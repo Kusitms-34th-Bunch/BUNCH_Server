@@ -12,9 +12,6 @@ class Member(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    @Column
-    val email: String? = null,
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     val role: MemberRole = MemberRole.ROLE_USER,

@@ -19,7 +19,7 @@ class SocialMemberRegistry(
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
     }
 
-    fun findOrCreate(provider: AuthProvider, subject: String, email: String?): Member =
+    fun findOrCreate(provider: AuthProvider, subject: String): Member =
         transaction.execute {
             // Serialize creation for this identity across application instances. Hash collisions only serialize unrelated identities.
             entityManager.createNativeQuery("SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(:identity, 0))")

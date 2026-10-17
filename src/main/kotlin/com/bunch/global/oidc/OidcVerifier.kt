@@ -96,9 +96,7 @@ internal class OidcVerifier(
                 throw BusinessException(ErrorCode.NONCE_MISMATCH)
             }
         }
-        val verified = raw["email_verified"] == true || raw["email_verified"] == "true"
-        val email = if (verified) (raw["email"] as? String)?.takeIf { it.isNotBlank() } else null
-        return SocialIdentity(subject, email, acceptedUntil)
+        return SocialIdentity(subject, acceptedUntil)
     }
 
     private fun validateCanonicalEncoding(token: String) {

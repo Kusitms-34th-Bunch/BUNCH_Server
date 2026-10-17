@@ -38,7 +38,7 @@ class AuthService(
             throw BusinessException(ErrorCode.TOKEN_REPLAY)
         }
 
-        val member = registry.findOrCreate(provider, identity.subject, identity.email)
+        val member = registry.findOrCreate(provider, identity.subject)
         member.requireActive()
 
         val sessionId = UUID.randomUUID().toString()

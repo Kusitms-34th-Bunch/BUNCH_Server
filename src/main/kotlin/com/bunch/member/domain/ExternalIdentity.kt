@@ -30,8 +30,5 @@ class ExternalIdentity(
     val provider: AuthProvider,
 
     @Column(name = "provider_subject", nullable = false, length = 255)
-    val providerSubject: String,
-
-    @Column(name = "email_at_link_time")
-    val emailAtLinkTime: String? = null
+    val providerSubject: String
 )

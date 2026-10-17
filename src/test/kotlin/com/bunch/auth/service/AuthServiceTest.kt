@@ -25,7 +25,7 @@ class AuthServiceTest {
     private val refresh = MemoryRefreshTokens()
     private val verifierList = AuthProvider.entries.map { provider -> object : SocialTokenVerifier {
         override val provider = provider
-        override fun verify(idToken: String, nonce: String?) = SocialIdentity("subject", null, Instant.now().plusSeconds(300))
+        override fun verify(idToken: String, nonce: String?) = SocialIdentity("subject", Instant.now().plusSeconds(300))
     } }
     private val replay = object : IdTokenReplayRepository {
         override fun reserve(provider: AuthProvider, idToken: String, acceptedUntil: Instant) = consumed.add("$provider:$idToken")
@@ -35,7 +35,7 @@ class AuthServiceTest {
     @Test fun `all providers create independent sessions and preserve OIDC replay protection`() {
         AuthProvider.entries.forEachIndexed { index, provider ->
             val member = Member(id = index + 1L)
-            `when`(registry.findOrCreate(provider, "subject", null)).thenReturn(member)
+            `when`(registry.findOrCreate(provider, "subject")).thenReturn(member)
             `when`(members.findById(member.id)).thenReturn(Optional.of(member))
             val first = service.login(provider, "first")
             val second = service.login(provider, "second")
@@ -46,7 +46,7 @@ class AuthServiceTest {
             assertTrue(refresh.isActive(firstSid, member.id))
             assertTrue(refresh.isActive(secondSid, member.id))
             assertEquals(firstSid, tokens.getSessionId(service.reissue(first.refreshToken).refreshToken))
-            verify(registry, times(2)).findOrCreate(provider, "subject", null)
+            verify(registry, times(2)).findOrCreate(provider, "subject")
             assertEquals(ErrorCode.TOKEN_REPLAY, assertThrows(BusinessException::class.java) { service.login(provider, "second") }.errorCode)
         }
     }
@@ -109,7 +109,7 @@ class AuthServiceTest {
 
     @Test fun `inactive members cannot create login sessions`() {
         listOf(AccountStatus.SUSPENDED, AccountStatus.WITHDRAWN).forEach { status ->
-            `when`(registry.findOrCreate(AuthProvider.GOOGLE, "subject", null))
+            `when`(registry.findOrCreate(AuthProvider.GOOGLE, "subject"))
                 .thenReturn(Member(id = 1, accountStatus = status))
             assertUnauthorized { service.login(AuthProvider.GOOGLE, status.name) }
         }
