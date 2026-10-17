@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/bunch_test}
+    username: ${DB_USERNAME:bunch}
+    password: ${DB_PASSWORD:bunch_local}

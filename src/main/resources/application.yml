@@ -1,0 +1,25 @@
+server:
+  port: ${SERVER_PORT:8080}
+spring:
+  application:
+    name: bunch
+  profiles:
+    default: local
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/bunch}
+    username: ${DB_USERNAME:bunch}
+    password: ${DB_PASSWORD:bunch_local}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [traceId=%X{traceId}] [eventId=%X{eventId}] [userId=%X{userId}] %-5level %logger{36} - %msg%n"

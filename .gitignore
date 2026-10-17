@@ -1,0 +1,22 @@
+# Gradle / JVM
+.gradle/
+build/
+out/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Local secrets and runtime
+.env
+.env.*
+!.env.example
+*.log
+logs/
+.omx/
+.gjc/

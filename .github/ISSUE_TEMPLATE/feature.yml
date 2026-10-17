@@ -1,0 +1,38 @@
+name: 기능 요청
+description: 새로운 기능과 완료 조건을 정의합니다.
+title: "feat: "
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: ✨ 기능 설명
+      description: 어떤 기능인지, 왜 필요한지 설명해주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: documents
+    attributes:
+      label: 🔗 관련 문서
+      value: |-
+        - Spec:
+  - type: textarea
+    id: direction
+    attributes:
+      label: 📐 구현 방향
+      description: API 동작, 처리 흐름 및 주요 제약을 작성해주세요.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: ✅ 완료 조건
+      value: |-
+        - [ ] 정상 동작이 Spec을 충족함
+        - [ ] 실패 조건과 오류 응답이 Spec을 충족함
+        - [ ] 테스트 및 검증 완료
+        - [ ] 문서 업데이트(필요 시)
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 🔗 참고
+      description: 화면/기획/레퍼런스 링크
