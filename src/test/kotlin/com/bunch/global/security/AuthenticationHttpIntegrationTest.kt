@@ -1,7 +1,7 @@
 package com.bunch.global.security
 
-import com.bunch.auth.redis.RefreshTokenRepository
-import com.bunch.auth.security.TokenProvider
+import com.bunch.global.redis.RefreshTokenRepository
+import com.bunch.global.security.TokenProvider
 import com.bunch.global.exception.ErrorCode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach

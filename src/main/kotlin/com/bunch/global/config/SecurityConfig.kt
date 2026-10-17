@@ -1,8 +1,8 @@
 package com.bunch.global.config
 
-import com.bunch.auth.security.CustomAccessDeniedHandler
-import com.bunch.auth.security.CustomAuthenticationEntryPoint
-import com.bunch.auth.security.JwtAuthenticationFilter
+import com.bunch.global.security.CustomAccessDeniedHandler
+import com.bunch.global.security.CustomAuthenticationEntryPoint
+import com.bunch.global.security.JwtAuthenticationFilter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean

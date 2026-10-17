@@ -1,9 +1,9 @@
 package com.bunch.global.flow
 
-import com.bunch.member.AuthProvider
-import com.bunch.member.ExternalIdentityRepository
-import com.bunch.member.MemberRepository
-import com.bunch.auth.security.TokenProvider
+import com.bunch.global.oidc.AuthProvider
+import com.bunch.member.domain.ExternalIdentityRepository
+import com.bunch.member.domain.MemberRepository
+import com.bunch.global.security.TokenProvider
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
