@@ -26,6 +26,8 @@ USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES 
 - 승인된 범위에서 직접 진행하고 병렬 작업은 파일 소유 범위를 분명히 한다.
 - 공유 작업 공간의 다른 변경을 덮어쓰지 않는다. 추적 여부만으로 작업 소유자를 판단하지 않는다.
 - 루트 단일 Gradle 모듈과 `com.bunch`를 유지한다. 도메인 패키지는 필요할 때만 만든다.
+- 기능 코드는 도메인 이름 아래 `controller / service / domain / dto`로 분리한다.
+  계층별 책임과 생성 기준은 GROUND_RULES의 구현 규칙을 따른다.
 - 공통 처리는 `global`, 인증은 `auth`, 현재 개인 계정 영속성은 `member` 경계다.
   제품의 Membership(그룹 소속)과 현재 `member` 패키지(개인 계정)를 혼동하지 않는다.
 - 정리·리팩토링 전 계획과 유지 동작의 테스트를 확보한다.
