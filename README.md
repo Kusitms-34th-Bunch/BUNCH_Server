@@ -9,10 +9,10 @@
 ## 프로젝트 상태
 
 - `main`의 초기 커밋은 실행 가능한 공통 인프라다. 제품 기능·회원 테이블은 포함하지 않는다.
-- 현재 문서 브랜치는 제품 요구사항과 로그인·온보딩 계약을 정리한다.
-- 기존 소셜 인증 기반은 [이슈 #2](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/2)의
-  별도 PR로 등록·구조 정리한다. 공통 기반과 인증 기반의 검증 결과를 구분한다.
-- 제품 확정 정책과 현재 로컬 구현의 차이는 [인증 Spec](docs/specs/auth.md)을 참고한다.
+- `dev`에는 제품 문서와 기존 소셜 로그인·JWT·회원·Redis 인증 기반을 통합한다.
+- 인증 코드는 도메인 계층과 공통 기술 패키지로 분리한다. 약관·프로필·가입 상태와
+  온보딩 전체 기능은 후속 구현이다. 제품 확정 정책과 현재 동작의 차이는
+  [인증 Spec](docs/specs/auth.md)을 참고한다.
 
 ## 기술 스택
 
@@ -46,14 +46,16 @@ BUNCH_Server/
 └── src/
     ├── main/kotlin/com/bunch/
     │   ├── BunchApplication.kt
-    │   └── global/
+    │   ├── auth/             # controller / service / dto
+    │   ├── member/           # service / domain
+    │   └── global/           # config / security / oidc / redis 등
     ├── main/resources/
-    ├── test/kotlin/com/bunch/global/
+    ├── test/kotlin/com/bunch/
     └── test/resources/
 ```
 
-구조도는 커밋된 공통 기반을 나타낸다. 로컬 `auth/`, `member/`, 회원 마이그레이션과
-관련 테스트는 후속 커밋 대상이다. 새 도메인 패키지는 실제 기능 개발 때 추가한다.
+인증·회원 코드와 회원 마이그레이션·관련 테스트를 포함한다.
+새 도메인 패키지와 계층은 실제 기능 개발 때 필요한 경우에만 추가한다.
 
 ## 로컬 실행
 
@@ -61,6 +63,7 @@ JDK 21과 Docker Compose가 필요하다. 저장소 루트에서 실행한다.
 
 ```bash
 cp .env.example .env
+# 다음 단계 전에 .env의 JWT_SECRET에 아래 인증 환경 변수 표에 따른 키를 입력한다.
 docker compose up -d --wait
 set -a
 . ./.env
@@ -89,12 +92,12 @@ set +a
 프로필은 `local / test / dev / prod`다. 기존 영속 볼륨에서는 `POSTGRES_DB` 변경만으로
 새 DB가 생성되지 않는다. 실제 운영 자격 증명은 커밋하지 않는다.
 
-### 보존된 인증 코드로 로컬 실행할 때
+### 인증 환경 변수
 
-미커밋 인증 변경을 포함한 작업 공간에서는 추가 설정이 필요하다.
-아래 항목은 공통 기반의 필수 설정이 아니며 인증 반영 시 함께 관리한다.
+현재 인증 기반 기동에는 아래 설정이 필요하다. 예제의 제공자 값은 기동용이며
+실제 로그인에는 해당 앱에 발급된 값을 사용한다.
 
-| 변수 | 현재 로컬 구현 용도 |
+| 변수 | 현재 구현 용도 |
 | --- | --- |
 | `JWT_SECRET` | 디코딩 후 64바이트 이상인 Base64 키. `openssl rand -base64 64`로 생성해 로컬 환경에만 보관 |
 | `APPLE_CLIENT_ID` | Apple 허용 audience |
@@ -116,7 +119,7 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 
 - 통합 테스트는 `test` 프로필을 사용한다. 테스트 DB와 Redis에 운영 저장소를 지정하지 않는다.
 - 공통 기반은 응답·오류·로깅·DB·Redis 연결과 OpenAPI·접근 제어를 검증한다.
-- 로컬 미커밋 인증 코드가 있으면 제공자 검증·동시 가입·토큰 처리 테스트도 함께 실행된다.
+- 제공자 검증·동시 가입·토큰 처리와 HTTP 인증 회귀 테스트를 함께 실행한다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
@@ -140,5 +143,6 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 바탕으로 공통 기반을 분리했다. 원본 Git 이력은 가져오지 않았다.
 
 CI는 dev 대상 PR과 dev push에서 빌드·테스트한다. 자동 배포는 구성하지 않았다.
-원격 저장소 생성·push·브랜치 보호·CodeRabbit/Gemini 연결·배포는 별도 작업이다.
+원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
+배포는 별도 작업이다.
 확정 마감일은 없다.
