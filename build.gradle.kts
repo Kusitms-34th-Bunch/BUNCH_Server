@@ -31,6 +31,9 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
+allOpen {
+    annotation("jakarta.persistence.Entity")
+}
 kotlin {
     jvmToolchain(21)
     compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") }

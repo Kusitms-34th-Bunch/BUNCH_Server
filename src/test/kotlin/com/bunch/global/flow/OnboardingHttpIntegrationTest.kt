@@ -63,7 +63,7 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
     @Test
     fun `pending signup resumes then creates invites and joins through authenticated APIs`() {
         val (ownerId, ownerAccess) = account()
-        mvc.perform(get("/api/v1/auth/session").header("Authorization", "Bearer $ownerAccess"))
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $ownerAccess"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.memberId").value(ownerId))
             .andExpect(jsonPath("$.data.signupStatus").value("IN_PROGRESS"))
             .andExpect(jsonPath("$.data.termsAccepted").value(false))
@@ -75,7 +75,21 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
             .andExpect(status().isForbidden).andExpect(jsonPath("$.error.code").value("AUTH_015"))
         mvc.perform(get("/api/v1/auth/terms").header("Authorization", "Bearer $ownerAccess"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.terms.length()").value(4))
+        val agreements = TermType.entries.filter { it.required }
+            .map { mapOf("type" to it, "version" to "v1", "agreed" to true) }
+        mvc.perform(post("/api/v1/auth/terms/agreements").header("Authorization", "Bearer $ownerAccess")
+            .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(mapOf("agreements" to agreements))))
+            .andExpect(status().isOk)
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $ownerAccess"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.memberId").value(ownerId))
+            .andExpect(jsonPath("$.data.signupStatus").value("IN_PROGRESS"))
+            .andExpect(jsonPath("$.data.termsAccepted").value(true))
+            .andExpect(jsonPath("$.data.defaultBunchId").isEmpty)
         register(ownerAccess, "HTTP 생성자")
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $ownerAccess"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.signupStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.data.termsAccepted").value(true))
+            .andExpect(jsonPath("$.data.defaultBunchId").isEmpty)
         val created = mvc.perform(post("/api/v1/bunches").header("Authorization", "Bearer $ownerAccess")
             .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(createBody))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.characterType").value("TYPE_2"))
@@ -103,7 +117,7 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
                 .andExpect(status().isOk).andExpect(jsonPath("$.data.outcome").value("JOINED"))
                 .andExpect(jsonPath("$.data.bunch.id").value(bunchId))
         }
-        mvc.perform(get("/api/v1/auth/session").header("Authorization", "Bearer $joiningAccess"))
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $joiningAccess"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.defaultBunchId").value(bunchId))
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bunch_memberships WHERE bunch_id = ?", Int::class.java, bunchId)).isEqualTo(2)
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bunch_join_notifications WHERE bunch_id = ?", Int::class.java, bunchId)).isEqualTo(1)
@@ -120,7 +134,9 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
         val member = members.findById(id).get()
         member.accountStatus = AccountStatus.WITHDRAWN
         members.saveAndFlush(member)
-        mvc.perform(get("/api/v1/auth/session").header("Authorization", "Bearer $access"))
+        val sessionId = tokens.getSessionId(access)
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $access"))
             .andExpect(status().isUnauthorized).andExpect(jsonPath("$.data").isEmpty)
+        assertThat(sessions.isActive(sessionId, id)).isFalse()
     }
 }

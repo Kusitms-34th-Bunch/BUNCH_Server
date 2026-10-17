@@ -5,7 +5,9 @@ import com.bunch.bunch.dto.*
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
+import com.bunch.notification.domain.JoinNotification
 import com.bunch.notification.domain.JoinNotificationRepository
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.security.SecureRandom
@@ -17,26 +19,32 @@ import java.util.UUID
 @Service
 class InvitationService(
     private val bunches: BunchRepository,
+    private val memberships: BunchMembershipRepository,
     private val invitations: InvitationRepository,
     private val members: MemberRepository,
     private val notifications: JoinNotificationRepository,
     private val input: InvitationInput,
-    private val rateLimiter: InvitationRateLimiter
+    private val rateLimiter: InvitationRateLimiter,
+    private val entityManager: EntityManager
 ) {
     private val random = SecureRandom()
 
     @Transactional
     fun issue(userId: Long, bunchId: Long): InvitationResponse {
-        completed(userId)
+        members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-        bunches.activeMembership(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
+        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
         val now = Instant.now()
-        invitations.findNonrevoked(bunchId)?.takeIf { it.isValid(now) }?.let { return response(it) }
-        invitations.revoke(bunchId, now)
+        invitations.findByBunchIdAndRevokedAtIsNull(bunchId)?.let {
+            if (it.isValid(now)) return response(it)
+            it.revokedAt = now
+        }
         repeat(10) {
             val token = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
             val code = (1..8).map { CODE_ALPHABET[random.nextInt(CODE_ALPHABET.length)] }.joinToString("")
-            invitations.issue(bunchId, userId, token, code, now, now.plus(Duration.ofDays(7)))?.let { return response(it) }
+            if (invitations.insertIfAvailable(bunchId, userId, token, code, now, now.plus(Duration.ofDays(7))) == 1) {
+                return response(invitations.findByToken(token)!!)
+            }
         }
         fail(ErrorCode.INTERNAL_ERROR)
     }
@@ -57,44 +65,49 @@ class InvitationService(
 
     @Transactional
     fun join(userId: Long, key: UUID, invitation: String): JoinResponse {
-        members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
+        val member = members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         val resolved = input.resolve(invitation)
-        bunches.findJoinReplay(userId, key)?.let { replay ->
+        memberships.findJoinReplay(userId, key.toString())?.let { previous ->
+            val replay = previous.joinRequests.getValue(key.toString())
             if (resolved == null || replay.fingerprint != fingerprint(resolved)) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-            val bunch = bunches.findLocked(replay.bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-            bunches.activeMembership(userId, bunch.id)?.let { bunches.markUsed(it.id, Instant.now()) }
+            val bunch = bunches.findLocked(previous.bunch.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+            memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let { it.lastUsedAt = Instant.now() }
             return JoinResponse(replay.outcome, BunchResponse.from(bunch))
         }
         if (resolved == null) rateLimiter.invalidInvitation(userId)
         val bunch = bunches.findLocked(resolved.bunchId) ?: rateLimiter.invalidInvitation(userId)
         // Invitation rotation uses this same bunch lock. Re-read after acquiring it.
-        val current = invitations.findById(resolved.id)?.takeIf { it.isValid(Instant.now()) }
-            ?: rateLimiter.invalidInvitation(userId)
+        entityManager.refresh(resolved)
+        val current = resolved.takeIf { it.isValid(Instant.now()) } ?: rateLimiter.invalidInvitation(userId)
         val now = Instant.now()
-        val existing = bunches.activeMembership(userId, bunch.id)
+        val existing = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)
         if (existing != null) {
-            bunches.markUsed(existing.id, now)
-            bunches.rememberJoin(existing.id, key, fingerprint(current), JoinOutcome.ALREADY_MEMBER)
+            existing.lastUsedAt = now
+            existing.rememberJoin(key, fingerprint(current), JoinOutcome.ALREADY_MEMBER)
             return JoinResponse(JoinOutcome.ALREADY_MEMBER, BunchResponse.from(bunch))
         }
-        if (bunches.countMembers(bunch.id) >= 8) fail(ErrorCode.BUNCH_FULL)
-        if (bunches.countAffiliations(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
-        val membership = bunches.addMembership(userId, bunch.id, MembershipRole.MEMBER, now)
-        bunches.rememberJoin(membership.id, key, fingerprint(current), JoinOutcome.JOINED)
-        notifications.notifyExistingMembers(bunch.id, membership.id, userId, now)
+        if (memberships.countByBunchIdAndStatus(bunch.id) >= 8) fail(ErrorCode.BUNCH_FULL)
+        if (memberships.countByMemberIdAndStatus(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
+        val membership = memberships.save(BunchMembership(bunch = bunch, member = member, role = MembershipRole.MEMBER, joinedAt = now))
+        membership.rememberJoin(key, fingerprint(current), JoinOutcome.JOINED)
+        val recipients = memberships.findAllByBunchIdAndStatus(bunch.id).filter { it.member.id != userId }
+        notifications.saveAll(recipients.map {
+            JoinNotification(bunchId = bunch.id, joinedMembershipId = membership.id,
+                recipientMemberId = it.member.id, joinedMemberId = userId, createdAt = now)
+        })
         return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch))
     }
 
     private fun eligibility(userId: Long, bunchId: Long): InviteEligibility = when {
-        bunches.activeMembership(userId, bunchId) != null -> InviteEligibility.ALREADY_MEMBER
-        bunches.countMembers(bunchId) >= 8 -> InviteEligibility.FULL
-        bunches.countAffiliations(userId) >= 10 -> InviteEligibility.LIMIT_EXCEEDED
+        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) != null -> InviteEligibility.ALREADY_MEMBER
+        memberships.countByBunchIdAndStatus(bunchId) >= 8 -> InviteEligibility.FULL
+        memberships.countByMemberIdAndStatus(userId) >= 10 -> InviteEligibility.LIMIT_EXCEEDED
         else -> InviteEligibility.AVAILABLE
     }
 
     private fun card(invitation: Invitation): InvitationCard {
-        val bunch = bunches.find(invitation.bunchId) ?: fail(ErrorCode.INVALID_INVITATION)
-        return InvitationCard(bunch.name, bunch.introduction, bunch.imageUrl, invitations.inviterNickname(invitation), invitation.code)
+        val bunch = bunches.findById(invitation.bunchId).orElse(null) ?: fail(ErrorCode.INVALID_INVITATION)
+        return InvitationCard(bunch.name, bunch.introduction, bunch.imageUrl, memberships.inviterNickname(invitation.issuerMemberId, invitation.bunchId), invitation.code)
     }
 
     private fun completed(userId: Long) = members.findById(userId)

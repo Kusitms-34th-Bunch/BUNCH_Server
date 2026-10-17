@@ -1,6 +1,7 @@
 package com.bunch.bunch
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
@@ -30,6 +31,7 @@ import javax.imageio.ImageIO
 @ActiveProfiles("test")
 class BunchImageIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var bunchRepository: BunchRepository
+    @Autowired private lateinit var membershipRepository: BunchMembershipRepository
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
     private lateinit var server: HttpServer
     private lateinit var imageBunches: BunchService
@@ -64,7 +66,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         }
         server.start()
         val storage = ProfileImageStorage("test", "test-key", "test-secret", "http://127.0.0.1:${server.address.port}")
-        imageBunches = BunchService(bunchRepository, members, storage, transactionManager)
+        imageBunches = BunchService(bunchRepository, membershipRepository, members, storage, transactionManager)
     }
 
     @AfterEach
@@ -88,12 +90,12 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
         assertThat(result.imageUrl).isEqualTo("https://images.example/${uploaded.single()}.jpg")
         assertThat(deleted).containsExactly("old/image")
-        assertThat(bunchRepository.find(bunch.id)?.imagePublicId).isEqualTo(uploaded.single())
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(uploaded.single())
         val reset = imageBunches.resetProfileImage(owner, bunch.id)
         assertThat(reset.imageUrl).isNull()
         assertThat(reset.characterType).isEqualTo(bunch.characterType)
         assertThat(deleted).containsExactly("old/image", uploaded.single())
-        assertThat(bunchRepository.find(bunch.id)?.imagePublicId).isNull()
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isNull()
     }
 
     @Test
@@ -105,8 +107,8 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         assertThatThrownBy { imageBunches.updateProfileImage(owner, bunch.id, photo()) }.isInstanceOf(DataAccessException::class.java)
         assertThat(uploaded).hasSize(1)
         assertThat(deleted).containsExactly(uploaded.single())
-        assertThat(bunchRepository.find(bunch.id)?.imagePublicId).isEqualTo("old/image")
-        assertThat(bunchRepository.find(bunch.id)?.imageUrl).isEqualTo("https://images.example/old.jpg")
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo("old/image")
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo("https://images.example/old.jpg")
     }
 
     @Test
@@ -117,7 +119,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.FORBIDDEN) { imageBunches.updateProfileImage(owner, bunch.id, photo()) }
         assertThat(uploaded).hasSize(1)
         assertThat(deleted).containsExactly(uploaded.single())
-        assertThat(bunchRepository.find(bunch.id)?.imageUrl).isNull()
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isNull()
     }
 
     @Test
@@ -141,11 +143,11 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("UPDATE bunches SET image_public_id = 'old/image', image_url = 'https://images.example/old.jpg' WHERE id = ?", bunch.id)
         failUpload = true
         assertError(ErrorCode.PROFILE_IMAGE_FAILED) { imageBunches.updateProfileImage(owner, bunch.id, photo()) }
-        assertThat(bunchRepository.find(bunch.id)?.imagePublicId).isEqualTo("old/image")
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo("old/image")
         failUpload = false
         failDeletion = true
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
-        assertThat(bunchRepository.find(bunch.id)?.imageUrl).isEqualTo(result.imageUrl)
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(result.imageUrl)
         assertThat(deleted).contains("old/image")
     }
 

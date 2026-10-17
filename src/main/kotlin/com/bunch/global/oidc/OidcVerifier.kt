@@ -17,7 +17,6 @@ internal class OidcVerifier(
     jwksUri: String,
     private val nonceMode: NonceMode
 ) {
-    enum class NonceMode { NONE, RAW, SHA256 }
     private val decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
         .jwsAlgorithm(SignatureAlgorithm.RS256).build().also {
             // All timestamps are checked below using the same accepted expiry used by replay storage.

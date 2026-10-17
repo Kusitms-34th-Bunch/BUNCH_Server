@@ -162,6 +162,15 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `authenticated legacy onboarding path returns not found`() {
+        val accessToken = newSession().accessToken
+
+        mvc.perform(get("/api/v1/auth/session")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken"))
+            .expectError(ErrorCode.RESOURCE_NOT_FOUND)
+    }
+
+    @Test
     fun `access requires a live session bound to signed member`() {
         val pair = tokenProvider.generateToken(userId, "ROLE_USER")
         val sid = tokenProvider.getSessionId(pair.accessToken)
@@ -199,7 +208,7 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
         mvc.perform(get("/api/v1/invitations/unknown/nested")).expectError(ErrorCode.UNAUTHORIZED)
         mvc.perform(post("/api/v1/invitations/verify")).expectError(ErrorCode.UNAUTHORIZED)
         mvc.perform(get("/error")).expectError(ErrorCode.UNAUTHORIZED)
-        mvc.perform(get("/api/v1/auth/session")).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/api/v1/members/me/onboarding")).expectError(ErrorCode.UNAUTHORIZED)
         mvc.perform(get("/api/v1/auth/terms")).expectError(ErrorCode.UNAUTHORIZED)
     }
 

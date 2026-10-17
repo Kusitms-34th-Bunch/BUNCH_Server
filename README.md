@@ -36,7 +36,8 @@ BUNCH_Server/
 │   ├── GROUND_RULES.md
 │   └── specs/
 │       ├── auth.md
-│       └── onboarding.md
+│       ├── onboarding.md
+│       └── login-onboarding-api.md
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   ├── workflows/ci.yml
@@ -47,9 +48,9 @@ BUNCH_Server/
     ├── main/kotlin/com/bunch/
     │   ├── BunchApplication.kt
     │   ├── auth/             # controller / service / dto
-    │   ├── member/           # 약관·프로필·개인 계정
-│   ├── bunch/            # 번치·소속·초대
-│   ├── notification/     # 참여 알림 영속성
+    │   ├── member/           # 약관·프로필·개인 계정·온보딩 조회
+    │   ├── bunch/            # 번치·소속·초대
+    │   ├── notification/     # 참여 알림 영속성
     │   └── global/           # config / security / oidc / redis 등
     ├── main/resources/
     ├── test/kotlin/com/bunch/

@@ -20,6 +20,7 @@ import java.util.UUID
 @Service
 class BunchService(
     private val bunches: BunchRepository,
+    private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     transactionManager: PlatformTransactionManager
@@ -30,37 +31,38 @@ class BunchService(
     fun nameAvailability(userId: Long, name: String): NameAvailability {
         completed(userId)
         val normalized = ProfileText.name(name)
-        return NameAvailability(normalized, !bunches.nameExists(normalized))
+        return NameAvailability(normalized, !bunches.existsByName(normalized))
     }
 
     @Transactional
     fun create(userId: Long, key: UUID, request: CreateBunchRequest): BunchResponse {
-        members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
+        val member = members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         val name = ProfileText.name(request.name)
         val introduction = ProfileText.introduction(request.introduction)
         val fingerprint = fingerprint(name, introduction, request.visibility.name, request.characterType.name)
         val now = Instant.now()
-        bunches.findCreation(userId, key)?.let { previous ->
+        bunches.findByCreatedByAndCreationRequestKey(userId, key)?.let { previous ->
             if (previous.creationFingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-            val current = bunches.findLocked(previous.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-            bunches.activeMembership(userId, current.id)?.let { bunches.markUsed(it.id, now) }
-            return BunchResponse.from(current)
+            memberships.findByMemberIdAndBunchIdAndStatus(userId, previous.id)?.let { it.lastUsedAt = now }
+            return BunchResponse.from(previous)
         }
-        if (bunches.countAffiliations(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
-        val bunch = bunches.create(userId, key, fingerprint, name, introduction, request.visibility, request.characterType, now)
-            ?: fail(ErrorCode.BUNCH_NAME_TAKEN)
-        bunches.addMembership(userId, bunch.id, MembershipRole.OWNER, now)
+        if (memberships.countByMemberIdAndStatus(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
+        if (bunches.insertIfNameAvailable(userId, key, fingerprint, name, introduction,
+                request.visibility.name, request.characterType.name, now) == 0) fail(ErrorCode.BUNCH_NAME_TAKEN)
+        val bunch = bunches.findByCreatedByAndCreationRequestKey(userId, key)!!
+        memberships.save(BunchMembership(bunch = bunch, member = member, role = MembershipRole.OWNER, joinedAt = now))
         return BunchResponse.from(bunch)
     }
 
     @Transactional(readOnly = true)
-    fun defaultBunchId(userId: Long): Long? = bunches.defaultBunchId(userId)
+    fun defaultBunchId(userId: Long): Long? =
+        memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)?.bunch?.id
 
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
         lockOwnerOrMember(userId, bunchId, ownerOnly = false)
-        val membership = bunches.activeMembership(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        bunches.markUsed(membership.id, Instant.now())
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
+        membership.lastUsedAt = Instant.now()
     }
 
     // Preflight avoids uploading for unauthorized callers. The second check protects against
@@ -74,8 +76,10 @@ class BunchService(
             transactions.execute {
                 val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
                 previousPublicId = current.imagePublicId
-                bunches.updateImage(bunchId, uploaded.publicId, uploaded.url)
-                BunchResponse.from(current.copy(imagePublicId = uploaded.publicId, imageUrl = uploaded.url))
+                current.imagePublicId = uploaded.publicId
+                current.imageUrl = uploaded.url
+                bunches.flush()
+                BunchResponse.from(current)
             }!!
         } catch (ex: Exception) {
             images.delete(uploaded.publicId)
@@ -91,8 +95,10 @@ class BunchService(
         val result = transactions.execute {
             val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
             previousPublicId = current.imagePublicId
-            bunches.updateImage(bunchId, null, null)
-            BunchResponse.from(current.copy(imagePublicId = null, imageUrl = null))
+            current.imagePublicId = null
+            current.imageUrl = null
+            bunches.flush()
+            BunchResponse.from(current)
         }!!
         images.delete(previousPublicId)
         return result
@@ -103,7 +109,7 @@ class BunchService(
     private fun lockOwnerOrMember(userId: Long, bunchId: Long, ownerOnly: Boolean): Bunch {
         members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         val bunch = bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-        val membership = bunches.activeMembership(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
         if (ownerOnly && membership.role != MembershipRole.OWNER) fail(ErrorCode.FORBIDDEN)
         return bunch
     }

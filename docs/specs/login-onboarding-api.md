@@ -7,6 +7,9 @@
 
 AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 기능을 구현한다.
 기존 auth/member/global을 확장하고 bunch에 번치·소속·초대를 둔다.
+번치·소속·초대·참여 알림은 기존 테이블을 매핑한 JPA 엔티티와 JpaRepository로 관리한다.
+소속의 번치·회원 참조는 단방향 LAZY이며, 기존 부분 유일 인덱스·JSONB 재시도 기록을 유지한다.
+일반 조회·변경은 JPA로 처리하고 충돌 회피·JSONB 키 검색만 native query를 사용한다.
 기존 OIDC 검증·재사용 방지·소셜 식별자 유일성은 유지한다. 새로운 이메일 수집은 하지 않는다.
 새 의존성, 서버 단계별 초안, 범용 온보딩/멱등성 프레임워크, 이벤트 버스는 추가하지 않는다.
 
@@ -27,7 +30,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   기존 access는 같은 세션이 유효한 동안 자신의 만료까지 유효하다.
 - 로그아웃은 현재 세션만 삭제한다. 삭제된 세션은 재발급이 복원할 수 없다.
   재차 로그아웃은 이미 인증 불가하므로 401이다. 다른 기기 세션은 유지한다.
-- 가입 중 허용: 로그인/재발급, 세션, 약관 조회·동의, 닉네임 확인, 가입 완료, 로그아웃.
+- 가입 중 허용: 로그인/재발급, 온보딩 조회, 약관 조회·동의, 닉네임 확인, 가입 완료, 로그아웃.
   나머지 제품 기능은 403 SIGNUP_INCOMPLETE로 거부한다.
 - 필수 약관 enum: SERVICE / PRIVACY / AGE_OVER_14. 선택 분석 동의는 DEMOGRAPHICS.
   앱이 승인된 원문을 제공하고 서버는 현재 버전과 동의 이력·시각을 관리한다.
@@ -110,7 +113,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/{apple,google,kakao}/login | 기존 idToken/nonce | 기존 accessToken/refreshToken, 독립 sid |
 | POST /api/v1/auth/reissue | 기존 refreshToken | 같은 sid의 새 토큰 쌍 |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
-| GET /api/v1/auth/session | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
+| GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
 | GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available |
@@ -124,6 +127,9 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
 | POST /api/v1/invitations/verify | invitation | card,eligibility |
 | POST /api/v1/invitations/join | invitation + Idempotency-Key | outcome,bunch(생성 응답과 동일) |
+
+온보딩 상태 조회는 `GET /api/v1/members/me/onboarding`만 제공한다. 기존
+`/api/v1/auth/session` 경로는 alias로 유지하지 않으며 인증된 요청도 404다.
 
 오류는 ErrorCode enum을 확장한다: 입력400, 미인증/이용불가401, 가입미완료/권한403,
 무효초대404, 이름중복/필수동의버전/이미가입완료다른입력/정원/소속한도/요청키충돌409,

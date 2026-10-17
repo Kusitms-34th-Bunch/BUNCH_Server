@@ -16,6 +16,9 @@
 공개 웹 화면은 별도 범위이며 공개 카드 API만 제공한다. 아래 입력·출력은 원문 의미를
 보존하며 확정 HTTP 경로·DTO·저장 계약은 연결된 API 계약을 따른다.
 
+앱 실행 시 가입·동의·기본 번치 상태는 `GET /api/v1/members/me/onboarding`으로 조회한다.
+기존 `/api/v1/auth/session` 경로는 alias로 제공하지 않는다.
+
 <a id="onboarding-responsibilities"></a>
 ## 프런트엔드와 백엔드 책임
 
