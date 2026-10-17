@@ -8,7 +8,10 @@ import com.bunch.global.common.ApiResponse
 import com.bunch.global.oidc.AuthProvider
 import jakarta.validation.Valid
 import org.springframework.http.ResponseEntity
-import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.core.Authentication
+import com.bunch.global.security.JwtSessionDetails
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.exception.ErrorCode
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -30,8 +33,10 @@ class AuthController(private val authService: AuthService) {
     fun reissue(@Valid @RequestBody request: AuthRequests.ReissueRequest) = response(authService.reissue(request.refreshToken))
 
     @PostMapping("/logout")
-    fun logout(@AuthenticationPrincipal userId: String): ResponseEntity<ApiResponse<Unit>> {
-        authService.logout(userId)
+    fun logout(authentication: Authentication): ResponseEntity<ApiResponse<Unit>> {
+        val userId = authentication.principal as? String ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        val session = authentication.details as? JwtSessionDetails ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        authService.logout(userId, session.sessionId)
         return ResponseEntity.ok(ApiResponse.empty(Unit))
     }
 

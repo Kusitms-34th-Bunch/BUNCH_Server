@@ -78,6 +78,9 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             requestLogin(provider, "$idToken=", nonce).andExpect(status().isBadRequest())
             val again = login(provider, signedToken(provider, subject, nonce), nonce)
             assertThat(tokens.getUserId(again.first)).isEqualTo(memberId)
+            assertThat(tokens.getSessionId(first.first)).isNotEqualTo(tokens.getSessionId(again.first))
+            val firstRotation = reissue(first.second).andExpect(status().isOk()).andReturn().response.contentAsString
+            val firstRotatedRefresh = json.readTree(firstRotation).path("data").path("refreshToken").asText()
             reissue(first.second).andExpect(status().isUnauthorized())
             val rotated = reissue(again.second).andExpect(status().isOk())
                 .andExpect(header().doesNotExist("Set-Cookie")).andReturn().response.contentAsString
@@ -86,6 +89,11 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${again.first}"))
                 .andExpect(status().isOk()).andExpect(header().doesNotExist("Set-Cookie"))
             reissue(rotatedRefresh).andExpect(status().isUnauthorized())
+            mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${again.first}"))
+                .andExpect(status().isUnauthorized())
+            reissue(firstRotatedRefresh).andExpect(status().isOk())
+            mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${first.first}"))
+                .andExpect(status().isOk())
         }
     }
 

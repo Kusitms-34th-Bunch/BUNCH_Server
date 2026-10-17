@@ -11,7 +11,7 @@
 - `main`의 초기 커밋은 실행 가능한 공통 인프라다. 제품 기능·회원 테이블은 포함하지 않는다.
 - `dev`에는 제품 문서와 기존 소셜 로그인·JWT·회원·Redis 인증 기반을 통합한다.
 - 인증 코드는 도메인 계층과 공통 기술 패키지로 분리한다. 약관·프로필·가입 상태와
-  온보딩 전체 기능은 후속 구현이다. 제품 확정 정책과 현재 동작의 차이는
+  온보딩 기능을 이슈 #5에서 확장한다. 확정 정책·API는 [구현 계약](docs/specs/login-onboarding-api.md)을 따르며 기존 동작과의 차이는
   [인증 Spec](docs/specs/auth.md)을 참고한다.
 
 ## 기술 스택
@@ -47,7 +47,9 @@ BUNCH_Server/
     ├── main/kotlin/com/bunch/
     │   ├── BunchApplication.kt
     │   ├── auth/             # controller / service / dto
-    │   ├── member/           # service / domain
+    │   ├── member/           # 약관·프로필·개인 계정
+│   ├── bunch/            # 번치·소속·초대
+│   ├── notification/     # 참여 알림 영속성
     │   └── global/           # config / security / oidc / redis 등
     ├── main/resources/
     ├── test/kotlin/com/bunch/
@@ -107,6 +109,21 @@ set +a
 실제 SDK 검증에는 실제 제공자 설정이 필요하다. 자동 테스트는 테스트 키·로컬 JWKS를
 사용하며 실제 제공자 자격 증명이 필요하지 않다.
 
+## 가입·온보딩 환경 설정
+
+| 변수 | 용도 |
+| --- | --- |
+| `TERMS_SERVICE_VERSION` / `TERMS_PRIVACY_VERSION` / `TERMS_AGE_VERSION` | 앱의 승인 원문과 일치하는 필수 약관 버전 |
+| `TERMS_DEMOGRAPHICS_VERSION` | 분석 목적 선택 개인정보 동의 버전 |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | 서버의 프로필 사진 업로드·삭제 |
+| `BUNCH_INVITATION_BASE_URL` | 실제 공개 웹·앱에 연결할 초대 URL 접두사. 로컬 기본 `http://localhost:3000/invite` |
+
+약관 버전 미설정 시 관련 API는 503이다. 테스트 프로필의 `v1`은 운영 약관이 아니다.
+사진 설정이 없어도 서버는 기동하며, 개인 사진 저장 실패는 기본 이미지로 가입을 완료한다.
+번치 사진 변경 실패는 기존 이미지를 유지한다. 서버는 앱이 변환한 JPEG만 받는다.
+이전 sid 없는 인증 토큰은 세션 정책 변경 배포 후 다시 로그인해야 한다.
+실제 약관 원문·이미지 디자인·초대 도메인/AASA는 앱 연동 시 별도로 준비한다.
+
 ## 검증
 
 실제 PostgreSQL·Redis를 준비하고 최초 한 번 테스트 DB를 만든다.
@@ -120,6 +137,8 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 통합 테스트는 `test` 프로필을 사용한다. 테스트 DB와 Redis에 운영 저장소를 지정하지 않는다.
 - 공통 기반은 응답·오류·로깅·DB·Redis 연결과 OpenAPI·접근 제어를 검증한다.
 - 제공자 검증·동시 가입·토큰 처리와 HTTP 인증 회귀 테스트를 함께 실행한다.
+- 가입·약관·프로필·Cloudinary 로컬 HTTP stub·번치 생성/초대/참여·동시 정원/소속 한도를 함께 검증한다.
+- 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
@@ -133,6 +152,7 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 | [개발 규칙](docs/GROUND_RULES.md) | 작업 순서·구현·검증·완료 조건 |
 | [인증 Spec](docs/specs/auth.md) | 로그인·약관·프로필·가입 완료·세션 |
 | [온보딩 Spec](docs/specs/onboarding.md) | 번치 생성·초대 발급·참여·웹 초대장 |
+| [로그인·온보딩 API 계약](docs/specs/login-onboarding-api.md) | 이슈 #5 확정 정책·API·데이터 보장 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
 

@@ -21,9 +21,9 @@ class SocialMemberRegistry(
         entityManager.createNativeQuery("SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(:identity, 0))")
             .setParameter("identity", "${provider.name}:$subject").singleResult
         identities.findByProviderAndProviderSubject(provider, subject)?.member ?: run {
-            val member = members.saveAndFlush(Member(email = email))
+            val member = members.saveAndFlush(Member())
             identities.saveAndFlush(ExternalIdentity(member = member, provider = provider,
-                providerSubject = subject, emailAtLinkTime = email))
+                providerSubject = subject))
             member
         }
     }!!

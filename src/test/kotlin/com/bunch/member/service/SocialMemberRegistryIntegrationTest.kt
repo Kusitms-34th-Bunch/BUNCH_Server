@@ -31,7 +31,7 @@ class SocialMemberRegistryIntegrationTest @Autowired constructor(
             val again = registry.findOrCreate(provider, "subject", "later@example.com")
             assertThat(first.email).isNull()
             assertThat(again.id).isEqualTo(first.id)
-            assertThat(again.role).isEqualTo("ROLE_USER")
+            assertThat(again.role).isEqualTo(MemberRole.ROLE_USER)
         }
         assertThat(members.count()).isEqualTo(3)
         assertThat(identities.count()).isEqualTo(3)

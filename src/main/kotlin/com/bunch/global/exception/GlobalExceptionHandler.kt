@@ -20,6 +20,12 @@ class GlobalExceptionHandler {
             e.bindingResult.fieldErrors.firstOrNull()?.let { mapOf("field" to it.field, "reason" to it.defaultMessage) }))
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun json(e: HttpMessageNotReadableException) = business(BusinessException(ErrorCode.INVALID_JSON))
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException::class,
+        org.springframework.web.bind.MissingServletRequestParameterException::class,
+        org.springframework.web.bind.MissingRequestHeaderException::class,
+        org.springframework.web.multipart.support.MissingServletRequestPartException::class,
+        org.springframework.web.multipart.MaxUploadSizeExceededException::class)
+    fun badRequest(e: Exception) = business(BusinessException(ErrorCode.INVALID_INPUT))
     @ExceptionHandler(NoResourceFoundException::class)
     fun missing(e: NoResourceFoundException) = business(BusinessException(ErrorCode.RESOURCE_NOT_FOUND))
     @ExceptionHandler(Exception::class)

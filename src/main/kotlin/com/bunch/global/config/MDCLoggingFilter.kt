@@ -34,6 +34,9 @@ class MDCLoggingFilter : OncePerRequestFilter() {
     ) {
         val startTime = System.currentTimeMillis()
         val clientIp = clientIp(request)
+        val logPath = if (request.method == "GET" && request.requestURI.startsWith("/api/v1/invitations/")) {
+            "/api/v1/invitations/{token}"
+        } else request.requestURI
 
         var thrown: Throwable? = null
 
@@ -43,7 +46,7 @@ class MDCLoggingFilter : OncePerRequestFilter() {
             MDC.put("clientIp", clientIp)
             refreshUserId()
 
-            log.info("[REQ START] method={} path={} client={}", request.method, request.requestURI, clientIp)
+            log.info("[REQ START] method={} path={} client={}", request.method, logPath, clientIp)
 
             chain.doFilter(request, response)
         } catch (ex: Throwable) {
@@ -61,11 +64,11 @@ class MDCLoggingFilter : OncePerRequestFilter() {
             val message = "[REQ END] method={} path={} status={} durationMs={} client={}"
 
             if (thrown != null && response.status < 400) {
-                log.error(message, request.method, request.requestURI, status, durationMs, clientIp)
+                log.error(message, request.method, logPath, status, durationMs, clientIp)
             } else if (status >= 400) {
-                log.warn(message, request.method, request.requestURI, status, durationMs, clientIp)
+                log.warn(message, request.method, logPath, status, durationMs, clientIp)
             } else {
-                log.info(message, request.method, request.requestURI, status, durationMs, clientIp)
+                log.info(message, request.method, logPath, status, durationMs, clientIp)
             }
 
             MDC_KEYS.forEach(MDC::remove)

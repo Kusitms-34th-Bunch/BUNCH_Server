@@ -11,6 +11,7 @@ import com.bunch.global.oidc.AuthProvider
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.service.SocialMemberRegistry
 import org.springframework.stereotype.Service
+import java.util.UUID
 
 @Service
 class AuthService(
@@ -30,29 +31,41 @@ class AuthService(
             throw BusinessException(ErrorCode.TOKEN_REPLAY)
         }
         val member = registry.findOrCreate(provider, identity.subject, identity.email)
-        val pair = tokenProvider.generateToken(member.id, member.role)
-        refreshTokens.save(member.id, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
+        member.requireActive()
+        val sessionId = UUID.randomUUID().toString()
+        val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)
+        refreshTokens.save(sessionId, member.id, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
         return pair
     }
 
     fun reissue(refreshToken: String): TokenPair {
-        val userId = try {
+        val (userId, sessionId) = try {
             if (!tokenProvider.validateToken(refreshToken) || !tokenProvider.isRefreshToken(refreshToken)) {
                 throw BusinessException(ErrorCode.UNAUTHORIZED)
             }
-            tokenProvider.getUserId(refreshToken)
+            tokenProvider.getUserId(refreshToken) to tokenProvider.getSessionId(refreshToken)
         } catch (_: RuntimeException) { throw BusinessException(ErrorCode.UNAUTHORIZED) }
-        val member = members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
-        val pair = tokenProvider.generateToken(member.id, member.role)
-        if (!refreshTokens.compareAndRotate(userId, refreshToken, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())) {
+        if (!refreshTokens.isActive(sessionId, userId)) throw BusinessException(ErrorCode.UNAUTHORIZED)
+        val member = members.findById(userId).orElse(null)
+        if (member == null) {
+            refreshTokens.delete(sessionId, userId)
+            throw BusinessException(ErrorCode.UNAUTHORIZED)
+        }
+        try {
+            member.requireActive()
+        } catch (exception: BusinessException) {
+            refreshTokens.delete(sessionId, userId)
+            throw exception
+        }
+        val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)
+        if (!refreshTokens.compareAndRotate(sessionId, userId, refreshToken, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())) {
             throw BusinessException(ErrorCode.UNAUTHORIZED)
         }
         return pair
     }
 
-    fun logout(userId: String) {
+    fun logout(userId: String, sessionId: String) {
         val id = userId.toLongOrNull() ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
-        if (refreshTokens.get(id) == null) throw BusinessException(ErrorCode.ALREADY_LOGGED_OUT)
-        refreshTokens.delete(id)
+        if (!refreshTokens.delete(sessionId, id)) throw BusinessException(ErrorCode.UNAUTHORIZED)
     }
 }

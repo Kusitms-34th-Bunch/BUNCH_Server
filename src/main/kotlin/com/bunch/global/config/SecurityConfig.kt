@@ -1,5 +1,6 @@
 package com.bunch.global.config
 
+import jakarta.servlet.DispatcherType
 import com.bunch.global.security.CustomAccessDeniedHandler
 import com.bunch.global.security.CustomAuthenticationEntryPoint
 import com.bunch.global.security.JwtAuthenticationFilter
@@ -28,10 +29,12 @@ class SecurityConfig(
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .exceptionHandling { it.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler) }
             .authorizeHttpRequests {
+                it.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 it.requestMatchers(HttpMethod.POST, "/api/v1/auth/apple/login", "/api/v1/auth/google/login",
                     "/api/v1/auth/kakao/login", "/api/v1/auth/reissue").permitAll()
+                it.requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()
                 if (docsEnabled) it.requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
-                it.requestMatchers("/error").permitAll().anyRequest().authenticated()
+                it.anyRequest().authenticated()
             }
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter::class.java)
             .addFilterAfter(loggingFilter, JwtAuthenticationFilter::class.java)
