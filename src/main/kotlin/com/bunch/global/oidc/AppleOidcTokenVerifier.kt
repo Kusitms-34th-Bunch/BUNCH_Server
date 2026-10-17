@@ -5,10 +5,17 @@ import org.springframework.stereotype.Component
 
 @Component
 class AppleOidcTokenVerifier(
-    @Value("\${auth.apple.client-id}") clientId: String,
-    @Value("\${auth.apple.jwks-uri:https://appleid.apple.com/auth/keys}") jwksUri: String
+    @Value("\${auth.apple.client-id}")
+    clientId: String,
+    @Value("\${auth.apple.jwks-uri:https://appleid.apple.com/auth/keys}")
+    jwksUri: String
 ) : SocialTokenVerifier {
     override val provider = AuthProvider.APPLE
-    private val verifier = OidcVerifier(setOf("https://appleid.apple.com"), clientId, jwksUri, NonceMode.SHA256)
+    private val verifier = OidcVerifier(
+        setOf("https://appleid.apple.com"),
+        clientId,
+        jwksUri,
+        NonceMode.SHA256
+    )
     override fun verify(idToken: String, nonce: String?): SocialIdentity = verifier.verify(idToken, nonce)
 }

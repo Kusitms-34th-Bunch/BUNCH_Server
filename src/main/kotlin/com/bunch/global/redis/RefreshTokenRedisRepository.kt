@@ -7,9 +7,23 @@ import java.security.MessageDigest
 import java.time.Duration
 
 @Repository
-class RefreshTokenRedisRepository(private val redis: StringRedisTemplate) : RefreshTokenRepository {
-    override fun save(sessionId: String, userId: Long, refreshToken: String, expiresInSeconds: Long) {
-        check(redis.opsForValue().setIfAbsent(key(sessionId), value(userId, refreshToken), Duration.ofSeconds(expiresInSeconds)) == true) {
+class RefreshTokenRedisRepository(
+    private val redis: StringRedisTemplate
+) : RefreshTokenRepository {
+    override fun save(
+        sessionId: String,
+        userId: Long,
+        refreshToken: String,
+        expiresInSeconds: Long
+    ) {
+        check(
+            redis.opsForValue()
+                .setIfAbsent(
+                    key(sessionId),
+                    value(userId, refreshToken),
+                    Duration.ofSeconds(expiresInSeconds)
+                ) == true
+        ) {
             "Session already exists"
         }
     }
@@ -20,8 +34,19 @@ class RefreshTokenRedisRepository(private val redis: StringRedisTemplate) : Refr
     override fun delete(sessionId: String, userId: Long): Boolean =
         redis.execute(DELETE, listOf(key(sessionId)), "$userId:") == 1L
 
-    override fun compareAndRotate(sessionId: String, userId: Long, expectedToken: String, newToken: String, expiresInSeconds: Long): Boolean =
-        redis.execute(ROTATE, listOf(key(sessionId)), value(userId, expectedToken), value(userId, newToken), expiresInSeconds.toString()) == 1L
+    override fun compareAndRotate(
+        sessionId: String,
+        userId: Long,
+        expectedToken: String,
+        newToken: String,
+        expiresInSeconds: Long
+    ): Boolean = redis.execute(
+        ROTATE,
+        listOf(key(sessionId)),
+        value(userId, expectedToken),
+        value(userId, newToken),
+        expiresInSeconds.toString()
+    ) == 1L
 
     private fun key(sessionId: String) = "session:$sessionId"
 

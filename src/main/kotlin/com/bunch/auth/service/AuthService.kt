@@ -24,28 +24,51 @@ class AuthService(
 ) {
     private val verifiers = verifiers.associateBy { it.provider }
 
-    fun login(provider: AuthProvider, idToken: String, nonce: String? = null): TokenPair {
-        val identity = (verifiers[provider] ?: throw BusinessException(ErrorCode.AUTH_PROVIDER_UNAVAILABLE))
-            .verify(idToken, nonce)
+    fun login(
+        provider: AuthProvider,
+        idToken: String,
+        nonce: String? = null
+    ): TokenPair {
+        val identity = (
+            verifiers[provider]
+                ?: throw BusinessException(ErrorCode.AUTH_PROVIDER_UNAVAILABLE)
+        ).verify(idToken, nonce)
+
         if (!replayTokens.reserve(provider, idToken, identity.acceptedUntil)) {
             throw BusinessException(ErrorCode.TOKEN_REPLAY)
         }
+
         val member = registry.findOrCreate(provider, identity.subject, identity.email)
         member.requireActive()
+
         val sessionId = UUID.randomUUID().toString()
         val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)
-        refreshTokens.save(sessionId, member.id, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
+        refreshTokens.save(
+            sessionId,
+            member.id,
+            pair.refreshToken,
+            tokenProvider.getRefreshTokenValiditySeconds()
+        )
+
         return pair
     }
 
     fun reissue(refreshToken: String): TokenPair {
         val (userId, sessionId) = try {
-            if (!tokenProvider.validateToken(refreshToken) || !tokenProvider.isRefreshToken(refreshToken)) {
+            if (
+                !tokenProvider.validateToken(refreshToken) ||
+                !tokenProvider.isRefreshToken(refreshToken)
+            ) {
                 throw BusinessException(ErrorCode.UNAUTHORIZED)
             }
-            tokenProvider.getUserId(refreshToken) to tokenProvider.getSessionId(refreshToken)
-        } catch (_: RuntimeException) { throw BusinessException(ErrorCode.UNAUTHORIZED) }
-        if (!refreshTokens.isActive(sessionId, userId)) throw BusinessException(ErrorCode.UNAUTHORIZED)
+            tokenProvider.getUserId(refreshToken) to
+                tokenProvider.getSessionId(refreshToken)
+        } catch (_: RuntimeException) {
+            throw BusinessException(ErrorCode.UNAUTHORIZED)
+        }
+        if (!refreshTokens.isActive(sessionId, userId))
+            throw BusinessException(ErrorCode.UNAUTHORIZED)
+
         val member = members.findById(userId).orElse(null)
         if (member == null) {
             refreshTokens.delete(sessionId, userId)
@@ -58,7 +81,15 @@ class AuthService(
             throw exception
         }
         val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)
-        if (!refreshTokens.compareAndRotate(sessionId, userId, refreshToken, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())) {
+        if (
+            !refreshTokens.compareAndRotate(
+                sessionId,
+                userId,
+                refreshToken,
+                pair.refreshToken,
+                tokenProvider.getRefreshTokenValiditySeconds()
+            )
+        ) {
             throw BusinessException(ErrorCode.UNAUTHORIZED)
         }
         return pair
@@ -66,6 +97,7 @@ class AuthService(
 
     fun logout(userId: String, sessionId: String) {
         val id = userId.toLongOrNull() ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
-        if (!refreshTokens.delete(sessionId, id)) throw BusinessException(ErrorCode.UNAUTHORIZED)
+        if (!refreshTokens.delete(sessionId, id))
+            throw BusinessException(ErrorCode.UNAUTHORIZED)
     }
 }

@@ -12,12 +12,16 @@ import java.util.UUID
 @RequestMapping("/api/v1/invitations")
 class InvitationController(private val invitations: InvitationService) {
     @GetMapping("/{token}")
-    fun preview(@PathVariable token: String, request: HttpServletRequest) =
-        ApiResponse.ok(invitations.publicPreview(token, request.remoteAddr))
+    fun preview(
+        @PathVariable token: String,
+        request: HttpServletRequest
+    ) = ApiResponse.ok(invitations.publicPreview(token, request.remoteAddr))
 
     @PostMapping("/verify")
-    fun verify(@AuthenticationPrincipal userId: String, @RequestBody request: InvitationRequest) =
-        ApiResponse.ok(invitations.verify(userId.toLong(), request.invitation))
+    fun verify(
+        @AuthenticationPrincipal userId: String,
+        @RequestBody request: InvitationRequest
+    ) = ApiResponse.ok(invitations.verify(userId.toLong(), request.invitation))
 
     @PostMapping("/join")
     fun join(

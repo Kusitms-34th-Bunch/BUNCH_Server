@@ -1,3 +1,6 @@
 package com.bunch.member.domain
 
-enum class Gender { FEMALE, MALE }
+enum class Gender {
+    FEMALE,
+    MALE
+}

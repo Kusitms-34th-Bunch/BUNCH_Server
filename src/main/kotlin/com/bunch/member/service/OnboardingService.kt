@@ -23,7 +23,11 @@ class OnboardingService(
             sessions.delete(sessionId, memberId)
             throw BusinessException(ErrorCode.UNAUTHORIZED)
         }
-        return OnboardingResponse(member.id, member.signupStatus, terms.accepted(member.id),
-            if (member.signupStatus == SignupStatus.COMPLETED) bunches.defaultBunchId(member.id) else null)
+        return OnboardingResponse(
+            member.id,
+            member.signupStatus,
+            terms.accepted(member.id),
+            if (member.signupStatus == SignupStatus.COMPLETED) bunches.defaultBunchId(member.id) else null
+        )
     }
 }

@@ -8,12 +8,19 @@ import java.time.Duration
 import java.time.Instant
 
 @Repository
-class IdTokenReplayRedisRepository(private val redis: StringRedisTemplate) : IdTokenReplayRepository {
-    override fun reserve(provider: AuthProvider, idToken: String, acceptedUntil: Instant): Boolean {
+class IdTokenReplayRedisRepository(
+    private val redis: StringRedisTemplate
+) : IdTokenReplayRepository {
+    override fun reserve(
+        provider: AuthProvider,
+        idToken: String,
+        acceptedUntil: Instant
+    ): Boolean {
         val ttl = Duration.between(Instant.now(), acceptedUntil)
         if (ttl.isNegative || ttl.isZero) return false
         val digest = MessageDigest.getInstance("SHA-256").digest(idToken.toByteArray())
             .joinToString("") { "%02x".format(it) }
-        return redis.opsForValue().setIfAbsent("oidc:used:${provider.name}:$digest", "1", ttl) == true
+        return redis.opsForValue()
+            .setIfAbsent("oidc:used:${provider.name}:$digest", "1", ttl) == true
     }
 }

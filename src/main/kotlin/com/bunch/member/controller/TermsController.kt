@@ -15,12 +15,18 @@ import org.springframework.web.bind.annotation.*
 class TermsController(private val terms: TermsService, private val members: MemberRepository) {
     @GetMapping
     fun current(@AuthenticationPrincipal memberId: String): ApiResponse<*> {
-        members.findById(memberId.toLong()).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireActive()
+        members
+            .findById(memberId.toLong())
+            .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
+            .requireActive()
         return ApiResponse.ok(terms.current())
     }
 
     @PostMapping("/agreements")
-    fun agree(@AuthenticationPrincipal memberId: String, @Valid @RequestBody request: TermsRequest): ApiResponse<Unit> {
+    fun agree(
+        @AuthenticationPrincipal memberId: String,
+        @Valid @RequestBody request: TermsRequest
+    ): ApiResponse<Unit> {
         terms.agree(memberId.toLong(), request)
         return ApiResponse.empty(Unit)
     }

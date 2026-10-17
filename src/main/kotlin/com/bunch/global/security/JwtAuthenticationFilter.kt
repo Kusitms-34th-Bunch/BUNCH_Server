@@ -18,12 +18,21 @@ class JwtAuthenticationFilter(
     private val sessions: RefreshTokenRepository,
     private val objectMapper: ObjectMapper
 ) : OncePerRequestFilter() {
-    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
+    override fun doFilterInternal(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        filterChain: FilterChain
+    ) {
         val bearer = request.getHeader("Authorization")
-        val token = bearer?.takeIf { it.startsWith("Bearer ") }?.substring(7)
+        val token = bearer
+            ?.takeIf { it.startsWith("Bearer ") }
+            ?.substring(7)
         if (token != null) {
             val authentication = try {
-                if (tokenProvider.validateToken(token) && tokenProvider.isAccessToken(token)) {
+                if (
+                    tokenProvider.validateToken(token) &&
+                        tokenProvider.isAccessToken(token)
+                ) {
                     tokenProvider.getAuthentication(token)
                 } else null
             } catch (_: RuntimeException) {
@@ -32,15 +41,23 @@ class JwtAuthenticationFilter(
             if (authentication == null) {
                 SecurityContextHolder.clearContext()
             } else {
-                val sessionId = (authentication.details as JwtSessionDetails).sessionId
+                val sessionId = (
+                    authentication.details as JwtSessionDetails
+                ).sessionId
                 val active = try {
-                    sessions.isActive(sessionId, authentication.principal.toString().toLong())
+                    sessions.isActive(
+                        sessionId,
+                        authentication.principal.toString().toLong()
+                    )
                 } catch (_: DataAccessException) {
                     SecurityContextHolder.clearContext()
                     val error = ErrorCode.AUTH_SESSION_UNAVAILABLE
                     response.status = error.status
                     response.contentType = "application/json;charset=UTF-8"
-                    objectMapper.writeValue(response.writer, ApiResponse.fail(error.code, error.messageKey))
+                    objectMapper.writeValue(
+                        response.writer,
+                        ApiResponse.fail(error.code, error.messageKey)
+                    )
                     return
                 }
                 if (active) {

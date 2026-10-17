@@ -14,7 +14,8 @@ import java.util.*
 
 @Component
 class TokenProvider(
-    @Value("\${jwt.secret}") secretKey: String
+    @Value("\${jwt.secret}")
+    secretKey: String
 ) {
 
     companion object {
@@ -67,7 +68,11 @@ class TokenProvider(
             .compact()
     }
 
-    fun generateToken(userId: Long, role: String, sessionId: String = UUID.randomUUID().toString()): TokenPair {
+    fun generateToken(
+        userId: Long,
+        role: String,
+        sessionId: String = UUID.randomUUID().toString()
+    ): TokenPair {
         return TokenPair(
             accessToken = createAccessToken(userId, role, sessionId),
             refreshToken = createRefreshToken(userId, sessionId)
@@ -90,8 +95,11 @@ class TokenProvider(
     }
 
     fun parseClaims(token: String): Claims {
-        return Jwts.parserBuilder().setSigningKey(key).build()
-            .parseClaimsJws(token).body
+        return Jwts.parserBuilder()
+            .setSigningKey(key)
+            .build()
+            .parseClaimsJws(token)
+            .body
     }
 
     fun getUserId(token: String): Long {
@@ -113,7 +121,8 @@ class TokenProvider(
     fun getSessionId(token: String): String = sessionId(parseClaims(token))
 
     private fun sessionId(claims: Claims): String {
-        val sessionId = claims[SESSION_ID_CLAIM] as? String ?: throw IllegalArgumentException("Missing session ID")
+        val sessionId = claims[SESSION_ID_CLAIM] as? String
+            ?: throw IllegalArgumentException("Missing session ID")
         require(UUID.fromString(sessionId).toString() == sessionId) { "Invalid session ID" }
         return sessionId
     }

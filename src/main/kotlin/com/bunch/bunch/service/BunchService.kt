@@ -36,21 +36,47 @@ class BunchService(
 
     @Transactional
     fun create(userId: Long, key: UUID, request: CreateBunchRequest): BunchResponse {
-        val member = members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
+        val member = members
+            .findLockedById(userId)
+            ?.requireCompleted()
+            ?: fail(ErrorCode.USER_NOT_FOUND)
+
         val name = ProfileText.name(request.name)
         val introduction = ProfileText.introduction(request.introduction)
         val fingerprint = fingerprint(name, introduction, request.visibility.name, request.characterType.name)
         val now = Instant.now()
+
         bunches.findByCreatedByAndCreationRequestKey(userId, key)?.let { previous ->
             if (previous.creationFingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
             memberships.findByMemberIdAndBunchIdAndStatus(userId, previous.id)?.let { it.lastUsedAt = now }
             return BunchResponse.from(previous)
         }
+
         if (memberships.countByMemberIdAndStatus(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
-        if (bunches.insertIfNameAvailable(userId, key, fingerprint, name, introduction,
-                request.visibility.name, request.characterType.name, now) == 0) fail(ErrorCode.BUNCH_NAME_TAKEN)
+        if (
+            bunches.insertIfNameAvailable(
+                userId,
+                key,
+                fingerprint,
+                name,
+                introduction,
+                request.visibility.name,
+                request.characterType.name,
+                now
+            ) == 0
+        )
+            fail(ErrorCode.BUNCH_NAME_TAKEN)
+
         val bunch = bunches.findByCreatedByAndCreationRequestKey(userId, key)!!
-        memberships.save(BunchMembership(bunch = bunch, member = member, role = MembershipRole.OWNER, joinedAt = now))
+        memberships.save(
+            BunchMembership(
+                bunch = bunch,
+                member = member,
+                role = MembershipRole.OWNER,
+                joinedAt = now
+            )
+        )
+
         return BunchResponse.from(bunch)
     }
 
@@ -104,7 +130,10 @@ class BunchService(
         return result
     }
 
-    private fun completed(userId: Long) = members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
+    private fun completed(userId: Long) = members
+        .findById(userId)
+        .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
+        .requireCompleted()
 
     private fun lockOwnerOrMember(userId: Long, bunchId: Long, ownerOnly: Boolean): Bunch {
         members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
@@ -115,7 +144,9 @@ class BunchService(
     }
 
     private fun fingerprint(vararg values: String): String = MessageDigest.getInstance("SHA-256")
-        .digest(values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8))
+        .digest(
+            values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
+        )
         .joinToString("") { "%02x".format(it) }
 
     private fun fail(code: ErrorCode): Nothing = throw BusinessException(code)

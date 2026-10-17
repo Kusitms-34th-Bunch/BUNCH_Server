@@ -14,8 +14,10 @@ import java.util.UUID
 @RequestMapping("/api/v1/bunches")
 class BunchController(private val bunches: BunchService, private val invitations: InvitationService) {
     @GetMapping("/name-availability")
-    fun nameAvailability(@AuthenticationPrincipal userId: String, @RequestParam name: String) =
-        ApiResponse.ok(bunches.nameAvailability(userId.toLong(), name))
+    fun nameAvailability(
+        @AuthenticationPrincipal userId: String,
+        @RequestParam name: String
+    ) = ApiResponse.ok(bunches.nameAvailability(userId.toLong(), name))
 
     @PostMapping
     fun create(
@@ -25,20 +27,30 @@ class BunchController(private val bunches: BunchService, private val invitations
     ) = ApiResponse.ok(bunches.create(userId.toLong(), key, request))
 
     @PutMapping("/{id}/profile-image", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-    fun updateImage(@AuthenticationPrincipal userId: String, @PathVariable id: Long, @RequestPart photo: MultipartFile) =
-        ApiResponse.ok(bunches.updateProfileImage(userId.toLong(), id, photo))
+    fun updateImage(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable id: Long,
+        @RequestPart photo: MultipartFile
+    ) = ApiResponse.ok(bunches.updateProfileImage(userId.toLong(), id, photo))
 
     @DeleteMapping("/{id}/profile-image")
-    fun resetImage(@AuthenticationPrincipal userId: String, @PathVariable id: Long) =
-        ApiResponse.ok(bunches.resetProfileImage(userId.toLong(), id))
+    fun resetImage(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable id: Long
+    ) = ApiResponse.ok(bunches.resetProfileImage(userId.toLong(), id))
 
     @PutMapping("/{id}/last-used")
-    fun lastUsed(@AuthenticationPrincipal userId: String, @PathVariable id: Long): ApiResponse<Unit> {
+    fun lastUsed(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable id: Long
+    ): ApiResponse<Unit> {
         bunches.updateLastUsed(userId.toLong(), id)
         return ApiResponse.empty(Unit)
     }
 
     @PostMapping("/{id}/invitations")
-    fun issue(@AuthenticationPrincipal userId: String, @PathVariable id: Long) =
-        ApiResponse.ok(invitations.issue(userId.toLong(), id))
+    fun issue(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable id: Long
+    ) = ApiResponse.ok(invitations.issue(userId.toLong(), id))
 }

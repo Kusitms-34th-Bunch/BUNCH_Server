@@ -17,7 +17,12 @@ class InvitationRateLimiter(
     @Value("\${bunch.rate-limit.public-window-seconds:60}") private val publicWindowSeconds: Long
 ) {
     init {
-        require(memberLimit > 0 && memberWindowSeconds > 0 && publicLimit > 0 && publicWindowSeconds > 0)
+        require(
+            memberLimit > 0 &&
+                memberWindowSeconds > 0 &&
+                publicLimit > 0 &&
+                publicWindowSeconds > 0
+        )
     }
 
     fun publicRequest(remoteAddress: String) {
@@ -32,7 +37,14 @@ class InvitationRateLimiter(
     }
 
     private fun consume(key: String, limit: Int, seconds: Long) {
-        if (redis.execute(CONSUME, listOf(key), limit.toString(), seconds.toString()) != 1L) {
+        if (
+            redis.execute(
+                CONSUME,
+                listOf(key),
+                limit.toString(),
+                seconds.toString()
+            ) != 1L
+        ) {
             throw BusinessException(ErrorCode.RATE_LIMITED)
         }
     }

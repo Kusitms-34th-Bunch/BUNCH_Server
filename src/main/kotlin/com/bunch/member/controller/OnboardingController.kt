@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/members")
 class OnboardingController(private val onboarding: OnboardingService) {
     @GetMapping("/me/onboarding")
-    fun get(@AuthenticationPrincipal memberId: String, authentication: Authentication) =
-        ApiResponse.ok(onboarding.get(memberId.toLong(), (authentication.details as JwtSessionDetails).sessionId))
+    fun get(
+        @AuthenticationPrincipal memberId: String,
+        authentication: Authentication
+    ) = ApiResponse.ok(onboarding.get(memberId.toLong(), (authentication.details as JwtSessionDetails).sessionId))
 }
