@@ -3,3 +3,12 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/bunch_test}
     username: ${DB_USERNAME:bunch}
     password: ${DB_PASSWORD:bunch_local}
+jwt:
+  secret: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+Pw==
+auth:
+  apple:
+    client-id: test-apple-client
+  google:
+    client-id: test-google-client
+  kakao:
+    client-id: test-kakao-client
