@@ -11,18 +11,21 @@
 - 제품의 확정 요구사항, 제안, 미정과 현재 구현 상태를 분리해서 기록한다.
 - 기능 이슈에는 기능 ID·Spec·완료 조건을 연결한다. 브랜치·커밋·PR·머지는
   [CONTRIBUTING](../CONTRIBUTING.md)을 따른다.
-- 초기 공통 기반과 문서 정비는 `00` 예약 번호를 쓰는 부트스트랩 예외다.
-  이 예외를 이후 기능 개발의 이슈·검증 생략 근거로 사용하지 않는다.
+- 최초 공통 기반만 원격 `main`·`dev` 생성 시 직접 push하는 예외다.
+  원격 연결 이후 문서·설정·구조 변경도 실제 이슈와 작업 브랜치·PR로 진행한다.
 
 ## 2. 구현·API·데이터 규칙
 
 - Kotlin 1.9.25, Spring Boot 3.5.4, JDK 21과 루트 단일 Gradle 모듈을 유지한다.
-- 기본 패키지는 `com.bunch`다. `global`에는 도메인과 무관한 공통 처리만 둔다.
+- 기본 패키지는 `com.bunch`다. `global`에는 공통 설정과 보안·OIDC·Redis 등 기술 처리를 둔다.
   인증은 `auth`, 현재 개인 계정·소셜 식별자 영속성은 `member`가 담당한다.
   새 도메인은 실제 기능을 개발할 때 추가하며 빈 계층을 미리 만들지 않는다.
 - 기능 코드는 도메인 이름 디렉터리를 먼저 두고, 그 아래를 `controller`, `service`,
   `domain`, `dto`로 분리한다. 각 계층은 필요한 코드가 생길 때 생성한다.
-  `global`의 공통 설정·처리는 도메인 계층과 구분한다.
+  JWT·보안 필터는 `global/security`, 제공자 토큰 검증은 `global/oidc`,
+  Redis 토큰 저장 처리는 `global/redis`로 분리한다. 공통 기술 코드는
+  기능 Controller·Service·응답 DTO에 의존하지 않는다.
+  엔티티·JPA Repository는 해당 도메인의 `domain`, 유스케이스는 `service`에 둔다.
 
   ```text
   com/bunch/<도메인 이름>/

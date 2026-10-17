@@ -24,7 +24,7 @@ dev  - 개발 통합 브랜치
 ```
 
 - 최신 dev에서 작업 브랜치를 생성하고 dev로 PR을 보낸다.
-- main/dev에 직접 push하지 않는다. 최초 루트 커밋만 main에서 만든다.
+- main/dev에 직접 push하지 않는다. 최초 루트 커밋의 main·dev 생성 push만 예외로 한다.
 - 작업 PR은 Squash merge, dev → main은 Merge commit으로 병합한다.
 - 작업 브랜치는 머지 후 삭제한다.
 - 운영 긴급 수정은 main에서 시작하고 dev에도 반영한다.
@@ -110,7 +110,7 @@ Not-tested: 실제 iOS SDK 연동
 
 요구사항·Spec 확인 → 이슈 → 작업 브랜치 → 테스트·구현 → 문서 갱신 → 검증 → PR·리뷰 → 머지.
 구현·검증·완료 조건은 [GROUND_RULES](docs/GROUND_RULES.md)를 따른다.
-부트스트랩 문서 정비는 원격 저장소·이슈 없이 `00`으로 진행한다.
+원격 연결 이후 문서·설정 정비도 실제 이슈 번호와 작업 브랜치·PR을 사용한다.
 
 ## 이슈 템플릿
 

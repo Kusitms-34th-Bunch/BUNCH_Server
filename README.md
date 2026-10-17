@@ -4,6 +4,8 @@
 경험 단위의 **번들(Bundle)**을 함께 완성하는 그룹 아카이빙 서비스의 백엔드다.
 웹 코드를 WebView로 감싼 iOS 앱을 대상으로 하며, 공개 웹 화면은 초대장 하나다.
 
+저장소: [Kusitms-34th-Bunch/BUNCH_Server](https://github.com/Kusitms-34th-Bunch/BUNCH_Server)
+
 ## 프로젝트 상태
 
 - `main`의 초기 커밋은 실행 가능한 공통 인프라다. 제품 기능·회원 테이블은 포함하지 않는다.
@@ -25,7 +27,7 @@
 ## 디렉터리 구조
 
 ```text
-project/
+BUNCH_Server/
 ├── README.md / AGENTS.md / CLAUDE.md / CONTRIBUTING.md
 ├── .editorconfig / .gitattributes / .gitignore / .env.example
 ├── compose.yml
