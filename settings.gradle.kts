@@ -1,1 +1,1 @@
-rootProject.name = "bunch"
+rootProject.name = "BUNCH_Server"
