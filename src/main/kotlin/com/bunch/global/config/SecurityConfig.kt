@@ -1,21 +1,24 @@
 package com.bunch.global.config
 
-import com.bunch.global.common.ApiResponse
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.bunch.auth.security.CustomAccessDeniedHandler
+import com.bunch.auth.security.CustomAuthenticationEntryPoint
+import com.bunch.auth.security.JwtAuthenticationFilter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.http.MediaType
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.access.intercept.AuthorizationFilter
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 
 @Configuration
 class SecurityConfig(
+    private val jwtFilter: JwtAuthenticationFilter,
     private val loggingFilter: MDCLoggingFilter,
-    private val objectMapper: ObjectMapper,
+    private val entryPoint: CustomAuthenticationEntryPoint,
+    private val deniedHandler: CustomAccessDeniedHandler,
     @Value("\${springdoc.api-docs.enabled:true}") private val docsEnabled: Boolean
 ) {
     @Bean
@@ -23,22 +26,19 @@ class SecurityConfig(
         http.csrf { it.disable() }.formLogin { it.disable() }.httpBasic { it.disable() }
             .cors { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-            .exceptionHandling {
-                it.authenticationEntryPoint { _, response, _ ->
-                    response.status = 401
-                    response.contentType = MediaType.APPLICATION_JSON_VALUE
-                    objectMapper.writeValue(response.outputStream,
-                        ApiResponse.fail("AUTH_001", "error.unauthorized"))
-                }
-            }
+            .exceptionHandling { it.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler) }
             .authorizeHttpRequests {
+                it.requestMatchers(HttpMethod.POST, "/api/v1/auth/apple/login", "/api/v1/auth/google/login",
+                    "/api/v1/auth/kakao/login", "/api/v1/auth/reissue").permitAll()
                 if (docsEnabled) it.requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
-                it.requestMatchers("/error").permitAll().anyRequest().denyAll()
+                it.requestMatchers("/error").permitAll().anyRequest().authenticated()
             }
-            .addFilterBefore(loggingFilter, AuthorizationFilter::class.java)
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter::class.java)
+            .addFilterAfter(loggingFilter, JwtAuthenticationFilter::class.java)
         return http.build()
     }
-
+    @Bean
+    fun jwtRegistration() = FilterRegistrationBean(jwtFilter).apply { isEnabled = false }
     @Bean
     fun loggingRegistration() = FilterRegistrationBean(loggingFilter).apply { isEnabled = false }
 }
