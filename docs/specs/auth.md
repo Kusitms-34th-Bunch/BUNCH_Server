@@ -314,8 +314,8 @@ Apple 탈퇴·토큰 취소는 **이번 스프린트 구현 범위 밖**이지�
 
 ### 현재 자체 토큰 정책과 다중 기기 충돌
 
-`src/main/kotlin/com/bunch/auth/security/TokenProvider.kt`와
-`src/main/kotlin/com/bunch/auth/redis/RefreshTokenRedisRepository.kt`의
+`src/main/kotlin/com/bunch/global/security/TokenProvider.kt`와
+`src/main/kotlin/com/bunch/global/redis/RefreshTokenRedisRepository.kt`의
 현재 정책은 다음과 같다. **제품의 최종 토큰 정책으로 확정한 값이 아니다.**
 
 | 항목 | 현재 로컬 구현 | 목표/미결정 영향 |
