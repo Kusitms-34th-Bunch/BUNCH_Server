@@ -20,6 +20,15 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       timeout: 2s
+jwt:
+  secret: ${JWT_SECRET}
+auth:
+  apple:
+    client-id: ${APPLE_CLIENT_ID}
+  google:
+    client-id: ${GOOGLE_CLIENT_ID}
+  kakao:
+    client-id: ${KAKAO_NATIVE_APP_KEY}
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [traceId=%X{traceId}] [eventId=%X{eventId}] [userId=%X{userId}] %-5level %logger{36} - %msg%n"
