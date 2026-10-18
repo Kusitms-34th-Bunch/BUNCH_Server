@@ -1,8 +1,13 @@
 package com.bunch.global.security
 
 import com.bunch.global.redis.RefreshTokenRepository
-import com.bunch.global.security.TokenProvider
 import com.bunch.global.exception.ErrorCode
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.SignatureAlgorithm
+import io.jsonwebtoken.security.Keys
+import org.springframework.beans.factory.annotation.Value
+import java.util.Base64
+import java.util.Date
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -29,14 +34,17 @@ import java.util.UUID
 class AuthenticationHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val tokenProvider: TokenProvider,
-    private val refreshTokens: RefreshTokenRepository
+    private val refreshTokens: RefreshTokenRepository,
+    @Value("\${jwt.secret}") private val secret: String
 ) {
-    // Logout only uses the authenticated subject and Redis; no persisted member is required.
+    // These filter/logout tests need a live session but no persisted member.
     private val userId = UUID.randomUUID().mostSignificantBits.and(Long.MAX_VALUE).coerceAtLeast(1L)
+
+    private val sessionIds = mutableListOf<String>()
 
     @AfterEach
     fun removeOwnRefreshToken() {
-        refreshTokens.delete(userId)
+        sessionIds.forEach { refreshTokens.delete(it, userId) }
     }
 
     @ParameterizedTest
@@ -105,20 +113,20 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
 
     @Test
     fun `refresh JWT cannot authenticate logout or remove stored refresh token`() {
-        val refreshToken = tokenProvider.createRefreshToken(userId)
-        refreshTokens.save(userId, refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
+        val pair = newSession()
+        val refreshToken = pair.refreshToken
 
         mvc.perform(post("/api/v1/auth/logout")
             .header(HttpHeaders.AUTHORIZATION, "Bearer $refreshToken"))
             .expectError(ErrorCode.UNAUTHORIZED)
 
-        assertThat(refreshTokens.get(userId)).isEqualTo(refreshToken)
+        assertThat(refreshTokens.isActive(tokenProvider.getSessionId(refreshToken), userId)).isTrue()
     }
 
     @Test
-    fun `access JWT logs out without cookies and repeated logout returns defined error`() {
-        val pair = tokenProvider.generateToken(userId, "ROLE_USER")
-        refreshTokens.save(userId, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
+    fun `access JWT logs out without cookies and immediately revokes current session only`() {
+        val pair = newSession()
+        val other = newSession()
 
         mvc.perform(post("/api/v1/auth/logout")
             .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}"))
@@ -128,20 +136,88 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.error").isEmpty())
             .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))
 
-        assertThat(refreshTokens.get(userId)).isNull()
+        assertThat(refreshTokens.isActive(tokenProvider.getSessionId(pair.accessToken), userId)).isFalse()
+        assertThat(refreshTokens.isActive(tokenProvider.getSessionId(other.accessToken), userId)).isTrue()
 
         mvc.perform(post("/api/v1/auth/logout")
             .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}"))
-            .expectError(ErrorCode.ALREADY_LOGGED_OUT)
+            .expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/api/v1/missing-resource")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}"))
+            .expectError(ErrorCode.UNAUTHORIZED)
+        postJson("/api/v1/auth/reissue", """{"refreshToken":"${pair.refreshToken}"}""")
+            .expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(post("/api/v1/auth/logout")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer ${other.accessToken}"))
+            .andExpect(status().isOk())
     }
 
     @Test
     fun `authenticated unknown resource returns not found rather than authentication error`() {
-        val accessToken = tokenProvider.createAccessToken(userId, "ROLE_USER")
+        val accessToken = newSession().accessToken
 
         mvc.perform(get("/api/v1/missing-resource-${UUID.randomUUID()}")
             .header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken"))
             .expectError(ErrorCode.RESOURCE_NOT_FOUND)
+    }
+
+    @Test
+    fun `authenticated legacy onboarding path returns not found`() {
+        val accessToken = newSession().accessToken
+
+        mvc.perform(get("/api/v1/auth/session")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken"))
+            .expectError(ErrorCode.RESOURCE_NOT_FOUND)
+    }
+
+    @Test
+    fun `access requires a live session bound to signed member`() {
+        val pair = tokenProvider.generateToken(userId, "ROLE_USER")
+        val sid = tokenProvider.getSessionId(pair.accessToken)
+        mvc.perform(post("/api/v1/auth/logout")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}"))
+            .expectError(ErrorCode.UNAUTHORIZED)
+        refreshTokens.save(sid, userId + 1, pair.refreshToken, 120)
+        try {
+            mvc.perform(post("/api/v1/auth/logout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}"))
+                .expectError(ErrorCode.UNAUTHORIZED)
+            assertThat(refreshTokens.isActive(sid, userId + 1)).isTrue()
+        } finally {
+            refreshTokens.delete(sid, userId + 1)
+        }
+    }
+
+    @Test
+    fun `signed legacy JWT without sid cannot authenticate or reissue`() {
+        listOf("access", "refresh").forEach { type ->
+            val token = Jwts.builder().setSubject(userId.toString()).claim("role", "ROLE_USER")
+                .claim("tokenType", type).setExpiration(Date(System.currentTimeMillis() + 60000))
+                .signWith(Keys.hmacShaKeyFor(Base64.getDecoder().decode(secret)), SignatureAlgorithm.HS512).compact()
+            mvc.perform(post("/api/v1/auth/logout").header(HttpHeaders.AUTHORIZATION, "Bearer $token"))
+                .expectError(ErrorCode.UNAUTHORIZED)
+            postJson("/api/v1/auth/reissue", """{"refreshToken":"$token"}""")
+                .expectError(ErrorCode.UNAUTHORIZED)
+        }
+    }
+
+    @Test
+    fun `only single segment invitation GET is public`() {
+        mvc.perform(get("/api/v1/invitations/unknown-${UUID.randomUUID()}"))
+            .andExpect { result -> assertThat(result.response.status).isNotEqualTo(401) }
+        mvc.perform(get("/api/v1/invitations/unknown/nested")).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(post("/api/v1/invitations/verify")).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/error")).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/api/v1/members/me/onboarding")).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/api/v1/auth/terms")).expectError(ErrorCode.UNAUTHORIZED)
+    }
+
+    private fun newSession(): TokenPair {
+        val pair = tokenProvider.generateToken(userId, "ROLE_USER")
+        val sid = tokenProvider.getSessionId(pair.accessToken)
+        sessionIds.add(sid)
+        refreshTokens.save(sid, userId, pair.refreshToken, tokenProvider.getRefreshTokenValiditySeconds())
+        return pair
     }
 
     private fun postJson(path: String, body: String): ResultActions =

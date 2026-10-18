@@ -1,6 +1,5 @@
 package com.bunch.global.security
 
-import com.bunch.global.security.TokenPair
 import io.jsonwebtoken.Claims
 import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.Jwts
@@ -15,7 +14,8 @@ import java.util.*
 
 @Component
 class TokenProvider(
-    @Value("\${jwt.secret}") secretKey: String
+    @Value("\${jwt.secret}")
+    secretKey: String
 ) {
 
     companion object {
@@ -25,8 +25,7 @@ class TokenProvider(
             1000L * 60 * 60 * 24 * 14 // 14일
         private const val ROLE_CLAIM = "role"
         private const val TOKEN_TYPE_CLAIM = "tokenType"
-        private const val ACCESS_TOKEN_TYPE = "access"
-        private const val REFRESH_TOKEN_TYPE = "refresh"
+        private const val SESSION_ID_CLAIM = "sid"
     }
 
     private val decodedSecretKey = Base64.getDecoder().decode(secretKey)
@@ -40,37 +39,43 @@ class TokenProvider(
 
     private val key = Keys.hmacShaKeyFor(decodedSecretKey)
 
-    fun createAccessToken(userId: Long, role: String): String {
+    fun createAccessToken(userId: Long, role: String, sessionId: String): String {
         val now = Date()
 
         return Jwts.builder()
             .setSubject(userId.toString())
             .setId(UUID.randomUUID().toString())
             .claim(ROLE_CLAIM, role)
-            .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN_TYPE)
+            .claim(TOKEN_TYPE_CLAIM, TokenType.ACCESS.claim)
+            .claim(SESSION_ID_CLAIM, sessionId)
             .setIssuedAt(now)
             .setExpiration(Date(now.time + ACCESS_TOKEN_VALIDITY))
             .signWith(key, SignatureAlgorithm.HS512)
             .compact()
     }
 
-    fun createRefreshToken(userId: Long): String {
+    fun createRefreshToken(userId: Long, sessionId: String): String {
         val now = Date()
 
         return Jwts.builder()
             .setSubject(userId.toString())
             .setId(UUID.randomUUID().toString())
-            .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN_TYPE)
+            .claim(TOKEN_TYPE_CLAIM, TokenType.REFRESH.claim)
+            .claim(SESSION_ID_CLAIM, sessionId)
             .setIssuedAt(now)
             .setExpiration(Date(now.time + REFRESH_TOKEN_VALIDITY))
             .signWith(key, SignatureAlgorithm.HS512)
             .compact()
     }
 
-    fun generateToken(userId: Long, role: String): TokenPair {
+    fun generateToken(
+        userId: Long,
+        role: String,
+        sessionId: String = UUID.randomUUID().toString()
+    ): TokenPair {
         return TokenPair(
-            accessToken = createAccessToken(userId, role),
-            refreshToken = createRefreshToken(userId)
+            accessToken = createAccessToken(userId, role, sessionId),
+            refreshToken = createRefreshToken(userId, sessionId)
         )
     }
 
@@ -78,9 +83,10 @@ class TokenProvider(
 
     fun validateToken(token: String): Boolean {
         return try {
-            Jwts.parserBuilder().setSigningKey(key).build()
-                .parseClaimsJws(token)
-            true
+            val claims = parseClaims(token)
+            sessionId(claims)
+            require(claims.subject.toLong() > 0)
+            TokenType.entries.any { it.claim == claims[TOKEN_TYPE_CLAIM] }
         } catch (e: JwtException) {
             false
         } catch (e: IllegalArgumentException) {
@@ -89,8 +95,11 @@ class TokenProvider(
     }
 
     fun parseClaims(token: String): Claims {
-        return Jwts.parserBuilder().setSigningKey(key).build()
-            .parseClaimsJws(token).body
+        return Jwts.parserBuilder()
+            .setSigningKey(key)
+            .build()
+            .parseClaimsJws(token)
+            .body
     }
 
     fun getUserId(token: String): Long {
@@ -102,23 +111,31 @@ class TokenProvider(
     }
 
     fun isAccessToken(token: String): Boolean {
-        return parseClaims(token)[TOKEN_TYPE_CLAIM] == ACCESS_TOKEN_TYPE
+        return parseClaims(token)[TOKEN_TYPE_CLAIM] == TokenType.ACCESS.claim
     }
 
     fun isRefreshToken(token: String): Boolean {
-        return parseClaims(token)[TOKEN_TYPE_CLAIM] == REFRESH_TOKEN_TYPE
+        return parseClaims(token)[TOKEN_TYPE_CLAIM] == TokenType.REFRESH.claim
+    }
+
+    fun getSessionId(token: String): String = sessionId(parseClaims(token))
+
+    private fun sessionId(claims: Claims): String {
+        val sessionId = claims[SESSION_ID_CLAIM] as? String
+            ?: throw IllegalArgumentException("Missing session ID")
+        require(UUID.fromString(sessionId).toString() == sessionId) { "Invalid session ID" }
+        return sessionId
     }
 
     fun getAuthentication(token: String): Authentication {
-        val userId = getUserId(token)
-        val role = getRole(token)
+        val claims = parseClaims(token)
+        require(claims[TOKEN_TYPE_CLAIM] == TokenType.ACCESS.claim) { "Access token required" }
+        val userId = claims.subject.toLong()
+        require(userId > 0)
+        val role = claims[ROLE_CLAIM] as? String
         val authorities = role?.let { listOf(SimpleGrantedAuthority(it)) } ?: emptyList()
-        val principal = userId.toString()
-
-        return UsernamePasswordAuthenticationToken(
-            principal,
-            null,
-            authorities
-        )
+        return UsernamePasswordAuthenticationToken(userId.toString(), null, authorities).apply {
+            details = JwtSessionDetails(sessionId(claims))
+        }
     }
 }

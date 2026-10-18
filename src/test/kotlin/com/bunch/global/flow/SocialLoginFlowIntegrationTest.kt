@@ -70,7 +70,7 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             val idToken = signedToken(provider, subject, nonce)
             val first = login(provider, idToken, nonce)
             val memberId = tokens.getUserId(first.first)
-            assertThat(members.findById(memberId).orElseThrow().email).isNull()
+            assertThat(members.existsById(memberId)).isTrue()
             assertThat(identities.findByProviderAndProviderSubject(provider, subject)?.member?.id).isEqualTo(memberId)
             requestLogin(provider, idToken, nonce).andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("AUTH_011"))
@@ -78,6 +78,9 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             requestLogin(provider, "$idToken=", nonce).andExpect(status().isBadRequest())
             val again = login(provider, signedToken(provider, subject, nonce), nonce)
             assertThat(tokens.getUserId(again.first)).isEqualTo(memberId)
+            assertThat(tokens.getSessionId(first.first)).isNotEqualTo(tokens.getSessionId(again.first))
+            val firstRotation = reissue(first.second).andExpect(status().isOk()).andReturn().response.contentAsString
+            val firstRotatedRefresh = json.readTree(firstRotation).path("data").path("refreshToken").asText()
             reissue(first.second).andExpect(status().isUnauthorized())
             val rotated = reissue(again.second).andExpect(status().isOk())
                 .andExpect(header().doesNotExist("Set-Cookie")).andReturn().response.contentAsString
@@ -86,10 +89,38 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${again.first}"))
                 .andExpect(status().isOk()).andExpect(header().doesNotExist("Set-Cookie"))
             reissue(rotatedRefresh).andExpect(status().isUnauthorized())
+            mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${again.first}"))
+                .andExpect(status().isUnauthorized())
+            reissue(firstRotatedRefresh).andExpect(status().isOk())
+            mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer ${first.first}"))
+                .andExpect(status().isOk())
         }
     }
 
-    private fun signedToken(provider: AuthProvider, subject: String, nonce: String): String {
+    @Test
+    fun `email claims do not link accounts or change the social identity`() {
+        val subject = "email-flow-${UUID.randomUUID()}"
+        val ids = AuthProvider.entries.map { provider ->
+            val nonce = UUID.randomUUID().toString()
+            val first = login(provider, signedToken(provider, subject, nonce, "shared@example.com"), nonce)
+            val memberId = tokens.getUserId(first.first)
+            val changed = login(provider, signedToken(provider, subject, nonce, "changed@example.com"), nonce)
+            assertThat(tokens.getUserId(changed.first)).isEqualTo(memberId)
+
+            val otherSubject = "$subject-other"
+            val other = login(provider, signedToken(provider, otherSubject, nonce, "shared@example.com"), nonce)
+            assertThat(tokens.getUserId(other.first)).isNotEqualTo(memberId)
+            memberId
+        }
+        assertThat(ids.toSet()).hasSize(AuthProvider.entries.size)
+    }
+
+    private fun signedToken(
+        provider: AuthProvider,
+        subject: String,
+        nonce: String,
+        email: String? = null
+    ): String {
         val issuer = when (provider) {
             AuthProvider.APPLE -> "https://appleid.apple.com"
             AuthProvider.GOOGLE -> "https://accounts.google.com"
@@ -100,6 +131,9 @@ class SocialLoginFlowIntegrationTest @Autowired constructor(
             .audience("test-${provider.name.lowercase()}-client")
             .issueTime(Date.from(now.minusSeconds(1))).expirationTime(Date.from(now.plusSeconds(300)))
             .jwtID(UUID.randomUUID().toString())
+        if (email != null) {
+            builder.claim("email", email).claim("email_verified", true)
+        }
         if (provider != AuthProvider.GOOGLE) builder.claim("nonce", if (provider == AuthProvider.APPLE)
             MessageDigest.getInstance("SHA-256").digest(nonce.toByteArray()).joinToString("") { "%02x".format(it) } else nonce)
         return SignedJWT(JWSHeader.Builder(JWSAlgorithm.RS256).keyID("flow-key").build(), builder.build())

@@ -61,12 +61,25 @@ class OidcTokenVerifierTest {
         verifiers.forEach { v ->
             val identity = v.verify(token(v.provider), nonce)
             assertEquals("subject-1", identity.subject)
-            assertEquals("verified@example.com", identity.email)
             assertTrue(identity.acceptedUntil.isAfter(Instant.now().plusSeconds(350)))
-            assertNull(v.verify(token(v.provider, { it.claim("email_verified", false) }), nonce).email)
-            assertNull(v.verify(token(v.provider, { it.claim("email", null) }), nonce).email)
         }
     }
+
+    @Test
+    fun `email claims are optional and do not change the verified identity`() {
+        verifiers.forEach { verifier ->
+            val identity = verifier.verify(token(verifier.provider), nonce)
+            listOf<(JWTClaimsSet.Builder) -> Unit>(
+                { it.claim("email", null).claim("email_verified", null) },
+                { it.claim("email", "different@example.com") },
+                { it.claim("email_verified", false) }
+            ).forEach { change ->
+                val result = verifier.verify(token(verifier.provider, change), nonce)
+                assertEquals(identity.subject, result.subject)
+            }
+        }
+    }
+
     @Test fun `all providers reject invalid cryptography and required claims`() {
         verifiers.forEach { v ->
             fun rejected(token: String, code: ErrorCode = ErrorCode.INVALID_SOCIAL_TOKEN) {
