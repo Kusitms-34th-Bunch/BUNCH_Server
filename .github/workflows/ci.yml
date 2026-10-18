@@ -121,7 +121,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s' "$GITHUB_TOKEN" | sshpass -d 3 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
             set -e
-            cd /bunch
+            cd ~
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
             docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
             docker compose pull app
