@@ -115,8 +115,13 @@ GitHub runner에서 이 SSH 주소로 접속할 수 있어야 한다.
 조직의 Packages 게시 정책과 패키지의 저장소 연결·Actions 접근 권한이 이 저장소를 허용해야 한다.
 별도 발급하는 Cloudflare `TUNNEL_TOKEN`은 GHCR 인증과 다른 용도다.
 
-워크플로는 main push마다 테스트·빌드가 성공한 경우만 `latest`를 게시하고 앱을 교체한다.
-코드·설정 변경을 놓치지 않도록 경로 필터를 두지 않는다. dev와 PR에서는 게시·SSH 단계를 건너뛴다.
+워크플로는 `src/`, Gradle 파일·wrapper, Dockerfile·`.dockerignore`, CI 파일,
+배포 Compose·환경 변수 예제가 바뀐 경우에 빌드·테스트를 수행한다.
+문서만 변경하면 변경 확인 작업만 실행하고 `build`를 건너뛴다.
+dev의 필수 `build` 검사 결과를 남기기 위해 워크플로 자체에 경로 필터를 두지는 않는다.
+변경 확인에 실패하면 빌드·테스트를 실행해 검증 누락을 방지한다.
+main push에서 이 검증이 성공한 경우만 `latest`를 게시하고 앱을 교체한다.
+dev와 PR에서는 게시·SSH 단계를 건너뛴다.
 서버의 `.env`·Compose·DB·Redis·Tunnel은 자동으로 덮어쓰거나 재시작하지 않는다.
 배포 설정 변경 시 서버 파일도 직접 갱신한다. 이미지는 `.env`의 `APP_IMAGE`와 같은 주소를 사용한다.
 

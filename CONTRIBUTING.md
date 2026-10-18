@@ -31,6 +31,7 @@ dev  - 개발 통합 브랜치
 - 일정은 PRD에서 관리한다. 현재 확정 마감일은 없다.
 - 릴리스 검증 및 팀 승인 후 dev → main으로 머지한다.
 - CI는 dev 대상 PR과 dev/main push에서 빌드·테스트를 실행한다.
+- 문서만 변경하면 변경 확인만 실행하고 필수 `build` 검사를 skipped로 남긴다.
 - dev는 검증만 수행한다. main push는 검증 후 GHCR 게시와 운영 앱 배포를 수행한다.
 - 서버 준비와 필요한 Secrets는 [배포 안내](deploy/README.md)를 따른다.
 
