@@ -1,5 +1,10 @@
 package com.bunch.global.exception
-enum class ErrorCode(val code: String, val messageKey: String, val status: Int) {
+
+enum class ErrorCode(
+    val code: String,
+    val messageKey: String,
+    val status: Int
+) {
     INVALID_INPUT("COMMON_001", "error.invalid_input", 400),
     INVALID_JSON("COMMON_002", "error.invalid_json", 400),
     INTERNAL_ERROR("COMMON_999", "error.internal_error", 500),
@@ -12,5 +17,18 @@ enum class ErrorCode(val code: String, val messageKey: String, val status: Int) 
     TOKEN_REPLAY("AUTH_011", "error.token_replay", 401),
     UNAUTHORIZED("AUTH_001", "error.unauthorized", 401),
     FORBIDDEN("AUTH_002", "error.forbidden", 403),
-    AUTH_PROVIDER_UNAVAILABLE("AUTH_014", "error.auth_provider_unavailable", 503)
+    AUTH_PROVIDER_UNAVAILABLE("AUTH_014", "error.auth_provider_unavailable", 503),
+    TERMS_UNAVAILABLE("AUTH_017", "error.terms_unavailable", 503),
+    AUTH_SESSION_UNAVAILABLE("AUTH_018", "error.auth_session_unavailable", 503),
+    SIGNUP_INCOMPLETE("AUTH_015", "error.signup_incomplete", 403),
+    TERMS_VERSION_MISMATCH("AUTH_016", "error.terms_version_mismatch", 409),
+    NICKNAME_TAKEN("USER_002", "error.nickname_taken", 409),
+    REGISTRATION_CONFLICT("USER_003", "error.registration_conflict", 409),
+    PROFILE_IMAGE_FAILED("IMAGE_001", "error.profile_image_failed", 503),
+    BUNCH_NAME_TAKEN("BUNCH_001", "error.bunch_name_taken", 409),
+    BUNCH_FULL("BUNCH_002", "error.bunch_full", 409),
+    MEMBERSHIP_LIMIT_EXCEEDED("BUNCH_003", "error.membership_limit_exceeded", 409),
+    INVALID_INVITATION("INVITE_001", "error.invalid_invitation", 404),
+    IDEMPOTENCY_CONFLICT("REQUEST_001", "error.idempotency_conflict", 409),
+    RATE_LIMITED("REQUEST_002", "error.rate_limited", 429)
 }

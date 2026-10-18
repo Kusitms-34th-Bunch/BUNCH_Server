@@ -31,14 +31,16 @@ object LoggingUtil {
 
         val method = if (stack != null)
             "${stack.className}.${stack.methodName}(L${stack.lineNumber})"
-        else "Unknown"
+        else
+            "Unknown"
 
         val logMsg = buildString {
             appendLine("[Unexpected Error]")
             appendLine("eventId=$eventId traceId=$traceId userId=$userId ip=$clientIp")
             appendLine("method=$method")
             appendLine("rootCause=$root")
-            if (param != null) appendLine("param=$param")
+            if (param != null)
+                appendLine("param=$param")
         }
 
         logger.error(logMsg, ex)

@@ -17,6 +17,14 @@ class MDCLoggingFilterTest {
     private val filter = MDCLoggingFilter()
 
     @Test
+    fun `public invitation request masks capability token in start and end logs`(output: CapturedOutput) {
+        val token = "example-invitation-value"
+        filter.doFilter(MockHttpServletRequest("GET", "/api/v1/invitations/$token"),
+            MockHttpServletResponse(), FilterChain { _, _ -> })
+        assertThat(output.out + output.err).contains("/api/v1/invitations/{token}").doesNotContain(token)
+    }
+
+    @Test
     fun `thrown chain logs status 500 at error level rethrows and removes own mdc keys`(
         output: CapturedOutput
     ) {

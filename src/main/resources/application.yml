@@ -1,6 +1,10 @@
 server:
   port: ${SERVER_PORT:8080}
 spring:
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
   application:
     name: bunch
   profiles:
@@ -32,3 +36,15 @@ auth:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [traceId=%X{traceId}] [eventId=%X{eventId}] [userId=%X{userId}] %-5level %logger{36} - %msg%n"
+
+terms:
+  service-version: ${TERMS_SERVICE_VERSION:}
+  privacy-version: ${TERMS_PRIVACY_VERSION:}
+  age-version: ${TERMS_AGE_VERSION:}
+  demographics-version: ${TERMS_DEMOGRAPHICS_VERSION:}
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+bunch:
+  invitation-base-url: ${BUNCH_INVITATION_BASE_URL:http://localhost:3000/invite}
