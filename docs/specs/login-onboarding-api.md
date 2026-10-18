@@ -115,7 +115,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/{apple,google,kakao}/login | 기존 idToken/nonce | 기존 accessToken/refreshToken, 독립 sid |
 | POST /api/v1/auth/reissue | 기존 refreshToken | 같은 sid의 새 토큰 쌍 |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
-| GET /api/v1/members/me | 없음 | memberId, signupStatus, nickname, imageUrl, birthYear, gender |
+| GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, birthYear, gender, defaultBunch |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
@@ -141,15 +141,21 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 저장된 프로필만 조회한다. 회원 ID를 요청으로 받지 않으며 다른 회원의 프로필은 조회할 수 없다.
 가입 중인 ACTIVE 계정도 200으로 조회할 수 있고 약관 동의·가입 완료를 요구하지 않는다.
 온보딩 조회의 응답·도착지 판정 계약은 그대로 유지한다.
+가입 상태는 `/me/onboarding`의 `signupStatus`로 판단하며 본인 프로필 응답에는 중복 포함하지 않는다.
 
 | data 필드 | 타입·null 계약 |
 | --- | --- |
 | memberId | Long, 인증된 본인 ID |
-| signupStatus | IN_PROGRESS / COMPLETED |
 | nickname | String 또는 null. 가입 완료 전 미저장 상태는 null |
 | imageUrl | String 또는 null. 미등록·사진 저장 실패·기본 이미지이면 null이며 앱이 기본 이미지를 표시 |
 | birthYear | Int 또는 null. 선택하지 않았으면 null, 본인에게만 반환 |
 | gender | FEMALE / MALE 또는 null. 선택하지 않았으면 null, 본인에게만 반환 |
+| defaultBunch | 기존 BunchResponse 형식의 {id,name,characterType,imageUrl} 또는 null |
+
+`defaultBunch`는 가입 완료 회원의 ACTIVE 소속 중 lastUsedAt 내림차순, 같은 시각이면
+소속 ID 내림차순으로 선택한다. 기존 온보딩의 defaultBunchId와 같은 기준이며 별도 기본 번치
+설정을 저장하지 않는다. 가입 중이거나 유효한 소속이 없으면 null이다. 나가거나 내보내진 소속은
+제외하고 번치가 삭제되면 다른 유효 소속으로 복귀한다. 번치 기본 이미지는 imageUrl:null이다.
 
 null 필드도 JSON에 포함하며 임시 입력이나 기본값을 만들어 반환하지 않는다. 위 여섯 필드만
 반환하고 사진 publicId·약관·소셜 식별자·내부 계정 정보는 포함하지 않는다.
@@ -158,8 +164,9 @@ null 필드도 JSON에 포함하며 임시 입력이나 기본값을 만들어 �
 401 `AUTH_001`로 응답한다. 실패 응답은 `success:false`, `data:null`인 기존 오류 형식이다.
 Redis 세션 확인 장애는 기존 503 `AUTH_018`을 유지한다. 스키마·가입 저장 계약은 변경하지 않는다.
 
-검증 기준: 실제 PostgreSQL·Redis와 JWT 인증을 거쳐 저장된 여섯 필드 및 본인 조회 제한,
-가입 중/완료 상태의 null 필드, 미인증·잘못된 토큰·refresh 토큰·해제된 세션,
+검증 기준: 실제 PostgreSQL·Redis와 JWT 인증을 거쳐 프로필과 기본 번치의 본인 조회 제한,
+signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표시 정보·최근 사용/동률 순서·무효 소속/삭제 시 복귀,
+미인증·잘못된 토큰·refresh 토큰·해제된 세션,
 없는 회원·정지·탈퇴 계정의 401과 세션 해제를 확인하고 기존 온보딩 테스트를 유지한다.
 
 오류는 ErrorCode enum을 확장한다: 입력400, 미인증/이용불가401, 가입미완료/권한403,

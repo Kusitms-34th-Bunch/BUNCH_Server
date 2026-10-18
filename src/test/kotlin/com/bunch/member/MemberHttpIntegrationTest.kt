@@ -1,5 +1,11 @@
 package com.bunch.member
 
+import com.bunch.bunch.domain.CharacterType
+import com.bunch.bunch.domain.MembershipStatus
+import com.bunch.bunch.domain.Visibility
+import com.bunch.bunch.dto.BunchResponse
+import com.bunch.bunch.dto.CreateBunchRequest
+import com.bunch.bunch.service.BunchService
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenPair
 import com.bunch.global.security.TokenProvider
@@ -18,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
@@ -26,6 +33,8 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 
 @SpringBootTest
@@ -35,7 +44,9 @@ class MemberHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val members: MemberRepository,
     private val tokens: TokenProvider,
-    private val sessions: RefreshTokenRepository
+    private val sessions: RefreshTokenRepository,
+    private val bunches: BunchService,
+    private val jdbc: JdbcTemplate
 ) {
     private val memberIds = mutableListOf<Long>()
     private val sessionIds = mutableListOf<Pair<String, Long>>()
@@ -43,6 +54,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
     @AfterEach
     fun cleanup() {
         sessionIds.forEach { (sid, id) -> sessions.delete(sid, id) }
+        memberIds.forEach { jdbc.update("DELETE FROM bunches WHERE created_by = ?", it) }
         memberIds.forEach { members.deleteById(it) }
     }
 
@@ -73,11 +85,11 @@ class MemberHttpIntegrationTest @Autowired constructor(
                   "success": true,
                   "data": {
                     "memberId": ${member.id},
-                    "signupStatus": "COMPLETED",
                     "nickname": "${member.nickname}",
                     "imageUrl": "https://example.com/profile.jpg",
                     "birthYear": 2000,
-                    "gender": "$gender"
+                    "gender": "$gender",
+                    "defaultBunch": null
                   },
                   "error": null
                 }
@@ -96,11 +108,11 @@ class MemberHttpIntegrationTest @Autowired constructor(
                   "success": true,
                   "data": {
                     "memberId": ${member.id},
-                    "signupStatus": "IN_PROGRESS",
                     "nickname": null,
                     "imageUrl": null,
                     "birthYear": null,
-                    "gender": null
+                    "gender": null,
+                    "defaultBunch": null
                   },
                   "error": null
                 }
@@ -121,15 +133,69 @@ class MemberHttpIntegrationTest @Autowired constructor(
                   "success": true,
                   "data": {
                     "memberId": ${member.id},
-                    "signupStatus": "COMPLETED",
                     "nickname": "${member.nickname}",
                     "imageUrl": null,
                     "birthYear": null,
-                    "gender": null
+                    "gender": null,
+                    "defaultBunch": null
                   },
                   "error": null
                 }
             """.trimIndent(), JsonCompareMode.STRICT))
+    }
+
+    @ParameterizedTest
+    @EnumSource(MembershipStatus::class, names = ["LEFT", "REMOVED"])
+    fun `default bunch returns display fields and falls back after membership or bunch removal`(
+        inactiveStatus: MembershipStatus
+    ) {
+        val member = account(Member(signupStatus = SignupStatus.COMPLETED))
+        val first = bunch(member)
+        val second = bunch(member)
+        bunch(account(Member(signupStatus = SignupStatus.COMPLETED)))
+        val pair = session(member)
+        jdbc.update(
+            "UPDATE bunch_memberships SET last_used_at = ? WHERE member_id = ?",
+            Timestamp.from(Instant.parse("2026-01-01T00:00:00Z")),
+            member.id
+        )
+
+        profile(pair.accessToken)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.defaultBunch.id").value(second.id))
+
+        jdbc.update("UPDATE bunches SET image_url = ? WHERE id = ?", "https://example.com/bunch.jpg", first.id)
+        bunches.updateLastUsed(member.id, first.id)
+
+        profile(pair.accessToken)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.defaultBunch.length()").value(4))
+            .andExpect(jsonPath("$.data.defaultBunch.id").value(first.id))
+            .andExpect(jsonPath("$.data.defaultBunch.name").value(first.name))
+            .andExpect(jsonPath("$.data.defaultBunch.characterType").value(first.characterType.name))
+            .andExpect(jsonPath("$.data.defaultBunch.imageUrl").value("https://example.com/bunch.jpg"))
+            .andExpect(jsonPath("$.data.signupStatus").doesNotExist())
+        mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer ${pair.accessToken}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.signupStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.data.defaultBunchId").value(first.id))
+
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = ? WHERE member_id = ? AND bunch_id = ?",
+            inactiveStatus.name,
+            member.id,
+            first.id
+        )
+
+        profile(pair.accessToken)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.defaultBunch.id").value(second.id))
+
+        jdbc.update("DELETE FROM bunches WHERE id = ?", second.id)
+
+        profile(pair.accessToken)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.defaultBunch").isEmpty)
     }
 
     @ParameterizedTest
@@ -188,6 +254,17 @@ class MemberHttpIntegrationTest @Autowired constructor(
     private fun account(member: Member = Member()): Member = members.saveAndFlush(member).also {
         memberIds += it.id
     }
+
+    private fun bunch(member: Member): BunchResponse = bunches.create(
+        member.id,
+        UUID.randomUUID(),
+        CreateBunchRequest(
+            name = "번치 ${UUID.randomUUID().toString().take(6)}",
+            introduction = "함께 기록해요",
+            visibility = Visibility.PRIVATE,
+            characterType = CharacterType.TYPE_2
+        )
+    )
 
     private fun session(member: Member): TokenPair {
         val pair = tokens.generateToken(member.id, member.role.name)
