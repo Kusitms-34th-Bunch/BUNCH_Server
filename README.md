@@ -142,7 +142,9 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 `auth-kakao-sdk-oidc-app` 브랜치 `a013e3285e3b93c84c4d7401cacafd7af600d0a2`를
 바탕으로 공통 기반을 분리했다. 원본 Git 이력은 가져오지 않았다.
 
-CI는 dev 대상 PR과 dev push에서 빌드·테스트한다. 자동 배포는 구성하지 않았다.
+CI는 dev 대상 PR과 dev/main push에서 빌드·테스트한다.
+문서만 변경하면 변경 확인만 수행하고 빌드·테스트·배포를 건너뛴다.
+main push는 검증 후 GHCR에 이미지를 게시하고 서버 `/bunch`의 앱을 교체한다.
+서버 Compose·환경 변수·SSH Secrets 준비는 [배포 안내](deploy/README.md)를 따른다.
 원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
-배포는 별도 작업이다.
 확정 마감일은 없다.
