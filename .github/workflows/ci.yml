@@ -4,14 +4,20 @@ on:
   pull_request:
     branches: [dev]
   push:
-    branches: [dev]
+    branches: [dev, main]
 
 permissions:
   contents: read
+  packages: write
+
+concurrency:
+  group: bunch-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -53,6 +59,40 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Build and test
         run: ./gradlew build
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ghcr.io/kusitms-34th-bunch/bunch_server:latest
+        run: |
+          docker build -t "$IMAGE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+          docker push "$IMAGE"
+      - name: Deploy over SSH
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sshpass
+          install -m 700 -d ~/.ssh
+          printf '%s' "$GITHUB_TOKEN" | sshpass -d 3 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+            set -e
+            cd /bunch
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
+            docker compose pull app
+            docker compose up -d --no-deps app
+          " 3<<< "$SSH_PASSWORD"
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
