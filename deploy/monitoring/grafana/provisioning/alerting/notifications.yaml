@@ -1,0 +1,60 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: bunch-5xx
+    receivers:
+      - uid: bunch-discord-5xx
+        type: discord
+        disableResolveMessage: true
+        settings:
+          url: ${DISCORD_WEBHOOK_URL}
+          title: '{{ template "bunch.title" . }}'
+          message: |
+            {{ template "bunch.message" . }}
+          use_discord_username: true
+  - orgId: 1
+    name: bunch-app-down
+    receivers:
+      - uid: bunch-discord-app-down
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: ${DISCORD_WEBHOOK_URL}
+          title: '{{ template "bunch.title" . }}'
+          message: |
+            {{ template "bunch.message" . }}
+          use_discord_username: true
+policies:
+  - orgId: 1
+    receiver: bunch-app-down
+    group_by: [service, environment, alertname]
+    group_wait: 0s
+    group_interval: 10s
+    repeat_interval: 5m
+    routes:
+      - receiver: bunch-5xx
+        object_matchers:
+          - [monitoring_kind, '=', http5xx]
+      - receiver: bunch-app-down
+        object_matchers:
+          - [monitoring_kind, '=', appdown]
+templates:
+  - orgId: 1
+    name: bunch
+    template: |
+      {{ define "bunch.title" }}BUNCH · {{ .Status }}{{ end }}
+      {{ define "bunch.message" }}
+      {{ range .Alerts }}
+      서비스: {{ .Labels.service }} / 환경: {{ .Labels.environment }}
+      상태: {{ .Status }} · 규칙: {{ .Labels.alertname }}
+      {{ if eq .Labels.monitoring_kind "http5xx" }}최근 1분 5xx 건수: {{ index .Values "A" }}
+      조건: 요청 종료 로그의 status=5xx가 1건 이상
+      {{ else if eq .Labels.monitoring_kind "appdown" }}수집 중단 값: {{ index .Values "A" }} (1=중단, 0=정상)
+      조건: 앱 수집 실패 또는 대상 소실이 1분 지속
+      {{ else }}관측 오류: 데이터 소스 상태를 확인하세요.
+      {{ end }}
+      발생: {{ .StartsAt | tz "Asia/Seoul" | date "2006-01-02 15:04:05 MST" }}
+      {{ if eq .Status "resolved" }}복구: {{ .EndsAt | tz "Asia/Seoul" | date "2006-01-02 15:04:05 MST" }}{{ end }}
+      {{ end }}
+      대시보드: {{ reReplaceAll "/+$" "" .ExternalURL }}/d/bunch/bunch?orgId=1
+      {{ end }}

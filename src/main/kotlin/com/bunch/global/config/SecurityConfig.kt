@@ -35,6 +35,7 @@ class SecurityConfig(
                     .accessDeniedHandler(deniedHandler)
             }
             .authorizeHttpRequests {
+                it.requestMatchers("/actuator", "/actuator/**").denyAll()
                 it.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 it.requestMatchers(
                     HttpMethod.POST,
@@ -51,7 +52,7 @@ class SecurityConfig(
                 it.anyRequest().authenticated()
             }
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter::class.java)
-            .addFilterAfter(loggingFilter, JwtAuthenticationFilter::class.java)
+            .addFilterBefore(loggingFilter, JwtAuthenticationFilter::class.java)
 
         return http.build()
     }

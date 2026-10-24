@@ -23,6 +23,7 @@
 | 저장소 | PostgreSQL 16 · Redis 7 |
 | 스키마 | Flyway · JPA validate |
 | 구조 | 루트 단일 모듈 · `com.bunch` |
+| 관측 | Actuator · Alloy · Loki · Prometheus · Grafana · Discord |
 
 ## 디렉터리 구조
 
@@ -30,14 +31,16 @@
 BUNCH_Server/
 ├── README.md / AGENTS.md / CLAUDE.md / CONTRIBUTING.md
 ├── .editorconfig / .gitattributes / .gitignore / .env.example
-├── compose.yml
+├── compose.yml             # 로컬 DB·Redis
+├── deploy/                 # 운영 Compose·모니터링 프로비저닝
 ├── docs/
 │   ├── PRD.md
 │   ├── GROUND_RULES.md
 │   └── specs/
 │       ├── auth.md
 │       ├── onboarding.md
-│       └── login-onboarding-api.md
+│       ├── login-onboarding-api.md
+│       └── monitoring.md
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   ├── workflows/ci.yml
@@ -145,6 +148,28 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
 - 실행 결과는 PR과 완료 보고에 남긴다. 필수 완료 조건은 개발 규칙을 따른다.
 
+## 운영 모니터링
+
+앱은 API `8080`과 관리 `8081`을 분리하며 내부 관리 포트에서 health·prometheus만 제공한다.
+운영 Compose는 관리 포트를 공개하지 않는다. Alloy가 앱 요청 로그를 Loki로,
+Prometheus가 메트릭을 수집하고 Grafana 대시보드 하나에서 함께 조회한다.
+
+Discord 알림은 두 개다. 최근 1분 요청 종료 로그의 **5xx 한 건부터** 다음 10초 평가에서
+알리며 복구 메시지는 보내지 않는다. 앱 메트릭 수집 중단은 1분 유지 후 알리고 복구도 보낸다.
+최초 묶음 대기는 0초, 지속 장애 반복은 5분이다. 로그 수집·초기 기동·전송 지연이 더해지므로
+요청 후 10초 내 수신 보장은 아니다. 로그·메트릭은 7일, Docker 로그는 `10m × 3`으로 제한한다.
+운영 환경변수는 `.env` 하나에 두고 Compose의 `env_file`로 읽는다.
+상세 조건·한계는 [모니터링 Spec](docs/specs/monitoring.md)을 따른다.
+
+모니터링 설정을 바꿀 때는 Docker가 실행된 환경에서 다음을 검증한다.
+로컬 HTTP stub는 실제 Grafana/Loki를 사용하며 운영 Discord에 전송하지 않는다.
+
+```bash
+test -f deploy/.env || cp deploy/.env.example deploy/.env
+bash deploy/monitoring/check.sh
+python3 deploy/monitoring/smoke_test.py
+```
+
 ## 기준 문서
 
 | 문서 | 내용 |
@@ -154,6 +179,8 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 | [인증 Spec](docs/specs/auth.md) | 로그인·약관·프로필·가입 완료·세션 |
 | [온보딩 Spec](docs/specs/onboarding.md) | 번치 생성·초대 발급·참여·웹 초대장 |
 | [로그인·온보딩 API 계약](docs/specs/login-onboarding-api.md) | 이슈 #5 확정 정책·API·데이터 보장 |
+| [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
+| [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
 
@@ -165,7 +192,11 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 
 CI는 dev 대상 PR과 dev/main push에서 빌드·테스트한다.
 문서만 변경하면 변경 확인만 수행하고 빌드·테스트·배포를 건너뛴다.
-main push는 검증 후 GHCR에 이미지를 게시하고 서버 `/bunch`의 앱을 교체한다.
+CI는 앱과 모니터링 변경을 각각 감지한다. 공통 Compose·환경 예제·CI 변경은 둘 다 검증한다.
+main push는 앱 변경일 때만 GHCR `latest` 게시와 앱 교체를 수행한다.
+모니터링 변경은 네 모니터링 서비스만 함께 재생성하며, 모니터링 단독 변경은 앱을 재시작하지 않는다.
+Compose 파일과 변경된 모니터링 파일은 SSH 사용자 홈(`~`)에 복사하며 `.env`는 보존한다.
+앱 단독 변경은 모니터링 파일을 건드리지 않는다. DB·Redis·Tunnel은 자동 갱신하지 않는다.
 서버 Compose·환경 변수·SSH Secrets 준비는 [배포 안내](deploy/README.md)를 따른다.
 원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
 확정 마감일은 없다.

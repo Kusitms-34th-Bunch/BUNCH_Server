@@ -1,0 +1,37 @@
+// Adapted from wingwogus/hnc-qna at 67c37dc547a18412951f18e8fe5a8d47f9b6b921.
+discovery.docker "app" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=bunch", "com.docker.compose.service=app"]
+  }
+}
+
+loki.source.docker "app" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.app.targets
+  labels     = { service = "bunch", environment = sys.env("MONITORING_ENVIRONMENT") }
+  forward_to = [loki.process.app.receiver]
+}
+
+loki.process "app" {
+  stage.multiline {
+    firstline = "^[0-9]{4}-[0-9]{2}-[0-9]{2} "
+  }
+  stage.regex {
+    expression = `^[0-9-]+ [0-9:.,]+ \[traceId=(?P<traceId>[^]]*)\] \[eventId=(?P<eventId>[^]]*)\] \[userId=(?P<userId>[^]]*)\] (?P<level>[A-Z]+)`
+  }
+  stage.structured_metadata {
+    values = { traceId = "", eventId = "", userId = "", level = "" }
+  }
+  stage.label_keep {
+    values = ["service", "environment"]
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
