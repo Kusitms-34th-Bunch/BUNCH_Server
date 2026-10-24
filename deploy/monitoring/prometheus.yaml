@@ -1,0 +1,8 @@
+# Adapted from wingwogus/hnc-qna at 67c37dc547a18412951f18e8fe5a8d47f9b6b921.
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: bunch
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["app:8081"]

@@ -1,5 +1,22 @@
 server:
   port: ${SERVER_PORT:8080}
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+      discovery:
+        enabled: false
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 spring:
   servlet:
     multipart:
