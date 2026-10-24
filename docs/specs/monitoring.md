@@ -122,6 +122,7 @@ PostgreSQL·Redis·cloudflared는 CI가 재시작하지 않는다.
 자동 검증은 다음과 같다. 실제 실행 결과는 완료 보고에 남기며 이 목록 자체가 통과 증거는 아니다.
 
 ```bash
+test -f deploy/.env || cp deploy/.env.example deploy/.env
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build

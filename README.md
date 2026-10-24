@@ -165,6 +165,7 @@ Discord 알림은 두 개다. 최근 1분 요청 종료 로그의 **5xx 한 건�
 로컬 HTTP stub는 실제 Grafana/Loki를 사용하며 운영 Discord에 전송하지 않는다.
 
 ```bash
+test -f deploy/.env || cp deploy/.env.example deploy/.env
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 ```

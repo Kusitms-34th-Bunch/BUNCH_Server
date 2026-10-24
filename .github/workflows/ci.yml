@@ -112,7 +112,9 @@ jobs:
         run: ./gradlew build
       - name: Validate monitoring configuration
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
-        run: bash deploy/monitoring/check.sh
+        run: |
+          cp deploy/.env.example deploy/.env
+          bash deploy/monitoring/check.sh
       - name: Test Grafana and Loki with local HTTP stubs
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: python3 deploy/monitoring/smoke_test.py

@@ -38,8 +38,8 @@ docker compose up -d --wait postgres
 
 위 명령은 DB만 시작한다. 아직 이미지·Tunnel·소셜 설정을 채우지 않았어도 DB 준비는 가능하다.
 실제 `.env`는 Git에 올리지 않으며 값이 출력되는 `docker compose config` 대신 `--quiet`를 사용한다.
-로컬·CI의 설정 검사만 `--no-env-resolution`으로 운영 `.env` 없이 예제의 이미지 주소를 확인한다.
-운영 배포에서는 이 옵션을 사용하지 않고 실제 `.env`를 검증한다.
+CI는 검증 전에 예제를 `deploy/.env`로 복사해 운영과 같은 `env_file` 경로를 검증한다.
+이 파일은 CI 작업 공간에서만 사용하며 운영 서버의 `.env`로 전송하지 않는다.
 
 ## 2. 앱 DB 계정 생성
 
@@ -221,6 +221,8 @@ Grafana 로그인 후 프로비저닝된 대시보드 하나에서 `up`·요청�
 HTTP stub 기반 검증은 실제 Discord 수신과 다르다.
 
 ```bash
+# 로컬에 .env가 없는 최초 실행에서만 예제를 복사한다.
+test -f deploy/.env || cp deploy/.env.example deploy/.env
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 ```

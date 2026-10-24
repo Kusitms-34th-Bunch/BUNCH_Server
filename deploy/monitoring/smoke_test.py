@@ -121,7 +121,7 @@ def main():
     threading.Thread(target=stub.serve_forever, daemon=True).start()
 
     # Preserve Docker connectivity, but never let shell variables override the
-    # example file (especially image references or notification settings).
+    # env file (especially image references or notification settings).
     compose_env = {key: value for key, value in os.environ.items() if key in {
         "PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
         "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "XDG_RUNTIME_DIR",
@@ -161,8 +161,8 @@ def main():
             images = {}
             for service in ("loki", "prometheus", "grafana"):
                 images[service] = docker(
-                    "compose", "--project-name", run_id, "--env-file", str(ROOT.parent / ".env.example"),
-                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--no-env-resolution", "--images", service,
+                    "compose", "--project-name", run_id, "--env-file", str(ROOT.parent / ".env"),
+                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--images", service,
                     env=compose_env,
                 )
                 require(re.fullmatch(r"[\w./-]+:[\w.-]+", images[service]) is not None
