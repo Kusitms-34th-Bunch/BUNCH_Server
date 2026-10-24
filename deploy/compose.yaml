@@ -1,9 +1,16 @@
 name: bunch
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -16,6 +23,7 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -29,7 +37,10 @@ services:
   app:
     image: ${APP_IMAGE}
     restart: unless-stopped
+    logging: *logging
     env_file: .env
+    expose:
+      - "8081"
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,14 +50,63 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    logging: *logging
     env_file: .env
     command: ["tunnel", "--no-autoupdate", "run"]
     depends_on:
       app:
         condition: service_started
 
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    logging: *logging
+    env_file: .env
+    user: "0"
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloydata:/var/lib/alloy/data
+
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    logging: *logging
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
+      - lokidata:/loki
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+    volumes:
+      - ./monitoring/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheusdata:/prometheus
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    restart: unless-stopped
+    logging: *logging
+    env_file: .env
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+
 volumes:
   pgdata:
     name: bunch-pgdata
   redis_data:
     name: bunch-redis-data
+  alloydata:
+  lokidata:
+  prometheusdata:
+  grafanadata:
