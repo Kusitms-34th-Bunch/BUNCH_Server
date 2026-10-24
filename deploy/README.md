@@ -1,6 +1,6 @@
 # 최소 서버 배포
 
-`main push → 변경별 검증 → 앱 변경 시 GHCR 게시 → SSH로 /bunch의 해당 서비스 갱신` 순서다.
+`main push → 변경별 검증 → 앱 변경 시 GHCR 게시 → SSH 사용자 홈의 해당 서비스 갱신` 순서다.
 dev PR·push의 기존 CI는 유지한다. main에는 검증한 dev를 릴리스 PR로 병합한다.
 이미지는 `ghcr.io/kusitms-34th-bunch/bunch_server:latest`이며 Linux x86_64 서버 기준이다.
 서버 CPU는 `uname -m`으로 확인한다. ARM 서버면 이미지 빌드 대상 변경이 필요하다.
@@ -8,19 +8,18 @@ dev PR·push의 기존 CI는 유지한다. main에는 검증한 dev를 릴리스
 ## 1. 서버 파일 준비
 
 Docker Compose 설치와 Linux `bunch` 사용자 생성이 끝난 상태에서 진행한다.
-관리자 계정으로 배포 폴더를 만들고 bunch에 Docker 사용 권한을 부여한다.
+기존 배포 경로인 bunch 사용자 홈(`~`)을 사용하고 Docker 사용 권한을 부여한다.
 
 ```bash
-sudo install -d -o bunch -g bunch -m 700 /bunch
 sudo usermod -aG docker bunch
 ```
 
 `bunch`로 재로그인한 뒤 sudo 없이 `docker ps`가 되는지 확인한다.
 Docker 그룹은 root에 준하는 권한이다. SSH 비밀번호 로그인이 가능해야 한다.
 
-- [compose.yaml](compose.yaml)을 서버의 `/bunch/compose.yaml`로 복사한다.
-- [monitoring/](monitoring/)를 서버의 `/bunch/monitoring/`에 복사한다. CI도 이 두 설정 경로만 전송한다.
-- [.env.example](.env.example)을 서버의 `/bunch/.env`로 복사하고 실제 값을 입력한다.
+- [compose.yaml](compose.yaml)을 서버의 `~/compose.yaml`로 복사한다.
+- [monitoring/](monitoring/)를 서버의 `~/monitoring/`에 복사한다. CI도 이 두 설정 경로만 전송한다.
+- [.env.example](.env.example)을 서버의 `~/.env`로 복사하고 실제 값을 입력한다.
 - 이미 준비한 파일이 있으면 프로젝트명 `bunch`와 볼륨 `bunch-pgdata`, `bunch-redis-data`를 유지한다.
 - `.env`의 `POSTGRES_USER=postgres`, `POSTGRES_DB=postgres`는 관리자 초기화용이다.
   앱은 `DB_USERNAME=bunch`, DB `bunch`를 사용한다.
@@ -30,7 +29,7 @@ Docker 그룹은 root에 준하는 권한이다. SSH 비밀번호 로그인이 �
 - 관리·앱 비밀번호는 서로 다르게 설정한다. `$`·`#`가 있는 값은 작은따옴표로 감싼다.
 
 ```bash
-cd /bunch
+cd ~
 chmod 600 .env
 docker compose config --quiet
 docker compose up -d --wait postgres
@@ -46,7 +45,7 @@ CI는 검증 전에 예제를 `deploy/.env`로 복사해 운영과 같은 `env_f
 신규 DB에서 최초 한 번만 수행한다. 관리자 비밀번호는 `.env`의 `POSTGRES_PASSWORD`다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose exec postgres psql -h 127.0.0.1 -U postgres -d postgres -W
 ```
 
@@ -64,7 +63,7 @@ GRANT USAGE, CREATE ON SCHEMA public TO bunch;
 앱 계정으로 접속한 뒤 사용자와 DB가 모두 `bunch`인지 확인한다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose exec postgres psql -h 127.0.0.1 -U bunch -d bunch -W
 ```
 
@@ -96,7 +95,7 @@ openssl rand 64 | openssl base64 -A
 DB·Redis에는 호스트 공개 포트가 없다. 앱은 서비스 이름 `postgres`, `redis`로 접속한다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose up -d --wait postgres redis
 ```
 
@@ -142,7 +141,7 @@ CI의 `changes` job은 `git diff`로 두 플래그를 만든다. PR은 merge-bas
 main push의 검증 성공 후 다음 순서로 진행한다.
 
 1. 앱 플래그가 켜진 경우만 `latest` 이미지를 빌드·게시한다.
-2. SSH의 모든 Compose 명령은 `cd /bunch`에서 수행한다. `scp`로 `deploy/compose.yaml`을 복사하고,
+2. SSH의 모든 Compose 명령은 `cd ~`에서 수행한다. `scp`로 `deploy/compose.yaml`을 복사하고,
    모니터링 플래그가 켜진 경우에만 `deploy/monitoring/`을 복사한다.
    앱 단독 변경은 실행 중인 모니터링 설정 파일을 건드리지 않는다. 서버 `.env`는 전송·덮어쓰기하지 않는다.
    전송 전 파일 삭제는 하지 않으며, Git에서 삭제한 설정 파일은 서버에 남을 수 있다.
@@ -177,7 +176,7 @@ Cloudflare에서 원격 관리 Tunnel을 만들고 토큰을 `.env`의 `TUNNEL_T
 첫 main 배포가 끝나면 서버에서 Tunnel을 기동한다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose up -d --no-deps cloudflared
 docker compose ps
 docker compose logs --tail 50 app cloudflared
@@ -201,7 +200,7 @@ Cloudflare Tunnel에 관리자 hostname → `http://grafana:3000`을 별도로 �
 모니터링 기동 전 RAM·디스크 여유와 설정을 확인한다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose config --quiet
 docker compose pull alloy loki prometheus grafana
 docker compose up -d --no-deps --force-recreate alloy loki prometheus grafana
@@ -243,15 +242,15 @@ git checkout "$PREVIOUS_COMMIT" -- deploy/compose.yaml deploy/monitoring/
 ```
 
 `git checkout`은 새 커밋에서만 추가된 파일을 제거하지 않을 수 있다. 복원할 파일 목록을 확인하고,
-서버에서는 선택한 커밋의 모니터링 파일을 `/bunch/monitoring/`에 복사한다.
+서버에서는 선택한 커밋의 모니터링 파일을 `~/monitoring/`에 복사한다.
 로컬 복원 디렉터리에 남은 새 파일도 제외해 이전 커밋의 파일만 복사한다.
 전송 성공 전에 실행 중인 설정 파일을 삭제하지 않는다. 이전 커밋에서 제거해야 할 서버 파일은
 전송 완료 후 별도로 확인·정리하고 아래 명령으로 모니터링 서비스를 재생성한다.
-복원한 `deploy/compose.yaml`은 `/bunch/compose.yaml`에 복사한다. 서버 `.env`는 보존한다.
-명령을 실행하기 전 올바른 `/bunch`와 Git 커밋인지 확인한다.
+복원한 `deploy/compose.yaml`은 `~/compose.yaml`에 복사한다. 서버 `.env`는 보존한다.
+명령을 실행하기 전 올바른 SSH 사용자 홈(`~`)과 Git 커밋인지 확인한다.
 
 ```bash
-cd /bunch
+cd ~
 docker compose config --quiet
 docker compose pull alloy loki prometheus grafana
 docker compose up -d --no-deps --force-recreate alloy loki prometheus grafana
