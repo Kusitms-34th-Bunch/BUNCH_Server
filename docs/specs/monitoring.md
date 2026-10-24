@@ -86,8 +86,8 @@ Grafana/Loki가 준비되기 전에는 즉시 탐지할 수 없다. Docker 대�
 
 ### 전송·비밀값
 
-- `DISCORD_WEBHOOK_URL`은 Grafana에만 전달한다. Compose `.env`의 모든 값을 서비스에 일괄 전달하지 않는다.
-  앱·DB·Redis·Tunnel·수집기는 각 서비스에 필요한 변수만 받는다.
+- 앱·DB·Redis·Tunnel·Alloy·Grafana는 공통 `.env`를 `env_file`로 읽는다.
+  `DISCORD_WEBHOOK_URL`과 Grafana 설정도 같은 파일에 두며 해당 서비스들에 전체 변수가 전달된다.
 - `GF_SERVER_ROOT_URL`은 실제 Grafana HTTPS URL이며 링크 생성에 사용한다.
   `GF_SECURITY_ADMIN_PASSWORD`는 초기 관리자 생성용이다. 기존 계정 비밀번호 변경은 별도 수행한다.
 - 메시지는 규칙·서비스·환경·발생/복구·조건·Grafana 링크로 원인을 확인할 수 있게 한다.

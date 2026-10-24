@@ -24,8 +24,8 @@ Docker 그룹은 root에 준하는 권한이다. SSH 비밀번호 로그인이 �
 - 이미 준비한 파일이 있으면 프로젝트명 `bunch`와 볼륨 `bunch-pgdata`, `bunch-redis-data`를 유지한다.
 - `.env`의 `POSTGRES_USER=postgres`, `POSTGRES_DB=postgres`는 관리자 초기화용이다.
   앱은 `DB_USERNAME=bunch`, DB `bunch`를 사용한다.
-- `.env`는 Compose 보간 원본이며 서비스마다 필요한 변수만 `environment`로 전달한다.
-  `DISCORD_WEBHOOK_URL`은 Grafana에만 전달한다. 앱·DB·Redis·Tunnel에는 전달하지 않는다.
+- 앱·DB·Redis·Tunnel·Alloy·Grafana는 같은 `.env`를 `env_file: .env`로 읽는다.
+  앱 설정과 모니터링 환경변수는 이 파일 하나에서 관리하며, 파일의 모든 변수가 이 서비스들에 전달된다.
   `APP_IMAGE`는 기존 `ghcr.io/kusitms-34th-bunch/bunch_server:latest`를 유지한다.
 - 관리·앱 비밀번호는 서로 다르게 설정한다. `$`·`#`가 있는 값은 작은따옴표로 감싼다.
 
@@ -38,6 +38,8 @@ docker compose up -d --wait postgres
 
 위 명령은 DB만 시작한다. 아직 이미지·Tunnel·소셜 설정을 채우지 않았어도 DB 준비는 가능하다.
 실제 `.env`는 Git에 올리지 않으며 값이 출력되는 `docker compose config` 대신 `--quiet`를 사용한다.
+로컬·CI의 설정 검사만 `--no-env-resolution`으로 운영 `.env` 없이 예제의 이미지 주소를 확인한다.
+운영 배포에서는 이 옵션을 사용하지 않고 실제 `.env`를 검증한다.
 
 ## 2. 앱 DB 계정 생성
 

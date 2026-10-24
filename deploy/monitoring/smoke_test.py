@@ -162,7 +162,7 @@ def main():
             for service in ("loki", "prometheus", "grafana"):
                 images[service] = docker(
                     "compose", "--project-name", run_id, "--env-file", str(ROOT.parent / ".env.example"),
-                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--images", service,
+                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--no-env-resolution", "--images", service,
                     env=compose_env,
                 )
                 require(re.fullmatch(r"[\w./-]+:[\w.-]+", images[service]) is not None
