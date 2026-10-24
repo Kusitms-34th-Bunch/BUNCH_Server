@@ -84,6 +84,11 @@ class BunchService(
     fun defaultBunchId(userId: Long): Long? =
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)?.bunch?.id
 
+    @Transactional(readOnly = true)
+    fun defaultBunch(userId: Long): BunchResponse? =
+        memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
+            ?.let { BunchResponse.from(it.bunch) }
+
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
         lockOwnerOrMember(userId, bunchId, ownerOnly = false)
