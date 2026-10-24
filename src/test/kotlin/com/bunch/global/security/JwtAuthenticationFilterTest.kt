@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
+import org.slf4j.MDC
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -25,6 +26,7 @@ class JwtAuthenticationFilterTest {
     @AfterEach
     fun clearContext() {
         SecurityContextHolder.clearContext()
+        MDC.clear()
     }
 
     @Test
@@ -42,6 +44,25 @@ class JwtAuthenticationFilterTest {
         verify(sessions).isActive(sid, 7)
         verify(chain).doFilter(request, response)
         assertEquals(200, response.status)
+        assertNull(MDC.get("userId"))
+    }
+
+    @Test
+    fun `authentication updates the request user before downstream logging`() {
+        val pair = tokens.generateToken(7, "ROLE_USER")
+        val sid = tokens.getSessionId(pair.accessToken)
+        request.addHeader("Authorization", "Bearer ${pair.accessToken}")
+        `when`(sessions.isActive(sid, 7)).thenReturn(true)
+        MDC.put("traceId", "request-scope")
+        MDC.put("userId", "GUEST")
+        doAnswer {
+            assertEquals("7", MDC.get("userId"))
+            null
+        }.`when`(chain).doFilter(request, response)
+
+        filter.doFilter(request, response, chain)
+
+        verify(chain).doFilter(request, response)
     }
 
     @Test
