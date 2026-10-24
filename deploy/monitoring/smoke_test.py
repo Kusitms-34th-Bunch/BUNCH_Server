@@ -248,7 +248,8 @@ def main():
                         and (successful is None or (item[1] == 204) == successful)]
 
             def observe_normal(seconds):
-                deadline = time.monotonic() + seconds
+                minimum_end = time.monotonic() + seconds
+                deadline = minimum_end + 20
                 evaluations = set()
                 while time.monotonic() < deadline:
                     for uid in rules:
@@ -256,6 +257,10 @@ def main():
                         require(current["state"] == "inactive", "Unexpected alert state: " + uid)
                     evaluations.add(status("bunch-http-5xx")["lastEvaluation"])
                     require(not deliveries(), "Unexpected Discord delivery during normal/no traffic")
+                    # Initial scheduling/API latency can leave only two samples
+                    # in 24s. Keep checking state/delivery while waiting for three.
+                    if time.monotonic() >= minimum_end and len(evaluations) >= 3:
+                        break
                     time.sleep(2)
                 require(len(evaluations) >= 3, "Must observe at least two 10s evaluation transitions")
 
