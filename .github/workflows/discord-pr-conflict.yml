@@ -1,0 +1,44 @@
+name: Discord PR Conflict
+
+# 충돌 중인 PR에서도 실행하며, 기준 브랜치 push로 생긴 충돌도 확인한다.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify:
+    if: >-
+      github.event_name == 'push' || github.event.action != 'edited' ||
+      github.event.changes.base != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check webhook configuration
+        id: webhook
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo 'DISCORD_WEBHOOK_URL is not configured; skipping.'
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+      # 이벤트의 신뢰된 커밋만 사용한다. PR head/merge ref로 변경하지 않는다.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.webhook.outputs.configured == 'true'
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Notify conflicting pull requests
+        if: steps.webhook.outputs.configured == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/discord_notify.py conflicts

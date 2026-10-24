@@ -1,0 +1,42 @@
+name: Discord Notify
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: >-
+      github.event_name == 'issues' || github.event.action == 'opened' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check webhook configuration
+        id: webhook
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo 'DISCORD_WEBHOOK_URL is not configured; skipping.'
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+      # pull_request_target의 github.sha는 기본 브랜치의 신뢰된 커밋이다.
+      # PR head/merge ref를 checkout하거나 PR 코드를 실행하지 않는다.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.webhook.outputs.configured == 'true'
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Send notification
+        if: steps.webhook.outputs.configured == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python3 .github/scripts/discord_notify.py event
