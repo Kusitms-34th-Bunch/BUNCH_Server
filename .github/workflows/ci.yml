@@ -150,16 +150,16 @@ jobs:
           target="$SSH_USER@$SSH_HOST"
           ssh_options=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
           sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" \
-            deploy/compose.yaml "$target:/bunch/compose.yaml" 3<<< "$SSH_PASSWORD"
+            deploy/compose.yaml "$target:compose.yaml" 3<<< "$SSH_PASSWORD"
           if [[ "$MONITORING_CHANGED" == 'true' ]]; then
             sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" \
-              'set -eu; cd /bunch; mkdir -p monitoring' 3<<< "$SSH_PASSWORD"
+              'set -eu; cd ~; mkdir -p monitoring' 3<<< "$SSH_PASSWORD"
             sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" -r \
-              deploy/monitoring/. "$target:/bunch/monitoring/" 3<<< "$SSH_PASSWORD"
+              deploy/monitoring/. "$target:monitoring/" 3<<< "$SSH_PASSWORD"
           fi
           printf '%s' "$GITHUB_TOKEN" | sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" "
             set -eu
-            cd /bunch
+            cd ~
             docker compose config --quiet
             if [ '$APP_CHANGED' = 'true' ]; then
               trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT

@@ -112,7 +112,7 @@ HTTP 지연 p95, JVM 힙·Hikari 풀과 요청 로그를 확인하고 traceId/ev
 
 ## 배포·검증
 
-[배포 안내](../../deploy/README.md)의 `/bunch` 절차를 따른다.
+[배포 안내](../../deploy/README.md)의 SSH 사용자 홈(`~`) 절차를 따른다.
 CI는 `git diff`로 앱/모니터링 두 플래그를 계산하고 공통 Compose·환경 예제·CI 변경은 둘 다 켠다.
 문서만 변경하면 필수 이름 `build`를 skipped로 남기며 배포하지 않는다.
 모니터링만 변경하면 설정 검증 후 네 모니터링 서비스를 함께 재생성하고 앱은 재시작하지 않는다.
