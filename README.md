@@ -198,7 +198,6 @@ python3 deploy/monitoring/smoke_test.py
 | [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
-| [번들 구현 계획](docs/plans/bundle-implementation.md) | 본 작업 #23→#24→#25, 후속 #26~#29와 dev 통합 검증 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |

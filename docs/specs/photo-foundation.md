@@ -7,7 +7,6 @@ HTTP API는 이 범위에 포함하지 않는다.
 ## 기준 문서
 
 제품 정책은 [PRD](../PRD.md)와 [번들 Spec](bundle.md)을 따른다.
-[#23~#29 구현 순서와 범위](../plans/bundle-implementation.md)를 함께 참고한다.
 이 문서는 #23의 영속성·연결 계약을 구체화한다. 기존 인증·가입은
 [로그인·온보딩 API 계약](login-onboarding-api.md)을 따른다.
 

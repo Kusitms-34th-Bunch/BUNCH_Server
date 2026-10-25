@@ -394,4 +394,3 @@ iOS/WebView의 사진 선택·권한·입력·연결 복귀·화면 갱신은 �
   3.3.4, 3.6.1, 4.1.1~4.3.14.
 - [PRD](../PRD.md)
 - [로그인·온보딩 API 계약](login-onboarding-api.md)
-- [번들 구현 계획](../plans/bundle-implementation.md)
