@@ -54,6 +54,8 @@ BUNCH_Server/
     │   ├── member/           # 약관·프로필·개인 계정·온보딩 조회
     │   ├── bunch/            # 번치·소속·초대
     │   ├── notification/     # 참여 알림 영속성
+    │   ├── image/            # 공용 이미지 자산·참조 보호·커밋 후 정리
+    │   ├── photo/            # Photo·공동 업로더·번들 연결 기반
     │   └── global/           # config / security / oidc / redis 등
     ├── main/resources/
     ├── test/kotlin/com/bunch/
@@ -128,6 +130,18 @@ set +a
 이전 sid 없는 인증 토큰은 세션 정책 변경 배포 후 다시 로그인해야 한다.
 실제 약관 원문·이미지 디자인·초대 도메인/AASA는 앱 연동 시 별도로 준비한다.
 
+## 이미지·Photo 기반
+
+V5는 기존 개인·번치 프로필을 공용 `image_assets`로 백필하고 nullable FK로 전환한다.
+파일을 재업로드하지 않으며 기존 `imageUrl`과 기본 이미지의 null 응답을 유지한다.
+기존 public ID/URL이 한쪽만 있거나 같은 public ID의 URL이 다르면 마이그레이션은
+데이터를 바꾸지 않고 실패한다. 배포 전 해당 데이터를 점검한다.
+
+Photo·공동 업로더 스키마와 조회·최종 삭제 연결은
+[사진함 기반 계약](docs/specs/photo-foundation.md)을 따른다. 사진함 HTTP 업로드·목록·중복 병합은
+별도 구현 범위다. 파일 정리는 참조가 모두 해제된 DB 커밋 후 시도하며 실패 식별자만 기록한다.
+자동 정리 배치·재시도 큐는 제공하지 않는다.
+
 ## 검증
 
 실제 PostgreSQL·Redis를 준비하고 최초 한 번 테스트 DB를 만든다.
@@ -143,6 +157,8 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 제공자 검증·동시 가입·토큰 처리와 HTTP 인증 회귀 테스트를 함께 실행한다.
 - 가입·약관·프로필·Cloudinary 로컬 HTTP stub·번치 생성/초대/참여·동시 정원/소속 한도를 함께 검증한다.
 - 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
+- V4→V5의 실제 PostgreSQL 백필·불일치 롤백·재실행, JPA validate, Photo·공동 업로더
+  제약·소속 검증·공유 파일 보호·커밋 후 삭제를 검증한다. 사진함 fixture와 실제 API 연동은 구분한다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
@@ -181,6 +197,9 @@ python3 deploy/monitoring/smoke_test.py
 | [로그인·온보딩 API 계약](docs/specs/login-onboarding-api.md) | 이슈 #5 확정 정책·API·데이터 보장 |
 | [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
+| [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
+| [번들 구현 계획](docs/plans/bundle-implementation.md) | 본 작업 #23→#24→#25, 후속 #26~#29와 dev 통합 검증 |
+| [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
 

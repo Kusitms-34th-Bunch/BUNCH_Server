@@ -5,6 +5,9 @@ import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
+import com.bunch.image.domain.ImageAsset
+import com.bunch.image.domain.ImageAssetRepository
+import com.bunch.image.service.ImageAssetService
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
@@ -25,6 +28,7 @@ import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.UUID
 import javax.imageio.ImageIO
 
 @SpringBootTest
@@ -32,6 +36,7 @@ import javax.imageio.ImageIO
 class BunchImageIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var bunchRepository: BunchRepository
     @Autowired private lateinit var membershipRepository: BunchMembershipRepository
+    @Autowired private lateinit var assetRepository: ImageAssetRepository
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
     private lateinit var server: HttpServer
     private lateinit var imageBunches: BunchService
@@ -66,7 +71,14 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         }
         server.start()
         val storage = ProfileImageStorage("test", "test-key", "test-secret", "http://127.0.0.1:${server.address.port}")
-        imageBunches = BunchService(bunchRepository, membershipRepository, members, storage, transactionManager)
+        imageBunches = BunchService(
+            bunchRepository,
+            membershipRepository,
+            members,
+            storage,
+            ImageAssetService(assetRepository, storage, transactionManager),
+            transactionManager
+        )
     }
 
     @AfterEach
@@ -78,7 +90,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     fun `image replacement commits before deleting old image and reset preserves character`() {
         val owner = member()
         val bunch = create(owner)
-        jdbc.update("UPDATE bunches SET image_public_id = 'old/image', image_url = 'https://images.example/old.jpg' WHERE id = ?", bunch.id)
+        val oldImage = attachImage(bunch.id, "old", "https://images.example/old.jpg")
         onUpload = {
             // This independent connection must acquire both locks while HTTP upload is in flight.
             TransactionTemplate(transactionManager).execute {
@@ -89,12 +101,12 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         }
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
         assertThat(result.imageUrl).isEqualTo("https://images.example/${uploaded.single()}.jpg")
-        assertThat(deleted).containsExactly("old/image")
+        assertThat(deleted).containsExactly(oldImage.publicId)
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(uploaded.single())
         val reset = imageBunches.resetProfileImage(owner, bunch.id)
         assertThat(reset.imageUrl).isNull()
         assertThat(reset.characterType).isEqualTo(bunch.characterType)
-        assertThat(deleted).containsExactly("old/image", uploaded.single())
+        assertThat(deleted).containsExactly(oldImage.publicId, uploaded.single())
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isNull()
     }
 
@@ -102,13 +114,13 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     fun `image database update failure deletes new upload and preserves old image reference`() {
         val owner = member()
         val bunch = create(owner)
-        jdbc.update("UPDATE bunches SET image_public_id = 'old/image', image_url = 'https://images.example/old.jpg' WHERE id = ?", bunch.id)
-        rejectWrite("bunch_test_reject_image", "bunches", "UPDATE", "WHEN (NEW.image_public_id IS NOT NULL)")
+        val oldImage = attachImage(bunch.id, "old", "https://images.example/old.jpg")
+        rejectWrite("bunch_test_reject_image", "bunches", "UPDATE", "WHEN (NEW.profile_image_asset_id IS NOT NULL)")
         assertThatThrownBy { imageBunches.updateProfileImage(owner, bunch.id, photo()) }.isInstanceOf(DataAccessException::class.java)
         assertThat(uploaded).hasSize(1)
         assertThat(deleted).containsExactly(uploaded.single())
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo("old/image")
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo("https://images.example/old.jpg")
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(oldImage.publicId)
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(oldImage.url)
     }
 
     @Test
@@ -140,15 +152,48 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     fun `upload failure leaves database image unchanged and cleanup failure does not roll back success`() {
         val owner = member()
         val bunch = create(owner)
-        jdbc.update("UPDATE bunches SET image_public_id = 'old/image', image_url = 'https://images.example/old.jpg' WHERE id = ?", bunch.id)
+        val oldImage = attachImage(bunch.id, "old", "https://images.example/old.jpg")
         failUpload = true
         assertError(ErrorCode.PROFILE_IMAGE_FAILED) { imageBunches.updateProfileImage(owner, bunch.id, photo()) }
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo("old/image")
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(oldImage.publicId)
         failUpload = false
         failDeletion = true
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(result.imageUrl)
-        assertThat(deleted).contains("old/image")
+        assertThat(deleted).contains(oldImage.publicId)
+    }
+
+    @Test
+    fun `replacing or resetting bunch image preserves a shared personal profile asset`() {
+        val owner = member()
+        val bunch = create(owner)
+        val shared = attachImage(bunch.id, "shared", "https://images.example/shared.jpg")
+        jdbc.update("UPDATE members SET profile_image_asset_id = ? WHERE id = ?", shared.id, owner)
+
+        imageBunches.updateProfileImage(owner, bunch.id, photo())
+        assertThat(deleted).doesNotContain(shared.publicId)
+        assertThat(jdbc.queryForObject(
+            "SELECT profile_image_asset_id FROM members WHERE id = ?",
+            Long::class.java,
+            owner
+        )).isEqualTo(shared.id)
+        assertThat(members.findById(owner).orElseThrow().imagePublicId).isEqualTo(shared.publicId)
+
+        imageBunches.resetProfileImage(owner, bunch.id)
+        assertThat(deleted).doesNotContain(shared.publicId)
+        assertThat(assetRepository.existsById(shared.id)).isTrue()
+        assertThat(members.findById(owner).orElseThrow().imageUrl).isEqualTo(shared.url)
+    }
+
+    private fun attachImage(bunchId: Long, prefix: String, url: String): ImageAsset {
+        val image = assetRepository.saveAndFlush(
+            ImageAsset(
+                publicId = "$prefix/${UUID.randomUUID()}",
+                url = url
+            )
+        )
+        jdbc.update("UPDATE bunches SET profile_image_asset_id = ? WHERE id = ?", image.id, bunchId)
+        return image
     }
 
     private fun photo(): MockMultipartFile {

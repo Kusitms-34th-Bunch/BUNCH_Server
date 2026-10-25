@@ -4,6 +4,8 @@ import com.bunch.bunch.domain.InviteEligibility
 import com.bunch.bunch.domain.JoinOutcome
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.image.domain.ImageAsset
+import com.bunch.image.domain.ImageAssetRepository
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
@@ -20,6 +22,7 @@ import java.util.UUID
 @ActiveProfiles("test")
 class InvitationIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var mapper: ObjectMapper
+    @Autowired private lateinit var assetRepository: ImageAssetRepository
 
     @Test
     fun `concurrent issuance reuses one invitation and preserves original issuer`() {
@@ -154,12 +157,23 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("UPDATE bunch_invitations SET revoked_at = CURRENT_TIMESTAMP")
         expireInvitations()
         val newName = uniqueName()
-        jdbc.update("UPDATE bunches SET name = ?, image_url = ? WHERE id = ?", newName, "https://images.example/current.jpg", bunch.id)
+        val currentImage = assetRepository.saveAndFlush(
+            ImageAsset(
+                publicId = "invitation/${UUID.randomUUID()}",
+                url = "https://images.example/current.jpg"
+            )
+        )
+        jdbc.update(
+            "UPDATE bunches SET name = ?, profile_image_asset_id = ? WHERE id = ?",
+            newName,
+            currentImage.id,
+            bunch.id
+        )
         val replay = invitations.join(newcomer, key, " ${invite.code.lowercase()} ")
         assertThat(replay.outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(replay.bunch.id).isEqualTo(first.bunch.id)
         assertThat(replay.bunch.name).isEqualTo(newName)
-        assertThat(replay.bunch.imageUrl).isEqualTo("https://images.example/current.jpg")
+        assertThat(replay.bunch.imageUrl).isEqualTo(currentImage.url)
         assertError(ErrorCode.INVALID_INVITATION) { join(newcomer, invite) }
     }
 

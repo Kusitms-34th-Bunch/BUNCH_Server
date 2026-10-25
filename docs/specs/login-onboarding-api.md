@@ -62,11 +62,14 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   JPEG로 재인코딩해 불필요한 EXIF 등 메타데이터를 제외한다.
 - Cloudinary는 서버 RestClient의 HTTPS Basic Auth로 Upload API를 호출한다.
   API secret·Authorization·원문 토큰은 로그에 남기지 않는다. 사용자 입력 URL 원격 다운로드는 하지 않는다.
-- 저장 정보는 publicId/HTTPS URL이며 기본 이미지는 imageUrl:null이다.
+- 저장 정보는 공용 ImageAsset의 publicId/HTTPS URL이다. 개인·번치는 nullable
+  `profile_image_asset_id`로 참조하며 기본 이미지는 imageUrl:null이다. 기존 데이터는
+  재업로드 없이 백필하고 기존 응답 URL을 유지한다. [사진함 기반 계약](photo-foundation.md)을 따른다.
   회원 사진은 가입 multipart 요청에서 최종 저장한다. 사진 검증/저장만 실패하면 null로 가입을 완료한다.
   필수 프로필 오류·요청 전체의 파싱/전송 실패는 가입을 완료하지 않는다.
-- 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→기존 파일 삭제 순서다.
+- 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→커밋 후 미참조 기존 자산·파일 삭제 순서다.
   DB 실패 시 새 파일 삭제를 시도하며 기존 파일·참조는 유지한다.
+  다른 프로필·Photo·발행본의 FK 참조가 있으면 자산·파일을 유지한다.
   외부 파일 삭제 실패는 publicId만 기록하고 수동 정리 대상으로 남긴다.
 
 ## 생성·초대·참여
