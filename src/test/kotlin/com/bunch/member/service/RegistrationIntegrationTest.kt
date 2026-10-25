@@ -18,6 +18,7 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.mock.web.MockMultipartFile
 import java.time.Year
 import java.time.ZoneId
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -120,22 +121,24 @@ class RegistrationIntegrationTest @Autowired constructor(
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5))
         assertThrows<BusinessException> { registrations.complete(member.id, RegistrationRequest("bad!"), photo) }
         verifyNoInteractions(images)
-        `when`(images.upload(photo)).thenReturn(StoredImage("profile-id", "https://res.cloudinary.com/test/profile.jpg"))
+        val publicId = "profile/${UUID.randomUUID()}"
+        `when`(images.upload(photo)).thenReturn(StoredImage(publicId, "https://res.cloudinary.com/test/profile.jpg"))
         val result = registrations.complete(member.id, RegistrationRequest("사진성공"), photo)
         assertThat(result.imageUrl).endsWith("profile.jpg")
-        assertThat(members.findById(member.id).get().imagePublicId).isEqualTo("profile-id")
+        assertThat(members.findById(member.id).get().imagePublicId).isEqualTo(publicId)
     }
 
     @Test
     fun `failed database profile save removes new image and keeps signup incomplete`() {
         val member = member()
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(6, 7))
-        `when`(images.upload(photo)).thenReturn(StoredImage("rollback-profile", "https://res.cloudinary.com/test/rollback.jpg"))
+        val publicId = "rollback-profile/${UUID.randomUUID()}"
+        `when`(images.upload(photo)).thenReturn(StoredImage(publicId, "https://res.cloudinary.com/test/rollback.jpg"))
         jdbc.execute("CREATE FUNCTION registration_test_reject() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''profile write failed''; END'")
         try {
             jdbc.execute("CREATE TRIGGER registration_test_reject BEFORE UPDATE ON members FOR EACH ROW WHEN (NEW.id = ${member.id}) EXECUTE FUNCTION registration_test_reject()")
             assertThrows<RuntimeException> { registrations.complete(member.id, RegistrationRequest("저장실패"), photo) }
-            verify(images).delete("rollback-profile")
+            verify(images).delete(publicId)
             val saved = members.findById(member.id).get()
             assertThat(saved.signupStatus).isEqualTo(SignupStatus.IN_PROGRESS)
             assertThat(saved.nickname).isNull()

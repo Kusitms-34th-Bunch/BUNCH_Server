@@ -9,6 +9,8 @@ import com.bunch.bunch.service.BunchService
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenPair
 import com.bunch.global.security.TokenProvider
+import com.bunch.image.domain.ImageAsset
+import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.Member
@@ -46,16 +48,20 @@ class MemberHttpIntegrationTest @Autowired constructor(
     private val tokens: TokenProvider,
     private val sessions: RefreshTokenRepository,
     private val bunches: BunchService,
-    private val jdbc: JdbcTemplate
+    private val jdbc: JdbcTemplate,
+    private val imageAssets: ImageAssetRepository
 ) {
     private val memberIds = mutableListOf<Long>()
     private val sessionIds = mutableListOf<Pair<String, Long>>()
+    private val imageAssetIds = mutableListOf<Long>()
 
     @AfterEach
     fun cleanup() {
         sessionIds.forEach { (sid, id) -> sessions.delete(sid, id) }
         memberIds.forEach { jdbc.update("DELETE FROM bunches WHERE created_by = ?", it) }
         memberIds.forEach { members.deleteById(it) }
+        imageAssetIds.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
+        imageAssetIds.clear()
     }
 
     @ParameterizedTest
@@ -65,8 +71,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
             Member(
                 signupStatus = SignupStatus.COMPLETED,
                 nickname = "본인 ${UUID.randomUUID().toString().take(6)}",
-                imagePublicId = "private-image-id",
-                imageUrl = "https://example.com/profile.jpg",
+                profileImageAsset = imageAsset("private-image-id", "https://example.com/profile.jpg"),
                 birthYear = 2000,
                 gender = gender
             )
@@ -164,7 +169,8 @@ class MemberHttpIntegrationTest @Autowired constructor(
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.defaultBunch.id").value(second.id))
 
-        jdbc.update("UPDATE bunches SET image_url = ? WHERE id = ?", "https://example.com/bunch.jpg", first.id)
+        val firstImage = imageAsset("bunch-image-id", "https://example.com/bunch.jpg")
+        jdbc.update("UPDATE bunches SET profile_image_asset_id = ? WHERE id = ?", firstImage.id, first.id)
         bunches.updateLastUsed(member.id, first.id)
 
         profile(pair.accessToken)
@@ -254,6 +260,13 @@ class MemberHttpIntegrationTest @Autowired constructor(
     private fun account(member: Member = Member()): Member = members.saveAndFlush(member).also {
         memberIds += it.id
     }
+
+    private fun imageAsset(publicId: String, url: String): ImageAsset = imageAssets.saveAndFlush(
+        ImageAsset(
+            publicId = "$publicId/${UUID.randomUUID()}",
+            url = url
+        )
+    ).also { imageAssetIds += it.id }
 
     private fun bunch(member: Member): BunchResponse = bunches.create(
         member.id,

@@ -1,6 +1,7 @@
 package com.bunch.bunch.domain
 
 import jakarta.persistence.*
+import com.bunch.image.domain.ImageAsset
 import java.time.Instant
 import java.util.UUID
 
@@ -36,11 +37,9 @@ class Bunch(
     @Column(nullable = false, length = 16)
     val characterType: CharacterType,
 
-    @Column(length = 255)
-    var imagePublicId: String? = null,
-
-    @Column(columnDefinition = "text")
-    var imageUrl: String? = null,
+    @ManyToOne
+    @JoinColumn(name = "profile_image_asset_id")
+    var profileImageAsset: ImageAsset? = null,
 
     @Column(nullable = false)
     val createdBy: Long,
@@ -53,4 +52,10 @@ class Bunch(
 
     @Column(nullable = false)
     val createdAt: Instant
-)
+) {
+    val imagePublicId: String?
+        get() = profileImageAsset?.publicId
+
+    val imageUrl: String?
+        get() = profileImageAsset?.url
+}

@@ -1,6 +1,7 @@
 package com.bunch.member.domain
 
 import jakarta.persistence.*
+import com.bunch.image.domain.ImageAsset
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import java.time.Instant
@@ -33,15 +34,21 @@ class Member(
     @Column(length = 16)
     var gender: Gender? = null,
 
-    var imagePublicId: String? = null,
-
-    var imageUrl: String? = null,
+    @ManyToOne
+    @JoinColumn(name = "profile_image_asset_id")
+    var profileImageAsset: ImageAsset? = null,
 
     var completedAt: Instant? = null,
 
     @Column(length = 64)
     var registrationFingerprint: String? = null
 ) {
+    val imagePublicId: String?
+        get() = profileImageAsset?.publicId
+
+    val imageUrl: String?
+        get() = profileImageAsset?.url
+
     fun requireActive(): Member {
         if (accountStatus != AccountStatus.ACTIVE) throw BusinessException(ErrorCode.UNAUTHORIZED)
         return this
