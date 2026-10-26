@@ -214,6 +214,10 @@
 - 재획득한 편집권에는 새 토큰을 사용한다. REST 저장 시 현재 토큰·소유권·만료·내용 버전을 같은 트랜잭션에서 검증한다.
 - 필드·사진·코멘트의 버전과 별도로 번들 전체 revision을 관리한다.
   영속 내용이 실제로 바뀌면 revision을 올리고 heartbeat·편집 중 표시는 올리지 않는다.
+- 모든 서버 STOMP JSON은 `type / bunchId / bundleId / revision / requestId / data` 형식을 사용한다.
+  `type`은 서버 `BundleEventType` enum으로 정의한다. 내용 변경·편집권·활동·오류를 같은 방식으로 분기한다.
+  코멘트 저장의 `COMMENT`와 작성 중 활동의 `ACTIVITY`를 구분한다.
+  구체적인 타입과 payload는 [REST·STOMP API 계약](bundle-api.md)을 따른다.
 - 내용 변경 이벤트는 번들 ID·revision·요청 ID·변경 종류·서버에 저장된 실제 변경값을 담는다.
   DB 커밋 후 전송하고 클라이언트는 중복·이전 revision을 재적용하지 않는다.
 - 최초 진입·재연결·revision 누락 시 내용과 현재 편집권을 조회한다.
