@@ -157,10 +157,16 @@ STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
 인증 세션을 사용하며, WebSocket 연결의 URL에 토큰을 넣지 않는다.
 
 번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
-상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션 초안 저장은
-`X-Bundle-Screen`과 편집권 UUID를 함께 사용한다. 사진함 업로드·목록·중복 병합 HTTP API는
-이 저장소의 번들 API에 포함되지 않으며, 테스트 fixture의 Photo ID를 실제 사진함 API로
-간주하지 않는다.
+상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션의 `DRAFT` 저장은
+단독 사용자도 먼저 해당 target lease를 STOMP로 획득한 뒤, 현재 `leaseToken`과 최신
+`expectedVersion`을 REST 요청에 함께 보내야 한다. 편집권 target은 `TITLE`, `DATE`,
+`PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
+private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
+서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
+Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
+`bundle_edit_leases.screen_id`를 삭제한다.
+사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
+테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 
 ## 검증
 
@@ -179,8 +185,9 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
 - V4→V5의 실제 PostgreSQL 백필·불일치 롤백·재실행, JPA validate, Photo·공동 업로더
   제약·소속 검증·공유 파일 보호·커밋 후 삭제를 검증한다. 사진함 fixture와 실제 API 연동은 구분한다.
-- 번들 REST의 상태·버전·멱등성·편집권 충돌과 STOMP의 두 연결 인증·구독·heartbeat·실제
-  변경 이벤트·재연결 snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
+- 번들 REST의 상태·버전·멱등성·편집권 충돌과 STOMP의 두 연결 인증·구독·동일 member/session의
+  다른 connection 충돌·token 재발급·5초 heartbeat·15초 만료·실제 변경 이벤트·재연결
+  snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
   준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.

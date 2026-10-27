@@ -87,16 +87,16 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         owner.clear()
         guest.clear()
 
-        owner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE", "screenId" to "owner-screen"))
+        owner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
         val grant = owner.json { it.path("type").asText() == "LEASE_GRANTED" }
         assertThat(grant.path("revision").asLong()).isEqualTo(fixture.revision)
         val publicLease = guest.json { it.path("type").asText() == "LEASES" }
-        assertThat(publicLease.toString()).doesNotContain("token", "sessionId", "screenId")
+        assertThat(publicLease.toString()).doesNotContain("token", "sessionId", "connectionId")
         assertThat(publicLease.path("data").path("states").single().path("memberId").asLong()).isEqualTo(fixture.owner.memberId)
         assertThat(guest.frames.poll(200, TimeUnit.MILLISECONDS)?.body.orEmpty()).doesNotContain("token")
 
         val token = grant.path("data").path("token").asText()
-        guest.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE", "screenId" to "guest-screen"))
+        guest.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
         val rejection = guest.json { it.path("type").asText() == "COMMAND_REJECTED" }
         assertThat(rejection.path("data").path("code").asText()).isEqualTo("BUNDLE_004")
         assertThat(rejection.toString()).doesNotContain(token, "sessionId")
@@ -110,7 +110,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         assertThat(event.path("revision").asLong()).isEqualTo(fixture.revision + 1)
 
         owner.send(command(fixture, "lease/heartbeat"), mapOf(
-            "target" to "TITLE", "screenId" to "owner-screen", "token" to token
+            "target" to "TITLE", "token" to token
         ))
         val heartbeat = owner.json { it.path("type").asText() == "LEASE_HEARTBEAT" }
         assertThat(heartbeat.path("revision").asLong()).isEqualTo(saved.path("revision").asLong())
@@ -121,11 +121,11 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val later = putTitle(fixture, token, "연결이 끊긴 동안 저장", UUID.randomUUID().toString(), 1)
         val reconnected = connect(fixture.guest)
         subscribe(reconnected, fixture)
-        reconnected.send(command(fixture, "activity"), mapOf("type" to "VIEW", "screenId" to "guest-screen"))
+        reconnected.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
         val recoveredHeartbeat = reconnected.json { it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW" }
         assertThat(recoveredHeartbeat.path("revision").asLong()).isEqualTo(later.path("revision").asLong())
         owner.send(command(fixture, "lease/release"), mapOf(
-            "target" to "TITLE", "screenId" to "owner-screen", "token" to token
+            "target" to "TITLE", "token" to token
         ))
         val release = owner.json { it.path("type").asText() == "LEASE_RELEASED" }
         assertThat(release.path("data").path("target").asText()).isEqualTo("TITLE")
@@ -148,7 +148,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         subscribe(second, fixture)
         first.clear()
         second.clear()
-        first.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE", "screenId" to "first-screen"))
+        first.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE"))
         assertThat(first.json { it.path("type").asText() == "LEASE_GRANTED" }.path("data").path("target").asText()).isEqualTo("DATE")
         val publicState = second.json { it.path("type").asText() == "LEASES" }
         assertThat(publicState.toString()).doesNotContain("token")
@@ -159,9 +159,45 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
             check(System.nanoTime() < deadline) { "Disconnected connection lease was not released" }
             Thread.sleep(20)
         }
-        second.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE", "screenId" to "second-screen"))
+        second.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE"))
         val reacquired = second.json { it.path("type").asText() == "LEASE_GRANTED" }
         assertThat(reacquired.path("data").path("leaseVersion").asLong()).isGreaterThan(1)
+    }
+
+    @Test
+    fun `same session different connection cannot acquire heartbeat or release another socket lease`() {
+        val fixture = fixture()
+        val first = connect(fixture.owner)
+        val second = connect(fixture.owner)
+        subscribe(first, fixture)
+        subscribe(second, fixture)
+        val photoId = getSnapshot(fixture, fixture.owner).path("photos").first().path("id").asLong()
+
+        listOf("TITLE", "DATE", "PHOTO:$photoId").forEach { target ->
+            first.clear()
+            second.clear()
+            first.send(command(fixture, "lease/acquire"), mapOf("target" to target))
+            val grant = first.json { it.path("type").asText() == "LEASE_GRANTED" }
+            second.json { it.path("type").asText() == "LEASES" }
+            first.clear()
+            second.clear()
+            val token = grant.path("data").path("token").asText()
+
+            second.send(command(fixture, "lease/acquire"), mapOf("target" to target))
+            assertThat(second.json { it.path("type").asText() == "COMMAND_REJECTED" }
+                .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
+            listOf("heartbeat", "release").forEach { action ->
+                second.send(command(fixture, "lease/$action"), mapOf("target" to target, "token" to token))
+                assertThat(second.json { it.path("type").asText() == "COMMAND_REJECTED" }
+                    .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
+            }
+            first.send(command(fixture, "lease/heartbeat"), mapOf("target" to target, "token" to token))
+            assertThat(first.json { it.path("type").asText() == "LEASE_HEARTBEAT" }
+                .path("data").path("token").asText()).isEqualTo(token)
+            first.send(command(fixture, "lease/release"), mapOf("target" to target, "token" to token))
+            first.json { it.path("type").asText() == "LEASE_RELEASED" }
+            second.json { it.path("type").asText() == "LEASES" && it.path("data").path("states").isEmpty }
+        }
     }
 
     @Test
@@ -176,7 +212,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
 
         guest.sendRaw("SEND\ndestination:${topic(fixture)}\ncontent-type:application/json\n\n" +
             "{\"bunchId\":${fixture.bunchId},\"bundleId\":${fixture.bundleId},\"type\":\"FORGED\"}\u0000")
-        guest.send(command(fixture, "activity"), mapOf("type" to "VIEW", "screenId" to "guest"))
+        guest.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
         guest.json { it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW" }
         assertThat(owner.frames.toList().none { it.body.contains("FORGED") }).isTrue()
         owner.clear()
@@ -251,7 +287,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         return Credential(memberId, sid, pair.accessToken).also(credentials::add)
     }
 
-    private fun actor(value: Credential) = BundleActor(value.memberId, value.sid, "owner-screen")
+    private fun actor(value: Credential) = BundleActor(value.memberId, value.sid)
     private fun topic(fixture: Fixture) = "/topic/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}"
     private fun command(fixture: Fixture, suffix: String) =
         "/app/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/$suffix"
@@ -271,7 +307,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         client.subscribe(topic(fixture), "topic")
         client.subscribe("/user/queue/bundle-leases", "leases")
         client.subscribe("/user/queue/bundle-activity", "activity")
-        client.send(command(fixture, "activity"), mapOf("type" to "VIEW", "screenId" to "ready"))
+        client.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
         client.json { it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW" }
         client.clear()
     }
@@ -283,7 +319,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val response = http.send(HttpRequest.newBuilder(URI(
             "http://localhost:$port/api/v1/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/title"
         )).header("Authorization", "Bearer ${fixture.owner.access}")
-            .header("Content-Type", "application/json").header("X-Bundle-Screen", "owner-screen")
+            .header("Content-Type", "application/json")
             .header("X-Request-Id", requestId).PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
             HttpResponse.BodyHandlers.ofString())
         assertThat(response.statusCode()).withFailMessage(response.body()).isEqualTo(200)

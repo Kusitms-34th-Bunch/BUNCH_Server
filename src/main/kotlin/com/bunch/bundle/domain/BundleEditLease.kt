@@ -48,9 +48,6 @@ class BundleEditLease(
     @Column(name = "session_id", nullable = false, length = 36)
     var sessionId: String,
 
-    @Column(name = "screen_id", nullable = false, length = 120)
-    var screenId: String,
-
     @Column(name = "connection_id", nullable = false, length = 255)
     var connectionId: String,
 
@@ -69,20 +66,20 @@ class BundleEditLease(
     fun isActive(now: Instant): Boolean =
         releasedAt == null && lastHeartbeatAt.plusSeconds(LEASE_SECONDS).isAfter(now)
 
-    fun isOwnedBy(actorMemberId: Long, actorSessionId: String, actorScreenId: String): Boolean =
-        memberId == actorMemberId && sessionId == actorSessionId && screenId == actorScreenId
+    fun isOwnedBy(actorMemberId: Long, actorSessionId: String, actorConnectionId: String? = null): Boolean =
+        memberId == actorMemberId &&
+            sessionId == actorSessionId &&
+            (actorConnectionId == null || connectionId == actorConnectionId)
 
     fun acquire(
         memberId: Long,
         sessionId: String,
-        screenId: String,
         connectionId: String,
         token: UUID,
         now: Instant
     ) {
         this.memberId = memberId
         this.sessionId = sessionId
-        this.screenId = screenId
         this.connectionId = connectionId
         this.token = token
         this.version++

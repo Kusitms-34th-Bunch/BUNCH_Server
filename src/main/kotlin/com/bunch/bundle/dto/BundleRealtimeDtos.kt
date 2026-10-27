@@ -7,8 +7,7 @@ import java.util.UUID
 
 data class BundleActor(
     val memberId: Long,
-    val sessionId: String,
-    val screenId: String
+    val sessionId: String
 )
 
 data class BundleRealtimeMessage<T>(
@@ -91,12 +90,10 @@ data class BundleLeaseStateChangedEvent(
 
 data class BundleLeaseCommand(
     val target: String,
-    val screenId: String,
     val token: UUID? = null
 )
 
 data class BundleActivityCommand(
-    val screenId: String,
     val type: String = "COMMENT"
 )
 

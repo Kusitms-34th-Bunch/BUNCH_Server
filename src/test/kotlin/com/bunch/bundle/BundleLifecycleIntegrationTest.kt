@@ -31,6 +31,16 @@ import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
 import com.bunch.photo.service.PhotoUploaderRemovalResult
 import com.bunch.photo.service.PhotoService
+import com.bunch.bundle.controller.BundleSocketController
+import com.bunch.bundle.dto.BundleLeaseCommand
+import com.bunch.bundle.service.BundleRealtimeIdentity
+import com.bunch.bundle.service.BundleRealtimeSessionRegistry
+import com.bunch.global.security.JwtSessionDetails
+import org.springframework.messaging.simp.stomp.StompCommand
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -88,6 +98,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
 
     @MockitoBean
     private lateinit var storage: ProfileImageStorage
+
+    @Autowired
+    private lateinit var socketController: BundleSocketController
+
+    @Autowired
+    private lateinit var realtimeRegistry: BundleRealtimeSessionRegistry
 
     private val ownedBunchIds = mutableListOf<Long>()
     private val ownedAssetIds = mutableListOf<Long>()
@@ -554,7 +570,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val draft = createDraft(owner, bunchId, listOf(source.id))
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "add-guest")
 
-        val firstActor = actor(owner, "session-old", "screen-old")
+        val firstActor = actor(owner, "session-old")
         val first = bundleLeases.acquire(firstActor, bunchId, draft.id, "TITLE", "connection-old")
         jdbc.update(
             """UPDATE bundle_edit_leases
@@ -562,7 +578,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                WHERE bundle_id = ? AND target = 'TITLE'""",
             draft.id
         )
-        val secondActor = actor(guest, "session-new", "screen-new")
+        val secondActor = actor(guest, "session-new")
         val second = bundleLeases.acquire(secondActor, bunchId, draft.id, "TITLE", "connection-new")
         assertThat(second.token).isNotEqualTo(first.token)
         assertThat(second.leaseVersion).isEqualTo(first.leaseVersion + 1)
@@ -584,6 +600,172 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             "new-save"
         )
         assertThat(saved.title).isEqualTo("new title")
+    }
+
+    @Test
+    fun `active lease can rotate only on the same connection and stale operations cannot use the old token`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val draft = createDraft(owner, bunchId, listOf(source.id))
+        val actor = actor(owner, "shared-session")
+
+        val first = bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-a")
+        val rotated = bundleLeases.acquire(
+            actor,
+            bunchId,
+            draft.id,
+            "TITLE",
+            "connection-a"
+        )
+
+        assertThat(rotated.token).isNotEqualTo(first.token)
+        assertThat(rotated.leaseVersion).isEqualTo(first.leaseVersion + 1)
+        assertThat(rotated.revision).isEqualTo(first.revision)
+
+        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
+            bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-b")
+        }
+        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
+            bundleLeases.heartbeat(
+                actor = actor,
+                bunchId = bunchId,
+                bundleId = draft.id,
+                target = "TITLE",
+                token = first.token,
+                connectionId = "connection-a"
+            )
+        }
+        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
+            bundleLeases.release(
+                actor = actor,
+                bunchId = bunchId,
+                bundleId = draft.id,
+                target = "TITLE",
+                token = first.token,
+                connectionId = "connection-a"
+            )
+        }
+        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
+            bundleService.title(
+                actor,
+                bunchId,
+                draft.id,
+                BundleTextRequest("stale title", 0, BundleStatus.DRAFT, first.token),
+                "stale-token-save"
+            )
+        }
+
+        val saved = bundleService.title(
+            actor,
+            bunchId,
+            draft.id,
+            BundleTextRequest("current title", 0, BundleStatus.DRAFT, rotated.token),
+            "current-token-save"
+        )
+        assertThat(saved.title).isEqualTo("current title")
+    }
+
+    @Test
+    fun `concurrent acquire for one member session still permits only one connection`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val draft = createDraft(owner, bunchId, listOf(source.id))
+        val actor = actor(owner, "concurrent-session")
+
+        val results = concurrently(
+            listOf(
+                { bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-a") },
+                { bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-b") }
+            )
+        )
+
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertThat(results.count { errorCode(it.exceptionOrNull()) == ErrorCode.BUNDLE_LEASE_CONFLICT }).isEqualTo(1)
+    }
+
+    @Test
+    fun `late disconnect from an expired connection cannot release its replacement lease`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val draft = createDraft(owner, bunchId, listOf(source.id))
+        val first = bundleLeases.acquire(
+            actor(owner, "shared-session"), bunchId, draft.id, "TITLE", "connection-old"
+        )
+        jdbc.update(
+            """UPDATE bundle_edit_leases
+               SET last_heartbeat_at = CURRENT_TIMESTAMP - INTERVAL '16 seconds'
+               WHERE bundle_id = ? AND target = 'TITLE'""",
+            draft.id
+        )
+
+        val replacement = bundleLeases.acquire(
+            actor(owner, "shared-session"), bunchId, draft.id, "TITLE", "connection-new"
+        )
+        assertThat(replacement.leaseVersion).isEqualTo(first.leaseVersion + 1)
+
+        bundleLeases.clearConnection("connection-old")
+
+        val current = bundleLeases.publicStates(draft.id).single()
+        assertThat(current.memberId).isEqualTo(owner)
+        assertThat(current.leaseVersion).isEqualTo(replacement.leaseVersion)
+    }
+
+    @Test
+    fun `disconnect before a blocked acquire commits cannot leave an active lease`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, listOf(owner)).id))
+        val connectionId = UUID.randomUUID().toString()
+        val sessionId = UUID.randomUUID().toString()
+        realtimeRegistry.bind(connectionId, BundleRealtimeIdentity(owner, sessionId))
+        val headers = StompHeaderAccessor.create(StompCommand.SEND).apply {
+            this.sessionId = connectionId
+            user = UsernamePasswordAuthenticationToken(owner.toString(), null).apply {
+                details = JwtSessionDetails(sessionId)
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val pending = TransactionTemplate(transactionManager).execute {
+                bunchRepository.findLocked(bunchId)
+                val acquisition = executor.submit<Throwable?> {
+                    runCatching {
+                        socketController.acquire(headers, bunchId, draft.id, BundleLeaseCommand("TITLE"))
+                    }.exceptionOrNull()
+                }
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (true) {
+                    jdbc.execute("SELECT pg_stat_clear_snapshot()")
+                    val waiting = jdbc.queryForObject(
+                        """SELECT count(*) FROM pg_stat_activity
+                           WHERE datname = current_database() AND wait_event_type = 'Lock'
+                           AND lower(query) LIKE '%bunches%'""",
+                        Long::class.java
+                    ) ?: 0L
+                    if (waiting > 0) break
+                    check(!acquisition.isDone) { "Acquire completed before waiting: ${acquisition.get()}" }
+                    check(System.nanoTime() < deadline) { "Acquire did not wait for the bunch lock" }
+                    Thread.sleep(10)
+                }
+                realtimeRegistry.remove(connectionId)
+                bundleLeases.clearConnection(connectionId)
+                acquisition
+            }!!
+            val error = pending.get(5, TimeUnit.SECONDS)
+            assertThat(error).isInstanceOf(BusinessException::class.java)
+            assertThat((error as BusinessException).errorCode).isEqualTo(ErrorCode.UNAUTHORIZED)
+            assertThat(bundleLeases.publicStates(draft.id)).isEmpty()
+        } finally {
+            realtimeRegistry.remove(connectionId)
+            executor.shutdownNow()
+        }
     }
 
     @Test
@@ -1313,8 +1495,8 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         return saved
     }
 
-    private fun actor(memberId: Long, sessionId: String = "session-$memberId", screenId: String = "screen-$memberId") =
-        BundleActor(memberId, sessionId, screenId)
+    private fun actor(memberId: Long, sessionId: String = "session-$memberId") =
+        BundleActor(memberId, sessionId)
 
     private fun assertBundleError(code: ErrorCode, action: () -> Any?) {
         val thrown = org.assertj.core.api.Assertions.catchThrowable {

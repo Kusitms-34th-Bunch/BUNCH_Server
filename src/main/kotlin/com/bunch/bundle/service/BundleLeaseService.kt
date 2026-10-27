@@ -44,7 +44,11 @@ class BundleLeaseService(
 
         val now = Instant.now()
         val lease = leases.findLockedByBundleIdAndTarget(bundleId, normalizedTarget)
-        if (lease != null && lease.isActive(now) && !lease.isOwnedBy(actor)) {
+        if (
+            lease != null &&
+            lease.isActive(now) &&
+            !lease.isOwnedBy(actor.memberId, actor.sessionId, connectionId)
+        ) {
             fail(ErrorCode.BUNDLE_LEASE_CONFLICT, publicState(lease))
         }
 
@@ -54,7 +58,6 @@ class BundleLeaseService(
             target = normalizedTarget,
             memberId = actor.memberId,
             sessionId = actor.sessionId,
-            screenId = actor.screenId,
             connectionId = connectionId,
             token = token,
             version = 1,
@@ -64,7 +67,6 @@ class BundleLeaseService(
             stored.acquire(
                 memberId = actor.memberId,
                 sessionId = actor.sessionId,
-                screenId = actor.screenId,
                 connectionId = connectionId,
                 token = token,
                 now = now
@@ -81,16 +83,18 @@ class BundleLeaseService(
         bunchId: Long,
         bundleId: Long,
         target: String,
-        token: UUID
+        token: UUID,
+        connectionId: String
     ): LeaseGrant {
         validateActor(actor)
+        requireConnectionId(connectionId)
         val normalizedTarget = normalizeTarget(target)
         val bundle = access.lock(actor.memberId, bunchId, bundleId)
         access.requireParticipant(actor.memberId, bundle)
         requirePhotoBelongsToBundle(bundleId, normalizedTarget)
 
         val now = Instant.now()
-        val lease = requireOwnedLease(bundle, actor, normalizedTarget, token, now)
+        val lease = requireOwnedLease(bundle, actor, normalizedTarget, token, now, connectionId)
         lease.heartbeat(now)
         publishStates(bundle)
         return grant(bundle, lease)
@@ -102,16 +106,18 @@ class BundleLeaseService(
         bunchId: Long,
         bundleId: Long,
         target: String,
-        token: UUID
+        token: UUID,
+        connectionId: String
     ) {
         validateActor(actor)
+        requireConnectionId(connectionId)
         val normalizedTarget = normalizeTarget(target)
         val bundle = access.lock(actor.memberId, bunchId, bundleId)
         access.requireParticipant(actor.memberId, bundle)
         requirePhotoBelongsToBundle(bundleId, normalizedTarget)
 
         val now = Instant.now()
-        val lease = requireOwnedLease(bundle, actor, normalizedTarget, token, now)
+        val lease = requireOwnedLease(bundle, actor, normalizedTarget, token, now, connectionId)
         lease.release(now)
         publishStates(bundle)
     }
@@ -218,13 +224,14 @@ class BundleLeaseService(
         actor: BundleActor,
         target: String,
         token: UUID,
-        now: Instant
+        now: Instant,
+        connectionId: String? = null
     ): BundleEditLease {
         val lease = leases.findLockedByBundleIdAndTarget(bundle.id, target)
         if (
             lease == null ||
             !lease.isActive(now) ||
-            !lease.isOwnedBy(actor) ||
+            !lease.isOwnedBy(actor.memberId, actor.sessionId, connectionId) ||
             lease.token != token
         ) {
             fail(ErrorCode.BUNDLE_LEASE_CONFLICT, lease?.let { publicState(it) })
@@ -286,9 +293,7 @@ class BundleLeaseService(
         if (
             actor.memberId <= 0L ||
             actor.sessionId.isBlank() ||
-            actor.sessionId.length > 36 ||
-            actor.screenId.isBlank() ||
-            actor.screenId.length > 100
+            actor.sessionId.length > 36
         ) {
             fail(ErrorCode.INVALID_INPUT)
         }
@@ -308,7 +313,7 @@ class BundleLeaseService(
     private fun fail(code: ErrorCode, detail: Any? = null): Nothing = throw BusinessException(code, detail)
 
     private fun BundleEditLease.isOwnedBy(actor: BundleActor): Boolean =
-        isOwnedBy(actor.memberId, actor.sessionId, actor.screenId)
+        isOwnedBy(actor.memberId, actor.sessionId)
 
     private companion object {
         const val TITLE = "TITLE"

@@ -41,7 +41,7 @@ class BundleRealtimeMessageTest {
         val states = BundleLeaseStateChangedEvent(1, 2, 7, listOf(LeaseState("TITLE", 5, expiresAt, 4)))
         val stateJson = envelope(states.toMessage(), BundleEventType.LEASES)
         assertThat(stateJson.path("data").path("states").single().path("memberId").asLong()).isEqualTo(5)
-        assertThat(stateJson.toString()).doesNotContain("token", "sessionId", "screenId")
+        assertThat(stateJson.toString()).doesNotContain("token", "sessionId", "connectionId")
 
         val activity = BundleActivityEvent(1, 2, 5, BundleActivityType.COMMENT, 7)
         val activityJson = envelope(activity.toMessage(), BundleEventType.ACTIVITY)

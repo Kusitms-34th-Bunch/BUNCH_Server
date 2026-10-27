@@ -5,6 +5,7 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.BundleActor
+import com.bunch.bundle.dto.BundleDateRequest
 import com.bunch.bundle.dto.BundleParticipantRequest
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.PublishBundleRequest
@@ -183,13 +184,12 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `draft title requires the lease actor session screen and token`() {
+    fun `draft title requires the lease actor session and token`() {
         val fixture = fixture(photoCount = 1)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
-        val screen = "bundle-editor"
         val grant = leaseService.acquire(
-            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId, screen),
+            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
             bunchId = fixture.bunchId,
             bundleId = bundleId,
             target = "TITLE",
@@ -201,7 +201,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             wrongSession,
             fixture.bunchId,
             bundleId,
-            screen = screen,
             value = "wrong sid",
             expectedVersion = 0,
             leaseToken = grant.token
@@ -211,17 +210,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = "another-screen",
-            value = "wrong screen",
-            expectedVersion = 0,
-            leaseToken = grant.token
-        ).expectError(ErrorCode.BUNDLE_LEASE_CONFLICT)
-
-        titleRequest(
-            fixture.owner,
-            fixture.bunchId,
-            bundleId,
-            screen = screen,
             value = "wrong token",
             expectedVersion = 0,
             leaseToken = UUID.randomUUID()
@@ -231,7 +219,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = screen,
             value = "첫 번째 제목",
             expectedVersion = 0,
             leaseToken = grant.token
@@ -244,7 +231,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = screen,
             value = "오래된 제목",
             expectedVersion = 0,
             leaseToken = grant.token
@@ -258,11 +244,71 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = screen,
             value = "잘못된\n제목",
             expectedVersion = 1,
             leaseToken = grant.token
         ).expectError(ErrorCode.INVALID_INPUT)
+    }
+
+    @Test
+    fun `draft title date and photo caption save without the REST screen header`() {
+        val fixture = fixture(photoCount = 1)
+        val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
+        val bundleId = bundle.path("id").asLong()
+        val titleGrant = leaseService.acquire(
+            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
+            fixture.bunchId,
+            bundleId,
+            "TITLE",
+            "stomp-title-connection"
+        )
+        val dateGrant = leaseService.acquire(
+            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
+            fixture.bunchId,
+            bundleId,
+            "DATE",
+            "stomp-date-connection"
+        )
+        val photoId = detail(fixture.owner, fixture.bunchId, bundleId)
+            .path("photos").single().path("id").asLong()
+        val captionGrant = leaseService.acquire(
+            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
+            fixture.bunchId,
+            bundleId,
+            "PHOTO:$photoId",
+            "stomp-caption-connection"
+        )
+
+        titleRequest(
+            fixture.owner,
+            fixture.bunchId,
+            bundleId,
+            value = "헤더 없는 제목",
+            expectedVersion = 0,
+            leaseToken = titleGrant.token
+        ).andExpect(status().isOk)
+        dateRequest(
+            fixture.owner,
+            fixture.bunchId,
+            bundleId,
+            value = LocalDate.of(2024, 1, 2),
+            expectedVersion = 0,
+            leaseToken = dateGrant.token
+        ).andExpect(status().isOk)
+        captionRequest(
+            fixture.owner,
+            fixture.bunchId,
+            bundleId,
+            photoId,
+            value = "헤더 없는 캡션",
+            expectedVersion = 0,
+            leaseToken = captionGrant.token
+        ).andExpect(status().isOk)
+
+        val saved = detail(fixture.owner, fixture.bunchId, bundleId)
+        assertThat(saved.path("title").asText()).isEqualTo("헤더 없는 제목")
+        assertThat(saved.path("date").asText()).isEqualTo("2024-01-02")
+        assertThat(saved.path("photos").single().path("caption").asText()).isEqualTo("헤더 없는 캡션")
     }
 
     @Test
@@ -304,9 +350,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .path("version")
             .asLong()
         assertThat(participantCommentVersion).isGreaterThan(0)
-        val screen = "publish-editor"
         val grant = leaseService.acquire(
-            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId, screen),
+            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
             bunchId = fixture.bunchId,
             bundleId = bundleId,
             target = "TITLE",
@@ -317,7 +362,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = screen,
             value = "초안 제목",
             expectedVersion = 0,
             leaseToken = grant.token
@@ -373,7 +417,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = "rest",
             value = "늦은 초안 저장",
             expectedVersion = published.path("titleVersion").asLong(),
             leaseToken = grant.token,
@@ -384,7 +427,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            screen = null,
             value = "발행본 제목 수정",
             expectedVersion = published.path("titleVersion").asLong(),
             leaseToken = null,
@@ -397,7 +439,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             fixture.participant,
             fixture.bunchId,
             bundleId,
-            screen = null,
             value = "참여자 제목 수정",
             expectedVersion = published.path("titleVersion").asLong(),
             leaseToken = null,
@@ -515,7 +556,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         auth: Auth,
         bunchId: Long,
         bundleId: Long,
-        screen: String?,
         value: String,
         expectedVersion: Long,
         leaseToken: UUID?,
@@ -525,7 +565,39 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .header(HttpHeaders.AUTHORIZATION, bearer(auth))
             .contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode, leaseToken)))
-        if (screen != null) request.header("X-Bundle-Screen", screen)
+        return mvc.perform(request)
+    }
+
+    private fun dateRequest(
+        auth: Auth,
+        bunchId: Long,
+        bundleId: Long,
+        value: LocalDate?,
+        expectedVersion: Long,
+        leaseToken: UUID?,
+        mode: BundleStatus = BundleStatus.DRAFT
+    ): ResultActions {
+        val request = put("${bundlePath(bunchId, bundleId)}/date")
+            .header(HttpHeaders.AUTHORIZATION, bearer(auth))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(BundleDateRequest(value, expectedVersion, mode, leaseToken)))
+        return mvc.perform(request)
+    }
+
+    private fun captionRequest(
+        auth: Auth,
+        bunchId: Long,
+        bundleId: Long,
+        photoId: Long,
+        value: String,
+        expectedVersion: Long,
+        leaseToken: UUID?,
+        mode: BundleStatus = BundleStatus.DRAFT
+    ): ResultActions {
+        val request = put("${bundlePath(bunchId, bundleId)}/photos/$photoId/caption")
+            .header(HttpHeaders.AUTHORIZATION, bearer(auth))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode, leaseToken)))
         return mvc.perform(request)
     }
 

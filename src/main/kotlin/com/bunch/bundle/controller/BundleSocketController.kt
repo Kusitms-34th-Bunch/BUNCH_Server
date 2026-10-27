@@ -9,10 +9,12 @@ import com.bunch.bundle.dto.BundleLeaseReleasedData
 import com.bunch.bundle.dto.BundleActivityCommand
 import com.bunch.bundle.dto.BundleActivityEvent
 import com.bunch.bundle.dto.BundleActor
+import com.bunch.bundle.dto.BundleLeaseData
 import com.bunch.bundle.dto.BundleLeaseCommand
 import com.bunch.bundle.dto.BundleLeaseReleaseAck
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.service.BundleLeaseService
+import com.bunch.bundle.service.BundleRealtimeSessionRegistry
 import com.bunch.bundle.service.BundleRealtimeDestinations
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -31,7 +33,8 @@ import java.util.Locale
 class BundleSocketController(
     private val access: BundleAccessService,
     private val leases: BundleLeaseService,
-    private val events: ApplicationEventPublisher
+    private val events: ApplicationEventPublisher,
+    private val registry: BundleRealtimeSessionRegistry
 ) {
     @MessageMapping("/bunches/{bunchId}/bundles/{bundleId}/lease/acquire")
     @SendToUser(destinations = ["/queue/bundle-leases"], broadcast = false)
@@ -40,13 +43,23 @@ class BundleSocketController(
         @DestinationVariable("bunchId") bunchId: Long,
         @DestinationVariable("bundleId") bundleId: Long,
         command: BundleLeaseCommand
-    ) = leases.acquire(
-        actor = actor(headers, command.screenId),
-        bunchId = bunchId,
-        bundleId = bundleId,
-        target = command.target,
-        connectionId = connectionId(headers)
-    ).toMessage(BundleEventType.LEASE_GRANTED)
+    ): BundleRealtimeMessage<BundleLeaseData> {
+        val connectionId = connectionId(headers)
+        val grant = leases.acquire(
+            actor = actor(headers),
+            bunchId = bunchId,
+            bundleId = bundleId,
+            target = command.target,
+            connectionId = connectionId
+        )
+        // Acquire has committed before this check. A disconnect that ran before that
+        // commit could not see the lease row; a later disconnect can now find it.
+        if (registry.identity(connectionId) == null) {
+            leases.clearConnection(connectionId)
+            fail(ErrorCode.UNAUTHORIZED)
+        }
+        return grant.toMessage(BundleEventType.LEASE_GRANTED)
+    }
 
     @MessageMapping("/bunches/{bunchId}/bundles/{bundleId}/lease/heartbeat")
     @SendToUser(destinations = ["/queue/bundle-leases"], broadcast = false)
@@ -56,11 +69,12 @@ class BundleSocketController(
         @DestinationVariable("bundleId") bundleId: Long,
         command: BundleLeaseCommand
     ) = leases.heartbeat(
-        actor = actor(headers, command.screenId),
+        actor = actor(headers),
         bunchId = bunchId,
         bundleId = bundleId,
         target = command.target,
-        token = command.token ?: fail(ErrorCode.BUNDLE_LEASE_CONFLICT)
+        token = command.token ?: fail(ErrorCode.BUNDLE_LEASE_CONFLICT),
+        connectionId = connectionId(headers)
     ).toMessage(BundleEventType.LEASE_HEARTBEAT)
 
     @MessageMapping("/bunches/{bunchId}/bundles/{bundleId}/lease/release")
@@ -71,13 +85,14 @@ class BundleSocketController(
         @DestinationVariable("bundleId") bundleId: Long,
         command: BundleLeaseCommand
     ): BundleRealtimeMessage<BundleLeaseReleasedData> {
-        val actor = actor(headers, command.screenId)
+        val actor = actor(headers)
         leases.release(
             actor = actor,
             bunchId = bunchId,
             bundleId = bundleId,
             target = command.target,
-            token = command.token ?: fail(ErrorCode.BUNDLE_LEASE_CONFLICT)
+            token = command.token ?: fail(ErrorCode.BUNDLE_LEASE_CONFLICT),
+            connectionId = connectionId(headers)
         )
         val bundle = access.read(actor.memberId, bunchId, bundleId)
         return BundleLeaseReleaseAck(bunchId, bundleId, command.target, bundle.revision).toMessage()
@@ -91,7 +106,7 @@ class BundleSocketController(
         @DestinationVariable("bundleId") bundleId: Long,
         command: BundleActivityCommand
     ): BundleRealtimeMessage<BundleActivityData> {
-        val actor = actor(headers, command.screenId)
+        val actor = actor(headers)
         val bundle = access.read(actor.memberId, bunchId, bundleId)
         val type = try {
             BundleActivityType.valueOf(command.type.trim().uppercase(Locale.ROOT))
@@ -127,17 +142,14 @@ class BundleSocketController(
         )
     }
 
-    private fun actor(headers: StompHeaderAccessor, screenId: String): BundleActor {
+    private fun actor(headers: StompHeaderAccessor): BundleActor {
         val authentication = headers.user as? Authentication ?: fail(ErrorCode.UNAUTHORIZED)
         val memberId = authentication.principal.toString().toLongOrNull()
             ?.takeIf { it > 0 }
             ?: fail(ErrorCode.UNAUTHORIZED)
         val sessionId = (authentication.details as? JwtSessionDetails)?.sessionId
             ?: fail(ErrorCode.UNAUTHORIZED)
-        val normalizedScreenId = screenId.trim()
-            .takeIf { it.isNotEmpty() && it.length <= 100 }
-            ?: fail(ErrorCode.INVALID_INPUT)
-        return BundleActor(memberId, sessionId, normalizedScreenId)
+        return BundleActor(memberId, sessionId)
     }
 
     private fun connectionId(headers: StompHeaderAccessor): String =

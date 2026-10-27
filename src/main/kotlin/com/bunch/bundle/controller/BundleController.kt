@@ -44,10 +44,9 @@ class BundleController(private val bundles: BundleService) {
         authentication: Authentication,
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
-        @RequestHeader("X-Bundle-Screen", defaultValue = "rest") screen: String,
         @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
         @RequestBody request: BundleTextRequest
-    ) = ApiResponse.ok(bundles.title(actor(authentication, screen), bunchId, id, request, correlation(requestId)))
+    ) = ApiResponse.ok(bundles.title(actor(authentication), bunchId, id, request, correlation(requestId)))
 
     @PutMapping("/{id}/visibility")
     fun visibility(
@@ -63,10 +62,9 @@ class BundleController(private val bundles: BundleService) {
         authentication: Authentication,
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
-        @RequestHeader("X-Bundle-Screen", defaultValue = "rest") screen: String,
         @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
         @RequestBody request: BundleDateRequest
-    ) = ApiResponse.ok(bundles.date(actor(authentication, screen), bunchId, id, request, correlation(requestId)))
+    ) = ApiResponse.ok(bundles.date(actor(authentication), bunchId, id, request, correlation(requestId)))
 
     @PutMapping("/{id}/comments/me")
     fun comment(
@@ -110,10 +108,9 @@ class BundleController(private val bundles: BundleService) {
         authentication: Authentication,
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
-        @RequestHeader("X-Bundle-Screen", defaultValue = "rest") screen: String,
         @RequestHeader("Idempotency-Key") key: UUID,
         @RequestBody request: BundlePhotoChangesRequest
-    ) = ApiResponse.ok(bundles.changePhotos(actor(authentication, screen), bunchId, id, key, request))
+    ) = ApiResponse.ok(bundles.changePhotos(actor(authentication), bunchId, id, key, request))
 
     @PostMapping("/{id}/photos/{photoId}/move")
     fun move(
@@ -121,11 +118,10 @@ class BundleController(private val bundles: BundleService) {
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
         @PathVariable photoId: Long,
-        @RequestHeader("X-Bundle-Screen", defaultValue = "rest") screen: String,
         @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
         @RequestBody request: MoveBundlePhotoRequest
     ) = ApiResponse.ok(
-        bundles.move(actor(authentication, screen), bunchId, id, photoId, request, correlation(requestId))
+        bundles.move(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
     )
 
     @PutMapping("/{id}/photos/{photoId}/caption")
@@ -134,11 +130,10 @@ class BundleController(private val bundles: BundleService) {
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
         @PathVariable photoId: Long,
-        @RequestHeader("X-Bundle-Screen", defaultValue = "rest") screen: String,
         @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
         @RequestBody request: BundleTextRequest
     ) = ApiResponse.ok(
-        bundles.caption(actor(authentication, screen), bunchId, id, photoId, request, correlation(requestId))
+        bundles.caption(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
     )
 
     @PostMapping("/{id}/publish")
@@ -163,11 +158,10 @@ class BundleController(private val bundles: BundleService) {
 
     private fun userId(authentication: Authentication) = authentication.principal.toString().toLong()
 
-    private fun actor(authentication: Authentication, screen: String = "rest"): BundleActor {
-        if (screen.isBlank() || screen.length > 100) throw BusinessException(ErrorCode.INVALID_INPUT)
+    private fun actor(authentication: Authentication): BundleActor {
         val session = (authentication.details as? JwtSessionDetails)?.sessionId
             ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
-        return BundleActor(userId(authentication), session, screen)
+        return BundleActor(userId(authentication), session)
     }
 
     private fun correlation(value: UUID?) = (value ?: UUID.randomUUID()).toString()

@@ -31,7 +31,7 @@ ISO-8601 UTC offset을 포함한 `Instant` 문자열을 사용한다. enum 값�
 ```
 
 실패 응답은 HTTP 상태 코드와 함께 다음 형태다. `detail`은 오류에 따라 생략 가능한
-현재 서버 상태이며, 인증 토큰·세션·화면 식별자는 포함하지 않는다.
+현재 서버 상태이며, 인증 토큰·세션·서버 connectionId는 포함하지 않는다.
 
 ```json
 {
@@ -76,14 +76,17 @@ STOMP `CONNECT` frame의 native `Authorization` header에만 같은 Bearer acces
 | `Authorization` | `Bearer <access-jwt>` | 모든 REST 요청 | 활성 access 세션과 번치 소속을 확인한다. |
 | `Content-Type` | `application/json` | JSON body가 있는 요청 | DTO로 역직렬화한다. |
 | `X-Request-Id` | UUID | `title`, `visibility`, `date`, `comment`, 참여자 변경, `leave`, 사진 이동·캡션, 삭제 | 생략하면 서버가 UUID를 생성한다. 변경 이벤트의 `requestId`로 사용한다. |
-| `X-Bundle-Screen` | 비어 있지 않은 문자열, 최대 100자 | 제목·날짜·사진 변경·사진 이동·캡션 | 생략하면 `rest`다. 초안 편집권을 사용할 때 획득 시 사용한 값과 완전히 같아야 한다. |
 | `Idempotency-Key` | UUID | 생성·사진 구성 변경·발행 | 필수다. 같은 작업의 재시도와 중복 발행을 구분한다. |
 
-`X-Bundle-Screen`의 기본값 `rest`는 REST 호출을 식별하는 값일 뿐이다. STOMP에서
-`screenId: "bundle-editor"`로 획득한 초안 편집권을 REST로 사용할 때는 REST 요청에도
-`X-Bundle-Screen: bundle-editor`를 보내야 한다. 헤더를 생략하면 `rest`로 판단되어
-편집권 충돌이 발생한다. 편집권 확인에는 회원, 활성 JWT session, screen 값과 UUID
-token이 모두 사용된다.
+모든 요청의 `BundleActor`는 인증된 `memberId`와 `sessionId`로만 구성한다. STOMP lease에
+보관하는 `connectionId`는 서버가 연결에서 얻는 값이며 client body·header로 받지 않는다.
+REST에는 socket ID가 없으므로 초안 제목·날짜·캡션 저장에서 서버가 검증하는 값은
+경로의 target, 현재 회원·session, 현재 `leaseToken`, lease 만료 여부와
+`expectedVersion`이다. private token과 connectionId는 REST 응답·공개 상태에 포함하지 않는다.
+
+Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존한다. 이번 변경의 V8 마이그레이션은
+V7 파일을 수정하지 않고 별도 migration으로 `bundle_edit_leases.screen_id`를 삭제한다. 새
+client 식별자를 추가하지 않는다.
 
 모든 상태 변경 이벤트에는 상관관계 UUID가 있다. `X-Request-Id`를 받는 경로는 헤더가
 없을 때 서버가 생성한 UUID를 사용하고, `Idempotency-Key`가 필수인 생성·사진 변경·발행
@@ -142,16 +145,16 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 | `GET` | `/api/v1/bunches/{bunchId}/bundles?status={status}&page={page}&size={size}` | 없음 | 없음 | `BundlePage` |
 | `GET` | `/api/v1/bunches/{bunchId}/bundles/summary` | 없음 | 없음 | `BundleSummary` |
 | `GET` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}` | 없음 | 없음 | `BundleSnapshot` |
-| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/title` | `BundleTextRequest` | `X-Bundle-Screen`, 선택 `X-Request-Id` | `BundleSnapshot` |
+| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/title` | `BundleTextRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/visibility` | `BundleVisibilityRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
-| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/date` | `BundleDateRequest` | `X-Bundle-Screen`, 선택 `X-Request-Id` | `BundleSnapshot` |
+| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/date` | `BundleDateRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/comments/me` | `BundleTextRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/participants` | `BundleParticipantRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `DELETE` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/participants/{memberId}` | 없음 | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/leave` | 없음 | 선택 `X-Request-Id` | `BundleSnapshot` 또는 `null` |
-| `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/changes` | `BundlePhotoChangesRequest` | `X-Bundle-Screen`, `Idempotency-Key` | `BundleSnapshot` |
-| `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/move` | `MoveBundlePhotoRequest` | `X-Bundle-Screen`, 선택 `X-Request-Id` | `BundleSnapshot` |
-| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/caption` | `BundleTextRequest` | `X-Bundle-Screen`, 선택 `X-Request-Id` | `BundleSnapshot` |
+| `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/changes` | `BundlePhotoChangesRequest` | `Idempotency-Key` | `BundleSnapshot` |
+| `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/move` | `MoveBundlePhotoRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
+| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/caption` | `BundleTextRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/publish` | `PublishBundleRequest` | `Idempotency-Key` | `BundleSnapshot` |
 | `DELETE` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}` | 없음 | 선택 `X-Request-Id` | `null` |
 
@@ -198,10 +201,11 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 - 캡션은 NFC 정규화하며 최대 200 grapheme이다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
 
-제목·날짜·캡션 초안 저장은 `X-Bundle-Screen`과 `leaseToken`이 모두 일치해야 한다.
 제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`, 캡션 lease target은
-`PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서도 같은
-회원·session·screen·token을 검사한다.
+`PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
+받지 않고 현재 회원·session·target·`leaseToken`·미만료 상태·`expectedVersion`을 같은
+트랜잭션에서 검사한다. REST 저장이 성공한 뒤 서버가 DB commit 후 해당 내용 이벤트를
+STOMP로 한 번 발행한다. 클라이언트는 같은 내용을 STOMP 명령으로 다시 보내지 않는다.
 
 #### `BundleVisibilityRequest`
 
@@ -292,13 +296,15 @@ ID는 양수이고 중복될 수 없다. 추가 Photo는 같은 번치의 `READY
 변경된 사진 목록과 date chips를 보낸다.
 
 초안의 사진 변경·이동은 참여자가 할 수 있다. 다른 회원이 해당 Photo lease를 보유한
-동안에는 그 lease를 빼앗아 변경할 수 없다. `X-Bundle-Screen`은 생략하면 `rest`다.
+동안에는 그 lease를 빼앗아 변경할 수 없다. 사진 구성·순서 변경도 REST 저장으로 처리하고,
+DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 
 #### 캡션
 
 캡션 경로는 `BundleTextRequest`를 사용한다. 초안은 해당 `BundlePhoto`의
-`PHOTO:{bundlePhotoId}` 편집권과 `X-Bundle-Screen`이 필요하며, 발행본은 생성자 또는
-번치 관리자만 수정한다. 응답은 전체 `BundleSnapshot`이다.
+`PHOTO:{bundlePhotoId}` 편집권이 필요하며, REST에서 현재 회원·session·target·
+`leaseToken`·만료·`expectedVersion`을 검증한다. 발행본은 생성자 또는 번치 관리자만
+수정한다. 응답은 전체 `BundleSnapshot`이다.
 
 ### 발행
 
@@ -481,7 +487,7 @@ true다.
 | 409 | `BUNDLE_001` | 번치 인원 부족·초안 10개 초과 | null |
 | 409 | `BUNDLE_002` | `mode`와 실제 상태 불일치 또는 발행 retry fingerprint 불일치 | 보통 `{"status":"PUBLISHED"}` 또는 null |
 | 409 | `BUNDLE_003` | expected version/revision 불일치 | 현재 값과 `version` |
-| 409 | `BUNDLE_004` | 편집권 없음·만료·소유자 불일치·token/screen/session 불일치 | 공개 `LeaseState` 또는 null |
+| 409 | `BUNDLE_004` | 편집권 없음·만료·소유자 불일치·member/session/connection/token 불일치 | 공개 `LeaseState` 또는 null |
 | 409 | `BUNDLE_005` | 발행 조건 미충족 | `{"reasons":[...]}` |
 | 409 | `BUNDLE_006` | 사진 최종 수·현재 anchor·사진 구성 충돌 | 현재 bundle 내용 또는 `{photos,dateChips}` |
 
@@ -504,7 +510,7 @@ true다.
 }
 ```
 
-편집권 오류의 공개 상태는 token·session·screen을 노출하지 않는다.
+편집권 오류의 공개 상태는 token·session·connectionId를 노출하지 않는다.
 
 ```json
 {
@@ -538,7 +544,8 @@ endpoint는 `/ws`이며 `CONNECT` native header의 Bearer access JWT로 인증�
 | `/user/queue/bundle-activity` | 요청 연결의 활동/조회 heartbeat 응답 |
 
 private 응답은 같은 회원의 다른 연결로도 전달하지 않는다. 공개 편집권 상태에는
-`memberId`, `target`, `leaseVersion`, `expiresAt`만 포함하고 token·session·screen은 제외한다.
+`memberId`, `target`, `leaseVersion`, `expiresAt`만 포함하고 token·session·connectionId는
+제외한다.
 `DELETED`는 번들이 삭제된 뒤에도 해당 번치의 현재 멤버에게 전달한다.
 
 client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 envelope로 감싸지 않는다.
@@ -551,7 +558,27 @@ client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 enve
 ```
 
 편집권 명령과 `COMMENT` 활동은 초안 참여자만 사용할 수 있다. `VIEW` 활동은 초안·
-발행본의 현재 번치 멤버가 사용할 수 있다. `screenId`는 비어 있지 않은 최대 100자다.
+발행본의 현재 번치 멤버가 사용할 수 있다.
+
+### 기본 연결·구독·REST 저장 흐름
+
+공동 편집 화면의 기본 흐름은 다음 순서를 따른다.
+
+1. `/ws`에 `CONNECT`하고 native `Authorization` header로 access JWT를 보낸다. 서버는
+   인증된 `memberId`·`sessionId`와 서버 connectionId를 연결 문맥에 둔다.
+2. 번들 topic과 필요한 private queue를 `SUBSCRIBE`한 뒤, REST `GET`으로 현재
+   `BundleSnapshot`과 revision·공개 lease 상태를 조회한다.
+3. 내용 변경은 REST endpoint로만 보낸다. 모든 요청에는 최신 `expectedVersion`을 넣는다.
+   `DRAFT` 제목·날짜·캡션 저장은 단독 사용자라도 저장 전에 해당 target lease를
+   acquire하고, 그 응답의 현재 `leaseToken`도 넣는다. visibility·comment처럼 lease가
+   필요하지 않은 저장은 해당 DTO의 버전·상태 검증만 적용한다.
+4. 서버가 권한·member/session·target과 필요한 lease·버전을 같은 저장 경계에서 확인하고 DB
+   commit을 완료한 뒤, 저장된 실제 변경값을 담은 STOMP 내용 이벤트를 한 번 발행한다.
+   클라이언트는 같은 내용을 STOMP `SEND`로 보내거나 서버 이벤트를 다시 반사하지 않는다.
+
+연결·구독과 REST 저장은 snapshot·이벤트 수신과 내용 변경을 위한 기본 절차다. `DRAFT`
+제목·날짜·캡션 저장에는 단독 사용자도 `TITLE`·`DATE`·`PHOTO:{bundlePhotoId}` 중 해당
+target의 lease 획득·heartbeat·release가 필요하며, 재연결 복구도 아래 절차를 따른다.
 
 ### 서버 공통 메시지
 
@@ -616,19 +643,33 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 `type: "ACTIVITY"`와 `data.activity: "COMMENT"`다. `data.activity`는 별도의
 `BundleActivityType` enum으로 정의하며 `COMMENT`, `VIEW`만 사용한다.
 
-### 편집권 획득·heartbeat·해제
+### DRAFT 저장 편집권 절차: 획득·heartbeat·해제
 
-획득 명령 body:
+이 lease 절차는 `DRAFT` 제목·날짜·캡션 REST 저장에 필수인 전 단계다. 단독 사용자도
+예외 없이 저장할 target을 먼저 acquire하고, 받은 현재 `leaseToken`을 저장 요청에 넣어야
+한다. 편집 중에는 5초마다 heartbeat를 보내고, 저장을 마치거나 화면을 이탈할 때 release한다.
+`visibility`·`comment` 저장은 lease 없이 DTO의 버전·상태만 검증한다.
+
+획득 명령 body에는 target만 포함한다.
 
 ```json
 {
-  "target": "TITLE",
-  "screenId": "bundle-editor"
+  "target": "TITLE"
 }
 ```
 
-`target`은 `TITLE`, `DATE`, `PHOTO:{bundlePhotoId}`다. 획득할 때마다 새 token을 발급한다.
-응답은 `LEASE_GRANTED`이며 요청한 연결에서만 다음 값을 받는다.
+`target`은 `TITLE`, `DATE`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
+`connectionId`와 인증 principal의 `memberId`·`sessionId`를 사용한다. lease가 없거나
+만료·release된 경우 획득할 수 있다. 활성 lease를 재획득할 수 있는 경우는 같은
+`memberId`·`sessionId`·`connectionId`일 때뿐이며, 이때도 매번 새 token과 새
+만료 시각을 발급하고 이전 token을 무효화한다. 같은 member/session의 다른
+connectionId는 `BUNDLE_004` conflict다. 유효 lease의 `release`, 연결 disconnect 또는
+15초 만료가 확인된 뒤에만 다른 연결이 획득할 수 있다. acquire가 DB 잠금에서 기다리는
+동안 연결이 종료되면, 획득 커밋 직후 서버 연결 상태를 다시 확인해 해당 연결의 lease를
+정리하고 grant를 거부한다.
+
+응답은 `LEASE_GRANTED`이며 요청한 연결에서만 다음 값을 받는다. `token`은 이 private
+queue 밖으로 보내지 않는다.
 
 ```json
 {
@@ -663,29 +704,32 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 }
 ```
 
-heartbeat와 release에는 획득한 token을 추가한다.
+heartbeat와 release에는 target과 획득한 token을 추가한다. 서버는 요청 연결의
+`memberId`·`sessionId`·`connectionId`, target, 현재 token, 미만료 상태를 모두 검증한다.
+REST 저장은 socket ID를 보내지 않으므로 같은 lease 검증에서 connectionId를 요구하지
+않고 member/session·target·token·만료·expectedVersion을 검증한다.
 
 ```json
 {
   "target": "TITLE",
-  "screenId": "bundle-editor",
   "token": "2e7f9b3c-2d0a-4f11-8b2b-6b56dc4f8a33"
 }
 ```
 
 5초마다 heartbeat를 보내고 마지막 유효 갱신부터 15초 동안 편집권을 유지한다.
 heartbeat 응답은 `LEASE_HEARTBEAT`, release 응답은 `LEASE_RELEASED`다.
-현재 내용 revision도 공통 헤더에서 확인한다. 연결 종료 시 그 연결의 편집권을 해제하고,
-재연결 시에는 새 token으로 획득한다. 앱은 60초 무입력 시 dirty 입력을 REST로 저장한 뒤
-release하며, 저장 실패 시 미저장 입력을 유지한다.
+현재 내용 revision도 공통 envelope에서 확인한다. 연결 종료 처리는 저장된
+`connectionId`와 실제 종료된 연결이 일치할 때만 그 연결의 lease를 해제한다. 이전
+connection의 늦은 disconnect나 이전 token은 새 lease에 영향을 주지 않는다. 재연결 시에는
+새 connectionId에서 새 token으로 획득한다. 앱은 60초 무입력 시 dirty 입력을 REST로
+저장한 뒤 release하며, 저장 실패 시 미저장 입력을 유지한다.
 
 ### 활동·조회 heartbeat
 
-명령 body는 기존 형식을 사용한다. `type`은 trim 후 대문자로 해석하며 생략하면 COMMENT다.
+명령 body에는 `type`만 보낸다. trim 후 대문자로 해석하며 생략하면 COMMENT다.
 
 ```json
 {
-  "screenId": "bundle-editor",
   "type": "VIEW"
 }
 ```
@@ -725,9 +769,9 @@ release하며, 저장 실패 시 미저장 입력을 유지한다.
 인증·구독 권한을 통과하지 못한 frame은 응답 없이 폐기할 수 있다. 클라이언트는 timeout도
 실패로 처리한다. 오류에 token·인증 header·session·REST conflict detail을 노출하지 않는다.
 
-## 동기화·복구 규칙
+## 추가 복구 절차: 동기화·복구 규칙
 
-최초 진입·구독 직후·재연결·내용 revision 누락 시 REST detail로 복구한다.
+최초 진입·구독 직후·재연결·내용 revision 누락 시 REST snapshot으로 복구한다.
 
 ```text
 GET /api/v1/bunches/{bunchId}/bundles/{bundleId}
@@ -736,6 +780,9 @@ GET /api/v1/bunches/{bunchId}/bundles/{bundleId}
 - 내용 이벤트의 revision이 로컬 값 이하이면 중복/이전 이벤트로 무시한다.
 - 다음 revision이면 `type`에 맞춰 `data`의 실제 값을 적용한다.
 - revision이 건너뛰면 snapshot으로 복구하고, heartbeat에서 더 최신 revision을 확인했을 때도 복구한다.
+- 재연결한 connection은 이전 connection의 leaseToken을 재사용하지 않는다. snapshot을
+  확인한 뒤 필요한 target을 새로 acquire하고, 새 token과 최신 expectedVersion으로만
+  보류 REST 저장을 재시도한다.
 - `LEASES`, `LEASE_GRANTED`, `LEASE_HEARTBEAT`, `LEASE_RELEASED`, `ACTIVITY`, `COMMAND_REJECTED`에는 내용 중복 제거 규칙을 적용하지 않는다. 같은 revision에서도 새 편집권/활동 정보가 올 수 있다.
 - topic과 private queue 양쪽에서 받은 동일 활동은 회원별 활동 표시를 갱신한다.
 - 다른 회원의 이벤트나 snapshot을 적용할 때 본인의 미저장 입력을 유지한다.
