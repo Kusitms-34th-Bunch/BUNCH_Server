@@ -56,7 +56,7 @@ BUNCH_Server/
     │   ├── notification/     # 참여 알림 영속성
     │   ├── image/            # 공용 이미지 자산·참조 보호·커밋 후 정리
     │   ├── photo/            # Photo·공동 업로더·번들 연결 기반
-    │   └── global/           # config / security / oidc / redis 등
+    │   └── global/           # config / security / oidc / redis / job 등
     ├── main/resources/
     ├── test/kotlin/com/bunch/
     └── test/resources/
@@ -140,7 +140,22 @@ V5는 기존 개인·번치 프로필을 공용 `image_assets`로 백필하고 n
 Photo·공동 업로더 스키마와 조회·최종 삭제 연결은
 [사진함 기반 계약](docs/specs/photo-foundation.md)을 따른다. 사진함 HTTP 업로드·목록·중복 병합은
 별도 구현 범위다. 파일 정리는 참조가 모두 해제된 DB 커밋 후 시도하며 실패 식별자만 기록한다.
-자동 정리 배치·재시도 큐는 제공하지 않는다.
+파일 정리 실패의 자동 재시도는 아직 연결하지 않았다. 재시도가 필요한 후속 작업은 아래 비동기 작업 기반을 쓴다.
+
+## 비동기 작업 기반
+
+V9는 `async_jobs` 테이블을 추가한다. 업로드 응답과 분리해 처리하고 실패하면 다시 시도할 작업을
+DB에 기록하며, 서버가 재시작돼도 남은 작업을 이어서 처리한다. 외부 큐·Redis·스케줄러 라이브러리는 쓰지 않는다.
+작업 등록·점유·재시도·상태 전이 규칙은 [비동기 작업 처리 계약](docs/specs/async-processing.md)을 따른다.
+
+| 설정 | 기본값 | 용도 |
+| --- | --- | --- |
+| `async-job.worker.enabled` | `true` | 주기 실행. 테스트 프로필은 `false`이며 `AsyncJobWorker.runOnce`를 직접 호출한다 |
+| `async-job.worker.poll-interval-ms` / `batch-size` | `2000` / `10` | 확인 주기와 한 번에 가져올 작업 수 |
+| `async-job.worker.lease-seconds` | `300` | 실행 중 점유 유지 시간. 지나면 다른 실행기가 다시 가져간다 |
+| `async-job.retry.max-attempts` / `base-seconds` | `5` / `10` | 최대 시도 횟수와 재시도 기본 간격(두 배씩 증가, 최대 1시간) |
+
+작업 종류별 처리기(`AsyncJobHandler`)는 각 기능 이슈가 추가한다. 이 기반 자체는 처리기를 두지 않는다.
 
 ## 검증
 
@@ -199,6 +214,7 @@ python3 deploy/monitoring/smoke_test.py
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
+| [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
 
