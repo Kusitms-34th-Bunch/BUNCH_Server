@@ -65,3 +65,12 @@ cloudinary:
   api-secret: ${CLOUDINARY_API_SECRET:}
 bunch:
   invitation-base-url: ${BUNCH_INVITATION_BASE_URL:http://localhost:3000/invite}
+async-job:
+  worker:
+    enabled: true
+    poll-interval-ms: 2000
+    batch-size: 10
+    lease-seconds: 300
+  retry:
+    max-attempts: 5
+    base-seconds: 10
