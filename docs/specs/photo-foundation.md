@@ -183,6 +183,87 @@ FK가 null이고 API `imageUrl`도 null이다. 기존 URL 문자열은 그대로
 사진함의 일반 이미지 입력에는 프로필 검증 규칙을 적용하지 않는다. 이미지 저장만
 실패하면 가입은 기본 이미지로 완료하고, 번치 변경 실패 시 기존 이미지를 유지한다.
 
+## 사진함 이미지 저장소
+
+사진함의 이미지 파일은 `com.bunch.global.image.PhotoImageStorage`가 `photos/` 경로로
+업로드·삭제한다. 프로필의 `ProfileImageStorage`(JPEG·정사각형·1024px·5MB·`profiles/`)는
+바꾸지 않으며 사진함에 프로필 규칙을 적용하지 않는다. 사진함 업로드 API와 해시 계산·중복
+병합은 #30의 범위이고, 이 저장소는 #30이 쓸 부품만 제공한다.
+
+### 입력 검증
+
+`inspect(file)`는 업로드 바이트를 디코딩하지 않고 검사해 `PhotoImage`(바이트, 가로, 세로)를
+반환한다. 바이트는 재인코딩하지 않고 받은 그대로 돌려주므로 호출자는 이 바이트로 SHA-256을
+한 번만 계산하고, 같은 사진이 아닐 때만 `upload`를 호출한다.
+
+| 항목 | 규칙 | 거부 사유 |
+| --- | --- | --- |
+| Content-Type | `image/jpeg`만 허용한다 | `UNSUPPORTED_FORMAT` |
+| 크기 | 1장 30MiB(30 × 1024 × 1024바이트) 이하. 선언된 크기와 무관하게 30MiB + 1바이트까지만 읽는다 | `TOO_LARGE` |
+| JPEG 구조 | SOI로 시작해 EOI로 끝나며 마커 세그먼트 길이가 파일 안에 있어야 한다. 구조가 깨지면 추측하지 않고 거부한다 | `UNSUPPORTED_FORMAT` |
+| 해상도 | 프레임 헤더가 선언한 긴 변이 `photo-image.max-dimension`(기본 4096) 이하. 정사각형 제한은 없다. 픽셀은 디코딩하지 않으므로 작은 파일이 거대한 래스터를 선언해도 메모리를 쓰지 않는다 | `RESOLUTION_EXCEEDED` |
+| 위치 메타데이터 | EXIF의 GPS IFD 포인터(0x8825)나 XMP의 위치 속성(`exif:GPS*`, `Iptc4xmpCore:Location`, `Iptc4xmpExt:LocationCreated`·`LocationShown`, `photoshop:City`·`State`·`Country`)이 남아 있으면 거부한다 | `LOCATION_METADATA` |
+
+모든 거부는 `PhotoImageRejectedException`(`ErrorCode.INVALID_INPUT`)이며 `reason`으로
+사유를 구분한다. 같은 파일을 다시 보내도 성공할 수 없으므로 #30은 재시도 불가로 응답하고,
+사유별 사진함 오류 코드는 #30이 정한다.
+
+- 명세서 3.2.2는 앱이 위치 메타데이터(EXIF·XMP 포함)를 지우고 긴 변 2560px로 줄여 올린다고
+  정한다. 서버는 지우지 않고 남아 있으면 거부한다. 파일을 다시 인코딩하면 30MB 이미지를
+  통째로 디코딩해야 하고 해시도 달라지기 때문이다.
+- IPTC(APP13) 위치 필드와 EXIF 안에 내장된 미리보기 이미지는 검사하지 않는다.
+- 픽셀을 디코딩하지 않으므로 JPEG 헤더만 정상이고 데이터가 손상된 파일은 이 단계에서 걸러지지
+  않는다. 외부 저장소가 처리하지 못하면 업로드 실패로 나타난다.
+- 허용 형식은 현재 JPEG뿐이다. 명세서 3.2.2는 앱이 JPEG·PNG·HEIC·WebP를 고를 수 있다고 하므로
+  앱이 서버로 JPEG만 보내는지 확정 대기다. HEIC·WebP를 서버가 받으려면 새 의존성이 필요하다.
+
+### 업로드와 삭제
+
+- `upload(image)`는 `photos/{UUID}` public ID로 `overwrite=false` 업로드한다. 응답의 HTTPS URL,
+  public ID, `resource_type=image`, `format=jpg`, 가로·세로가 보낸 값과 같은지 확인한다.
+- 업로드가 실패하거나 응답이 맞지 않으면 생성한 public ID의 삭제를 시도하고
+  `PHOTO_IMAGE_STORAGE_FAILED`(`PHOTO_007`, 503)로 응답한다. 프로필의 `IMAGE_001`과 구분한다.
+- 연결 3초, 읽기 `photo-image.read-timeout-seconds`(기본 60초)로 30MB 업로드를 허용한다.
+  리다이렉트는 따라가지 않는다. 자격 증명이 없거나 업로드 주소가 안전하지 않으면 원격 호출 없이
+  실패하며 애플리케이션 기동은 막지 않는다.
+- `delete(publicId)`는 예외를 던지지 않는다. 이미 없는 파일은 성공으로 보고 실패하면 public ID만
+  로그에 남긴다. 실패한 삭제의 재시도는 별도 이슈(이미지 파일 삭제 재시도)에서 다룬다.
+- 요청마다 최대 30MiB를 서버 메모리로 읽는다. 동시 업로드 한도와 컨테이너 메모리는 운영 환경
+  점검에서 정한다.
+
+### 표시 URL
+
+`PhotoImageUrls`는 저장된 `ImageAsset.url`에서 표시용 주소를 계산하며 따로 저장하지 않는다.
+원본과 썸네일 파일을 따로 두지 않는다(PRD §7 확정 사항).
+
+- 전체 크기: 저장된 URL 그대로다. 보관된 이미지가 곧 전체 크기다.
+- 정사각 썸네일: URL의 `/image/upload/` 바로 뒤에 `c_fill,w_N,h_N/` 변환을 넣는다. 기본 300,
+  허용 범위 1~2560이다. 변환할 수 없는 URL(업로드 구간이 없는 주소)은 그대로 돌려준다.
+
+### 설정
+
+| 키 | 기본값 | 의미 |
+| --- | --- | --- |
+| `spring.servlet.multipart.max-file-size` / `max-request-size` | 6MB / 7MB (이 이슈에서 바꾸지 않음) | 서버 전체 업로드 한도. 30MB 사진을 받으려면 #30의 업로드 API와 함께 30MB / 31MB로 올린다. 모든 파일 업로드에 적용되므로 프로필·번치 이미지 담당과 배포 담당의 확인이 필요하다. 프로필 저장소는 코드에서 5MB 검사를 유지한다 |
+| `photo-image.max-dimension` | 4096 | 허용하는 긴 변 상한(px) |
+| `photo-image.read-timeout-seconds` | 60 | 외부 저장소 응답 대기 시간 |
+| `cloudinary.*` | 기존 설정 | 프로필 저장소와 같은 자격 증명을 쓴다 |
+
+### 저장소 테스트
+
+`JpegHeaderInspectorTest`, `PhotoImageStorageTest`, `PhotoImageUrlsTest`는 DB와 실제 소켓 없이
+실행한다. 외부 저장소 호출은 `MockRestServiceServer`로 대체해 업로드 요청 형식, 응답 검증 실패 시
+정리 호출, 삭제, 설정 주입을 검증한다. 경계값(30MiB, 긴 변 4096px)과 위치 메타데이터 거부도 포함한다.
+
+### 확정 대기
+
+- 이미지 접근 방식: 현재는 누구나 주소로 볼 수 있는 공개 URL이다. PRD §7-13은 권한 확인 후
+  짧은 유효기간의 URL을 권장하고 명세서에는 이 방식이 없다. 사진함 목록 API(#35)를 확정하기
+  전에 정한다.
+- 서버가 받는 형식(위 허용 형식), 해상도 상한 값, 썸네일 크기, 위치 메타데이터를 거부할지
+  지울지는 앱의 처리 범위 답에 따라 바뀔 수 있다.
+- 사용 중인 Cloudinary 플랜의 30MB 업로드 가능 여부는 확인하지 못했다.
+
 ## 테스트 기준
 
 Photo 통합 테스트는 `@SpringBootTest`, `@ActiveProfiles("test")`와 기존

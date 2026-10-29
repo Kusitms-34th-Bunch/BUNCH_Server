@@ -25,6 +25,7 @@ enum class ErrorCode(
     NICKNAME_TAKEN("USER_002", "error.nickname_taken", 409),
     REGISTRATION_CONFLICT("USER_003", "error.registration_conflict", 409),
     PROFILE_IMAGE_FAILED("IMAGE_001", "error.profile_image_failed", 503),
+    PHOTO_IMAGE_STORAGE_FAILED("PHOTO_007", "error.photo_image_storage_failed", 503),
     BUNCH_NAME_TAKEN("BUNCH_001", "error.bunch_name_taken", 409),
     BUNCH_FULL("BUNCH_002", "error.bunch_full", 409),
     MEMBERSHIP_LIMIT_EXCEEDED("BUNCH_003", "error.membership_limit_exceeded", 409),
