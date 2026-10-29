@@ -11,7 +11,16 @@ import java.util.UUID
 interface PhotoUploaderRepository : JpaRepository<PhotoUploader, Long> {
     fun existsByPhotoIdAndMemberId(photoId: Long, memberId: Long): Boolean
 
-    fun countByMemberIdAndUploadedAtGreaterThanEqual(memberId: Long, uploadedAt: Instant): Long
+    @Query(
+        "select count(uploader) from PhotoUploader uploader " +
+            "where uploader.member.id = :memberId and uploader.photo.bunch.id = :bunchId " +
+            "and uploader.uploadedAt >= :since"
+    )
+    fun countByMemberInBunchSince(
+        @Param("memberId") memberId: Long,
+        @Param("bunchId") bunchId: Long,
+        @Param("since") since: Instant
+    ): Long
 
     fun countByMemberIdAndUploadBatchId(memberId: Long, uploadBatchId: UUID): Long
 

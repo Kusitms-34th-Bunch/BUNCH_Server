@@ -215,7 +215,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
     fun `the daily limit counts today in Korean time and ignores earlier days`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val startOfDay = PhotoUploadLimits.startOfUploadDay(Instant.now())
-        val dailyLimit = PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY
+        val dailyLimit = PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY
         seedPhotos(bunchId, dailyLimit, ownerId, startOfDay.minus(Duration.ofHours(1)))
 
         val yesterdayDoesNotCount = uploads.upload(command(bunchId, ownerId), image("today-1"))
@@ -231,9 +231,44 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `the daily limit is counted per bunch`() {
+        val (ownerId, fullBunchId) = bunchWithOwner()
+        val otherBunchId = create(ownerId).id
+        seedPhotos(fullBunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, ownerId)
+
+        assertError(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED) {
+            uploads.upload(command(fullBunchId, ownerId), image("full-bunch"))
+        }
+
+        assertThat(uploads.upload(command(otherBunchId, ownerId), image("other-bunch")).kind)
+            .isEqualTo(PhotoUploadKind.STORED)
+    }
+
+    @Test
+    fun `another member's uploads do not use up my daily limit in the same bunch`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, otherId)
+
+        assertThat(uploads.upload(command(bunchId, ownerId), image("mine")).kind)
+            .isEqualTo(PhotoUploadKind.STORED)
+    }
+
+    @Test
+    fun `a merged upload counts toward the daily limit`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        val shared = image("shared-at-limit")
+        insertPhoto(bunchId, hashOf(shared), uploaderId = otherId)
+        seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, ownerId)
+
+        assertError(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED) { uploads.upload(command(bunchId, ownerId), shared) }
+    }
+
+    @Test
     fun `deleting uploads frees the daily limit`() {
         val (ownerId, bunchId) = bunchWithOwner()
-        seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY, ownerId)
+        seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, ownerId)
         assertError(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED) { uploads.upload(command(bunchId, ownerId), image("over")) }
 
         photoService.removeUploader(

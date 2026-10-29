@@ -54,23 +54,35 @@ class PhotoUploadConcurrencyTest : PhotoUploadTestSupport() {
     }
 
     @Test
-    fun `one member uploading to two bunches cannot pass the daily limit together`() {
-        val (ownerId, firstBunchId) = bunchWithOwner()
-        val secondBunchId = create(ownerId).id
-        seedPhotos(firstBunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY - 1, ownerId)
+    fun `one member uploading to the same bunch at once cannot pass the daily limit`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val dailyLimit = PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY
+        seedPhotos(bunchId, dailyLimit - 1, ownerId)
 
         val results = concurrently(
-            listOf(
-                { uploads.upload(command(firstBunchId, ownerId), image("daily-1")) },
-                { uploads.upload(command(secondBunchId, ownerId), image("daily-2")) },
-                { uploads.upload(command(firstBunchId, ownerId), image("daily-3")) },
-                { uploads.upload(command(secondBunchId, ownerId), image("daily-4")) }
-            )
+            (1..4).map { index -> { uploads.upload(command(bunchId, ownerId), image("daily-$index")) } }
         )
 
         assertThat(results.count { it.isSuccess }).isEqualTo(1)
         assertThat(errorCodes(results)).containsOnly(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED)
-        assertThat(memberUploadCount(ownerId)).isEqualTo(PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY.toLong())
+        assertThat(memberUploadCount(ownerId)).isEqualTo(dailyLimit.toLong())
+    }
+
+    @Test
+    fun `a full daily limit in one bunch does not block uploads to another bunch at the same time`() {
+        val (ownerId, fullBunchId) = bunchWithOwner()
+        val otherBunchId = create(ownerId).id
+        seedPhotos(fullBunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, ownerId)
+
+        val results = concurrently(
+            listOf(
+                { uploads.upload(command(fullBunchId, ownerId), image("full-bunch")) },
+                { uploads.upload(command(otherBunchId, ownerId), image("other-bunch")) }
+            )
+        )
+
+        assertThat(errorCodes(results)).containsExactly(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED)
+        assertThat(photoCount(otherBunchId)).isEqualTo(1)
     }
 
     @Test

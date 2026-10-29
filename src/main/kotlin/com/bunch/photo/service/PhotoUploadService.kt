@@ -30,7 +30,8 @@ import java.util.HexFormat
 /**
  * Saves one inspected photo into a bunch's photo box. The external upload runs outside any
  * transaction, so the database work is split into a check before it and a save after it.
- * Both take the same locks: member, then bunch, then photo.
+ * Both lock the bunch first and then the photo. The daily limit is counted per member and per bunch, so the
+ * bunch lock alone serializes the uploads it protects and no member lock is needed.
  */
 @Service
 class PhotoUploadService(
@@ -110,8 +111,9 @@ class PhotoUploadService(
     }
 
     private fun lock(command: PhotoUploadCommand): Locked {
-        val member = members.findLockedById(command.memberId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         val bunch = bunches.findLocked(command.bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        val member = members.findById(command.memberId).orElse(null)?.requireCompleted()
+            ?: fail(ErrorCode.USER_NOT_FOUND)
         memberships.findByMemberIdAndBunchIdAndStatus(command.memberId, command.bunchId) ?: fail(ErrorCode.FORBIDDEN)
         return Locked(member, bunch)
     }
@@ -125,8 +127,8 @@ class PhotoUploadService(
 
     private fun requireRoomForMember(command: PhotoUploadCommand) {
         val today = PhotoUploadLimits.startOfUploadDay(Instant.now())
-        if (uploaders.countByMemberIdAndUploadedAtGreaterThanEqual(command.memberId, today) >=
-            PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY
+        if (uploaders.countByMemberInBunchSince(command.memberId, command.bunchId, today) >=
+            PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY
         ) {
             fail(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED)
         }

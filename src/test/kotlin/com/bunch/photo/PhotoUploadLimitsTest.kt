@@ -25,7 +25,7 @@ class PhotoUploadLimitsTest {
     @Test
     fun `the limits match the feature specification`() {
         assertThat(PhotoUploadLimits.MAX_PHOTOS_PER_BATCH).isEqualTo(50)
-        assertThat(PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_DAY).isEqualTo(500)
+        assertThat(PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY).isEqualTo(100)
         assertThat(PhotoUploadLimits.MAX_PHOTOS_PER_BUNCH).isEqualTo(1_000)
     }
 }
