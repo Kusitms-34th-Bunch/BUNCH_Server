@@ -65,6 +65,8 @@ cloudinary:
   api-secret: ${CLOUDINARY_API_SECRET:}
 bunch:
   invitation-base-url: ${BUNCH_INVITATION_BASE_URL:http://localhost:3000/invite}
+  websocket:
+    allowed-origins: ${BUNCH_WS_ALLOWED_ORIGINS:http://localhost:3000}
 async-job:
   worker:
     enabled: true
