@@ -23,7 +23,7 @@ POST /api/v1/bunches/{bunchId}/photos
 
 | 필드 | 형식 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `photo` | 파일 | O | 앱이 긴 변 2560px로 줄이고 위치 정보를 지운 JPEG(확정 대기). `Content-Type`은 `image/jpeg` |
+| `photo` | 파일 | O | 앱이 긴 변 2560px로 줄이고(앱 확인) 위치 정보를 지운 JPEG(형식은 확정 대기). `Content-Type`은 `image/jpeg` |
 | `uploadBatchId` | UUID | O | 사진 선택창에서 한 번 고른 사진들에 같은 값. 「다시 시도」로 다시 올려도 원래 값을 유지한다(3.2.2 로직 3 ⑤) |
 | `capturedDate` | `yyyy-MM-dd` | 선택 | 앱이 사진 파일 정보에서 뽑은 촬영 현지 날짜. 카메라 촬영은 촬영 시각의 날짜(3.2.3) |
 | `capturedTime` | `HH:mm:ss` | 선택 | 촬영 현지 시각. **`capturedDate` 없이 보낼 수 없다** |
@@ -93,7 +93,7 @@ Content-Disposition: form-data; name="capturedTime"
 | 403 | `AUTH_015` | 가입이 끝나지 않음 | 불가 |
 | 404 | `RESOURCE_001` | 번치 없음 | 불가 |
 | 409 | `PHOTO_001` | 번치 사진 1,000장 도달 (새 사진만, 합치기는 허용) | 불가 |
-| 409 | `PHOTO_002` | 오늘(`Asia/Seoul` 자정 기준) 500장 도달 | 불가 |
+| 409 | `PHOTO_002` | 이 번치에서 오늘(`Asia/Seoul` 자정 기준) 100장 도달. 번치마다 따로 센다 | 불가 |
 | 409 | `PHOTO_003` | 같은 `uploadBatchId`로 50장 도달 | 불가 |
 | 503 | `PHOTO_007` | 이미지 저장소 일시 장애 | **가능** |
 
@@ -103,6 +103,6 @@ Content-Disposition: form-data; name="capturedTime"
 
 ## 서버 한도 (확정 대기)
 
-- 요청 크기: 현재 서버의 `multipart` 한도는 6MB/7MB이고, 앱의 이미지 처리 방식 답과 Cloudinary 계정 한도를 확인한 뒤 정한다.
-  지금 값에서는 6MB를 넘는 파일은 `400 COMMON_001`로 거부된다.
+- 요청 크기: 서버의 `multipart` 한도는 6MB/7MB다. 앱이 긴 변 2560px로 줄여 보내므로 파일은 보통 수 MB이고,
+  앱 연동 뒤 실제 파일 크기를 보고 재평가한다. 6MB를 넘는 파일은 `400 COMMON_001`로 거부된다(확정 대기).
 - 동시 요청은 5개 이하를 권장한다. 서버는 번치 단위로 저장 구간을 직렬 처리하므로 동시에 보내도 한도와 중복은 깨지지 않는다.
