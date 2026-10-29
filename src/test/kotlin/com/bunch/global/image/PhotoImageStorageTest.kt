@@ -128,6 +128,14 @@ class PhotoImageStorageTest {
     }
 
     @Test
+    fun `rejects location metadata placed after the scan data`() {
+        val valid = jpeg()
+
+        assertRejected(PhotoImageRejection.LOCATION_METADATA, file(withSegmentAfterScan(valid, 0xe1, gpsExif())))
+        assertRejected(PhotoImageRejection.LOCATION_METADATA, file(withSegmentAfterScan(valid, 0xe1, xmpWithGps())))
+    }
+
+    @Test
     fun `upload sends the bytes as an unmodified JPEG with basic auth and a unique photos path`() {
         val image = storage.inspect(file(jpeg(1200, 800)))
         repeat(2) { respondUpload(1200, 800) }
@@ -283,6 +291,10 @@ class PhotoImageStorageTest {
     private fun withSegment(jpeg: ByteArray, marker: Int, body: ByteArray): ByteArray =
         jpeg.copyOfRange(0, 2) + byteArrayOf(0xff.toByte(), marker.toByte()) + body + jpeg.copyOfRange(2, jpeg.size)
 
+    private fun withSegmentAfterScan(jpeg: ByteArray, marker: Int, body: ByteArray): ByteArray =
+        jpeg.copyOfRange(0, jpeg.size - 2) + byteArrayOf(0xff.toByte(), marker.toByte()) + body +
+            byteArrayOf(0xff.toByte(), 0xd9.toByte())
+
     // A JPEG segment holds at most 65533 bytes, so the padding is spread over many comment segments.
     private fun paddedTo(valid: ByteArray, total: Int): ByteArray {
         val out = ByteArrayOutputStream(total)
@@ -308,7 +320,10 @@ class PhotoImageStorageTest {
     }
 
     private fun xmpWithGps(): ByteArray {
-        val packet = "http://ns.adobe.com/xap/1.0/\u0000<x exif:GPSLatitude=\"37\"/>".toByteArray(ISO_8859_1)
+        val packet = (
+            "http://ns.adobe.com/xap/1.0/\u0000<x xmlns:exif=\"http://ns.adobe.com/exif/1.0/\" " +
+                "exif:GPSLatitude=\"37\"/>"
+            ).toByteArray(ISO_8859_1)
         return segmentLength(packet.size + 2) + packet
     }
 

@@ -1,12 +1,23 @@
 package com.bunch.global.image
 
+import org.w3c.dom.Element
+import org.w3c.dom.Node
+import org.xml.sax.SAXException
+import org.xml.sax.helpers.DefaultHandler
+import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.nio.charset.StandardCharsets.ISO_8859_1
+import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.parsers.ParserConfigurationException
 
 internal data class JpegHeader(val width: Int, val height: Int, val hasLocationMetadata: Boolean)
 
 /**
- * Reads only the JPEG marker segments before the scan data. The pixels are never decoded,
+ * Reads the JPEG marker segments up to the first EOI, including the ones between scans and
+ * after the last scan. Scan data is skipped byte by byte and the pixels are never decoded,
  * so a small file that declares a huge raster cannot make the server allocate that raster.
+ * Bytes after the first EOI are not inspected.
  * Malformed structure throws [IllegalArgumentException] instead of being guessed at.
  */
 internal object JpegHeaderInspector {
@@ -20,15 +31,13 @@ internal object JpegHeaderInspector {
     private val EXIF_PREFIX = "Exif".toByteArray(ISO_8859_1) + byteArrayOf(0, 0)
     private val XMP_PREFIX = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(ISO_8859_1)
 
-    // Property names that make an XMP packet a location carrier. IPTC (APP13) is not inspected.
-    private val XMP_LOCATION_KEYS = listOf(
-        "exif:GPS",
-        "Iptc4xmpCore:Location",
-        "Iptc4xmpExt:LocationCreated",
-        "Iptc4xmpExt:LocationShown",
-        "photoshop:City",
-        "photoshop:State",
-        "photoshop:Country"
+    // XMP properties are matched by namespace URI and local name, never by the prefix a writer chose.
+    // IPTC (APP13) is not inspected.
+    private val XMP_GPS_NAMESPACES = setOf("http://ns.adobe.com/exif/1.0/", "http://cipa.jp/exif/1.0/")
+    private val XMP_LOCATION_PROPERTIES = mapOf(
+        "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" to setOf("Location"),
+        "http://iptc.org/std/Iptc4xmpExt/2008-02-29/" to setOf("LocationCreated", "LocationShown"),
+        "http://ns.adobe.com/photoshop/1.0/" to setOf("City", "State", "Country")
     )
 
     fun inspect(bytes: ByteArray): JpegHeader {
@@ -37,13 +46,17 @@ internal object JpegHeaderInspector {
         var width = 0
         var height = 0
         var location = false
+        var scans = 0
         while (true) {
             require(position < bytes.size && unsigned(bytes, position) == MARKER_PREFIX)
             while (position < bytes.size && unsigned(bytes, position) == MARKER_PREFIX) position++
             require(position < bytes.size)
             val marker = unsigned(bytes, position++)
-            require(marker != EOI && marker != 0 && marker != SOI)
-            if (marker == SOS) break
+            require(marker != 0 && marker != SOI)
+            if (marker == EOI) {
+                require(scans > 0)
+                break
+            }
             if (marker == 0x01 || marker in 0xd0..0xd7) continue
             require(position + 2 <= bytes.size)
             val length = unsigned(bytes, position) shl 8 or unsigned(bytes, position + 1)
@@ -59,9 +72,29 @@ internal object JpegHeaderInspector {
                 }
             }
             position = end
+            if (marker == SOS) {
+                scans++
+                position = skipScanData(bytes, position)
+            }
         }
         require(width > 0 && height > 0)
         return JpegHeader(width, height, location)
+    }
+
+    // Entropy-coded data holds no markers except restart markers (ffd0..ffd7) and stuffed ff00 bytes.
+    // Returns the index of the next real marker prefix.
+    private fun skipScanData(bytes: ByteArray, from: Int): Int {
+        var index = from
+        while (index < bytes.size - 1) {
+            if (unsigned(bytes, index) != MARKER_PREFIX) {
+                index++
+                continue
+            }
+            val next = unsigned(bytes, index + 1)
+            if (next != 0 && next !in 0xd0..0xd7) return index
+            index += 2
+        }
+        throw IllegalArgumentException()
     }
 
     // SOF0..SOF15 except DHT (c4), JPG (c8) and DAC (cc).
@@ -69,11 +102,55 @@ internal object JpegHeaderInspector {
 
     private fun carriesLocation(bytes: ByteArray, start: Int, end: Int): Boolean = when {
         startsWith(bytes, start, end, EXIF_PREFIX) -> exifHasGpsPointer(bytes, start + EXIF_PREFIX.size, end)
-        startsWith(bytes, start, end, XMP_PREFIX) -> {
-            val packet = String(bytes, start + XMP_PREFIX.size, end - start - XMP_PREFIX.size, ISO_8859_1)
-            XMP_LOCATION_KEYS.any { packet.contains(it) }
-        }
+        startsWith(bytes, start, end, XMP_PREFIX) -> xmpHasLocation(bytes, start + XMP_PREFIX.size, end)
         else -> false
+    }
+
+    // The packet must be well-formed XML. DOCTYPE is refused so no entity or external resource is resolved.
+    private fun xmpHasLocation(bytes: ByteArray, start: Int, end: Int): Boolean {
+        var packetEnd = end
+        while (packetEnd > start && bytes[packetEnd - 1].toInt() == 0) packetEnd--
+        val root = try {
+            val factory = DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = true
+                isXIncludeAware = false
+                isExpandEntityReferences = false
+                setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            }
+            val builder = factory.newDocumentBuilder().apply { setErrorHandler(DefaultHandler()) }
+            builder.parse(ByteArrayInputStream(bytes, start, packetEnd - start)).documentElement
+        } catch (e: SAXException) {
+            throw IllegalArgumentException(e)
+        } catch (e: IOException) {
+            throw IllegalArgumentException(e)
+        } catch (e: ParserConfigurationException) {
+            throw IllegalStateException(e)
+        }
+
+        // Iterative on purpose: a 64 KB packet can nest tens of thousands of elements.
+        val pending = ArrayDeque<Element>().apply { add(root) }
+        while (pending.isNotEmpty()) {
+            val element = pending.removeLast()
+            if (isLocationProperty(element.namespaceURI, element.localName)) return true
+            val attributes = element.attributes
+            for (index in 0 until attributes.length) {
+                val attribute = attributes.item(index)
+                if (isLocationProperty(attribute.namespaceURI, attribute.localName)) return true
+            }
+            var child: Node? = element.firstChild
+            while (child != null) {
+                if (child is Element) pending.add(child)
+                child = child.nextSibling
+            }
+        }
+        return false
+    }
+
+    private fun isLocationProperty(namespace: String?, name: String?): Boolean = when {
+        namespace == null || name == null -> false
+        namespace in XMP_GPS_NAMESPACES -> name.startsWith("GPS")
+        else -> name in XMP_LOCATION_PROPERTIES[namespace].orEmpty()
     }
 
     private fun exifHasGpsPointer(bytes: ByteArray, tiff: Int, end: Int): Boolean {
