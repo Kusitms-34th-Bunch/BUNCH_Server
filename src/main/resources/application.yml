@@ -67,3 +67,12 @@ bunch:
   invitation-base-url: ${BUNCH_INVITATION_BASE_URL:http://localhost:3000/invite}
   websocket:
     allowed-origins: ${BUNCH_WS_ALLOWED_ORIGINS:http://localhost:3000}
+async-job:
+  worker:
+    enabled: true
+    poll-interval-ms: 2000
+    batch-size: 10
+    lease-seconds: 300
+  retry:
+    max-attempts: 5
+    base-seconds: 10

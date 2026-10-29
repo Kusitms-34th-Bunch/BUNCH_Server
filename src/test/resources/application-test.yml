@@ -16,6 +16,10 @@ auth:
   kakao:
     client-id: test-kakao-client
 
+async-job:
+  worker:
+    enabled: false
+
 terms:
   service-version: v1
   privacy-version: v1

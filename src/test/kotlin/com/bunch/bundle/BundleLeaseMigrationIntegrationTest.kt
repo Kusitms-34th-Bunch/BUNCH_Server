@@ -42,7 +42,7 @@ class BundleLeaseMigrationIntegrationTest @Autowired constructor(
                 token
             )
 
-            val current = configure(schema)
+            val current = configure(schema, "8")
             assertThat(current.migrate().migrationsExecuted).isEqualTo(1)
             current.validate()
 
