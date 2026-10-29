@@ -20,6 +20,7 @@
 | --- | --- |
 | 언어·프레임워크 | Kotlin 1.9.25 · Spring Boot 3.5.4 |
 | JVM·빌드 | JDK 21 · Gradle 8.14.3 Kotlin DSL |
+| API·실시간 | Spring MVC REST · Spring WebSocket/STOMP |
 | 저장소 | PostgreSQL 16 · Redis 7 |
 | 스키마 | Flyway · JPA validate |
 | 구조 | 루트 단일 모듈 · `com.bunch` |
@@ -40,6 +41,9 @@ BUNCH_Server/
 │       ├── auth.md
 │       ├── onboarding.md
 │       ├── login-onboarding-api.md
+│       ├── bundle.md
+│       ├── bundle-api.md
+│       ├── photo-foundation.md
 │       └── monitoring.md
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
@@ -56,7 +60,8 @@ BUNCH_Server/
     │   ├── notification/     # 참여 알림 영속성
     │   ├── image/            # 공용 이미지 자산·참조 보호·커밋 후 정리
     │   ├── photo/            # Photo·공동 업로더·번들 연결 기반
-    │   └── global/           # config / security / oidc / redis 등
+    │   ├── bundle/           # 번들 생성·공동 편집·발행
+    │   └── global/           # config / security / oidc / redis / job 등
     ├── main/resources/
     ├── test/kotlin/com/bunch/
     └── test/resources/
@@ -96,6 +101,7 @@ set +a
 | `DB_USERNAME` / `DB_PASSWORD` | 로컬 전용 `bunch` / `bunch_local` |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `POSTGRES_DB` | Compose 최초 DB / `bunch` |
+| `BUNCH_WS_ALLOWED_ORIGINS` | STOMP WebSocket을 허용할 브라우저 Origin 목록(쉼표 구분) / `http://localhost:3000` |
 
 프로필은 `local / test / dev / prod`다. 기존 영속 볼륨에서는 `POSTGRES_DB` 변경만으로
 새 DB가 생성되지 않는다. 실제 운영 자격 증명은 커밋하지 않는다.
@@ -140,7 +146,42 @@ V5는 기존 개인·번치 프로필을 공용 `image_assets`로 백필하고 n
 Photo·공동 업로더 스키마와 조회·최종 삭제 연결은
 [사진함 기반 계약](docs/specs/photo-foundation.md)을 따른다. 사진함 HTTP 업로드·목록·중복 병합은
 별도 구현 범위다. 파일 정리는 참조가 모두 해제된 DB 커밋 후 시도하며 실패 식별자만 기록한다.
-자동 정리 배치·재시도 큐는 제공하지 않는다.
+파일 정리 실패의 자동 재시도는 아직 연결하지 않았다. 재시도가 필요한 후속 작업은 아래 비동기 작업 기반을 쓴다.
+
+## 비동기 작업 기반
+
+V9는 `async_jobs` 테이블을 추가한다. 업로드 응답과 분리해 처리하고 실패하면 다시 시도할 작업을
+DB에 기록하며, 서버가 재시작돼도 남은 작업을 이어서 처리한다. 외부 큐·Redis·스케줄러 라이브러리는 쓰지 않는다.
+작업 등록·점유·재시도·상태 전이 규칙은 [비동기 작업 처리 계약](docs/specs/async-processing.md)을 따른다.
+
+| 설정 | 기본값 | 용도 |
+| --- | --- | --- |
+| `async-job.worker.enabled` | `true` | 주기 실행. 테스트 프로필은 `false`이며 `AsyncJobWorker.runOnce`를 직접 호출한다 |
+| `async-job.worker.poll-interval-ms` / `batch-size` | `2000` / `10` | 확인 주기와 한 번에 가져올 작업 수 |
+| `async-job.worker.lease-seconds` | `300` | 실행 중 점유 유지 시간. 지나면 다른 실행기가 다시 가져간다 |
+| `async-job.retry.max-attempts` / `base-seconds` | `5` / `10` | 최대 시도 횟수와 재시도 기본 간격(두 배씩 증가, 최대 1시간) |
+
+작업 종류별 처리기(`AsyncJobHandler`)는 각 기능 이슈가 추가한다. 이 기반 자체는 처리기를 두지 않는다.
+
+## 번들 클라이언트 프로토콜
+
+번들 REST·STOMP 클라이언트 계약은 [번들 API 계약](docs/specs/bundle-api.md)을 따른다.
+REST 기본 경로는 `/api/v1/bunches/{bunchId}/bundles`이고 공동 편집 WebSocket의
+STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
+`type / bunchId / bundleId / revision / requestId / data` 공통 형식으로 전달한다. REST와 STOMP 모두 기존 access JWT의 `sid`를 검증한 활성
+인증 세션을 사용하며, WebSocket 연결의 URL에 토큰을 넣지 않는다.
+
+번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
+상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션의 `DRAFT` 저장은
+단독 사용자도 먼저 해당 target lease를 STOMP로 획득한 뒤, 현재 `leaseToken`과 최신
+`expectedVersion`을 REST 요청에 함께 보내야 한다. 편집권 target은 `TITLE`, `DATE`,
+`PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
+private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
+서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
+Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
+`bundle_edit_leases.screen_id`를 삭제한다.
+사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
+테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 
 ## 검증
 
@@ -152,13 +193,17 @@ docker compose exec -T postgres createdb -U bunch bunch_test
 DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 ```
 
-- 통합 테스트는 `test` 프로필을 사용한다. 테스트 DB와 Redis에 운영 저장소를 지정하지 않는다.
+- 통합 테스트는 `test` 프로필을 사용하며 각 Spring 컨텍스트의 DB 풀은 최대 4개다. 테스트 DB와 Redis에 운영 저장소를 지정하지 않는다.
 - 공통 기반은 응답·오류·로깅·DB·Redis 연결과 OpenAPI·접근 제어를 검증한다.
 - 제공자 검증·동시 가입·토큰 처리와 HTTP 인증 회귀 테스트를 함께 실행한다.
 - 가입·약관·프로필·Cloudinary 로컬 HTTP stub·번치 생성/초대/참여·동시 정원/소속 한도를 함께 검증한다.
 - 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
 - V4→V5의 실제 PostgreSQL 백필·불일치 롤백·재실행, JPA validate, Photo·공동 업로더
   제약·소속 검증·공유 파일 보호·커밋 후 삭제를 검증한다. 사진함 fixture와 실제 API 연동은 구분한다.
+- 번들 REST의 상태·버전·멱등성·편집권 충돌과 STOMP의 두 연결 인증·구독·동일 member/session의
+  다른 connection 충돌·token 재발급·5초 heartbeat·15초 만료·실제 변경 이벤트·재연결
+  snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
+  준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
@@ -198,7 +243,9 @@ python3 deploy/monitoring/smoke_test.py
 | [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
+| [번들 API 계약](docs/specs/bundle-api.md) | 번들 REST·STOMP 클라이언트 요청·응답·복구 프로토콜 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
+| [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
 | [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
 
