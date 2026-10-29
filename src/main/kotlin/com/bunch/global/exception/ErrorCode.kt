@@ -31,5 +31,11 @@ enum class ErrorCode(
     MEMBERSHIP_LIMIT_EXCEEDED("BUNCH_003", "error.membership_limit_exceeded", 409),
     INVALID_INVITATION("INVITE_001", "error.invalid_invitation", 404),
     IDEMPOTENCY_CONFLICT("REQUEST_001", "error.idempotency_conflict", 409),
+    BUNDLE_LIMIT_EXCEEDED("BUNDLE_001", "error.bundle_limit_exceeded", 409),
+    BUNDLE_STATE_CONFLICT("BUNDLE_002", "error.bundle_state_conflict", 409),
+    BUNDLE_VERSION_CONFLICT("BUNDLE_003", "error.bundle_version_conflict", 409),
+    BUNDLE_LEASE_CONFLICT("BUNDLE_004", "error.bundle_lease_conflict", 409),
+    BUNDLE_PUBLISH_BLOCKED("BUNDLE_005", "error.bundle_publish_blocked", 409),
+    BUNDLE_PHOTO_CONFLICT("BUNDLE_006", "error.bundle_photo_conflict", 409),
     RATE_LIMITED("REQUEST_002", "error.rate_limited", 429)
 }

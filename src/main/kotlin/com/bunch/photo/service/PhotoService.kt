@@ -8,6 +8,7 @@ import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -17,7 +18,8 @@ class PhotoService(
     private val bunches: BunchRepository,
     private val photos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
-    private val imageAssets: ImageAssetService
+    private val imageAssets: ImageAssetService,
+    private val deletionCallbacks: ObjectProvider<PhotoFinalDeletionCallback>
 ) {
     /**
      * Reads a complete, READY photo selection in the caller's requested order.
@@ -92,6 +94,7 @@ class PhotoService(
             return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
         }
 
+        deletionCallbacks.orderedStream().forEach { it.beforePhotoDelete(photo.id) }
         finalDeletionCallback.beforePhotoDelete(photo.id)
         val assetId = photo.imageAsset.id
         photos.delete(photo)

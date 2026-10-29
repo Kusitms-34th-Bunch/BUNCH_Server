@@ -130,18 +130,23 @@ batch 잠금으로 확보하고, 그 Photo의 업로더 행을 ID 오름차순�
 - 마지막 업로더를 제거할 때 `PhotoFinalDeletionCallback`을 Photo 삭제 직전에
   같은 transaction에서 호출한다.
 - callback이 예외를 던지면 업로더 제거와 Photo 삭제 모두 rollback한다.
-- 기본 `NONE` callback은 #23의 빈 경계다. #24는 실제 bundle 테이블을 도입할 때
-  반드시 callback을 연결해 초안 Photo 연결·캡션을 같은 transaction에서 정리해야
-  한다. 사진이 0장인 초안은 폐기한다. 발행본은 원본 Photo FK만 해제하고 별도
-  ImageAsset FK·순서·캡션을 보존한다. 발행·연결 caller도 같은 Bunch 잠금을 유지해
-  삭제가 먼저 커밋되면 연결을 거부하고 발행이 먼저 커밋되면 파일을 보존한다.
-  #24 연동 전까지는 bundle 테이블이나 가상 registry를 만들지 않는다.
-- Photo 삭제가 확정된 뒤 `ImageAssetService.releaseAfterCommit(assetId)`를
-  transaction 내부에서 호출한다.
+- 기본 `NONE` callback은 #23에서 사진함만 사용할 때의 빈 경계다. #24는
+  `BundlePhotoDeletionCallback`을 `PhotoFinalDeletionCallback`으로 등록하고,
+  `beforePhotoDelete(photoId)`를 같은 transaction에서 `BundleService.beforePhotoDelete`
+  로 전달한다. callback은 `MANDATORY` transaction을 요구하므로 Photo 삭제와 번들
+  정리를 분리하지 않는다.
+- 최종 업로더 제거가 확정되기 전에 callback이 번들 사진 참조를 정리한다.
+  발행본은 `bundle_photos.photo_id`만 null로 만들고 필수 `ImageAsset` 참조·순서·캡션을
+  보존한다. 초안은 해당 번들 사진과 사진별 편집권을 제거하고 순서를 다시 매긴다.
+  남은 사진이 없으면 초안을 영구 삭제한다. 발행·연결 caller도 같은 Bunch 잠금을
+  유지해 삭제가 먼저 커밋되면 연결을 거부하고 발행이 먼저 커밋되면 파일을 보존한다.
+- callback 또는 그 안의 번들 정리가 예외를 던지면 업로더 제거·Photo 삭제·번들 정리를
+  모두 rollback한다. Photo 삭제가 확정된 뒤에만 `ImageAssetService.releaseAfterCommit(assetId)`를
+  요청하며, 외부 파일 삭제는 DB 변경 커밋 후에 시도한다.
 
 최종 Photo 삭제 callback은 `@Transactional` 경계에서 실행된다. #24 callback은
 그 경계를 `MANDATORY`로 요구해 Photo 삭제와 bundle 정리를 별도 transaction으로
-분리하지 않는다. 반복 삭제는 callback과 이미지 해제를 다시 적용하지 않는다.
+분리하지 않는다. 이미 제거된 업로더·Photo에는 callback을 다시 적용하지 않는다.
 
 ## 이미지 자산 보호와 파일 정리
 
