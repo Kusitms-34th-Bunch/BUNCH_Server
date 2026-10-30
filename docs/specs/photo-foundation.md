@@ -244,7 +244,7 @@ FK가 null이고 API `imageUrl`도 null이다. 기존 URL 문자열은 그대로
 
 | 키 | 기본값 | 의미 |
 | --- | --- | --- |
-| `spring.servlet.multipart.max-file-size` / `max-request-size` | 6MB / 7MB (이 이슈에서 바꾸지 않음) | 서버 전체 업로드 한도. 30MB 사진을 받으려면 #30의 업로드 API와 함께 30MB / 31MB로 올린다. 모든 파일 업로드에 적용되므로 프로필·번치 이미지 담당과 배포 담당의 확인이 필요하다. 프로필 저장소는 코드에서 5MB 검사를 유지한다 |
+| `spring.servlet.multipart.max-file-size` / `max-request-size` | 30MB / 31MB (#33에서는 6MB / 7MB였고 #30의 업로드 API와 함께 올렸다) | 서버 전체 업로드 한도. 30MB 사진을 받기 위한 값이다. 모든 파일 업로드에 적용되므로 프로필·번치 이미지 담당과 배포 담당의 확인이 필요하다. 프로필 저장소는 코드에서 5MB 검사를 유지한다 |
 | `photo-image.max-dimension` | 4096 | 허용하는 긴 변 상한(px) |
 | `photo-image.read-timeout-seconds` | 60 | 외부 저장소 응답 대기 시간 |
 | `cloudinary.*` | 기존 설정 | 프로필 저장소와 같은 자격 증명을 쓴다 |
