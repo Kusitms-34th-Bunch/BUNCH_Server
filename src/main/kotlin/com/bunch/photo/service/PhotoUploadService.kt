@@ -18,6 +18,7 @@ import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploader
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
+import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -30,8 +31,9 @@ import java.util.HexFormat
 /**
  * Saves one inspected photo into a bunch's photo box. The external upload runs outside any
  * transaction, so the database work is split into a check before it and a save after it.
- * Both lock the bunch first and then the photo. The daily limit is counted per member and per bunch, so the
- * bunch lock alone serializes the uploads it protects and no member lock is needed.
+ * Both lock the upload batch of the member, then the bunch, then the photo. The daily limit is counted per member
+ * and per bunch, so the bunch lock alone serializes the uploads it protects. The batch limit is counted per member
+ * and per batch across bunches, so it needs its own lock: two bunches never share a bunch lock.
  */
 @Service
 class PhotoUploadService(
@@ -44,6 +46,7 @@ class PhotoUploadService(
     private val imageAssetRepository: ImageAssetRepository,
     private val storage: PhotoImageStorage,
     private val events: ApplicationEventPublisher,
+    private val entityManager: EntityManager,
     transactionManager: PlatformTransactionManager
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -111,6 +114,10 @@ class PhotoUploadService(
     }
 
     private fun lock(command: PhotoUploadCommand): Locked {
+        // Always before the bunch lock. Hash collisions only serialize unrelated batches.
+        entityManager.createNativeQuery("SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(:batch, 0))")
+            .setParameter("batch", "photo-upload-batch:${command.memberId}:${command.uploadBatchId}")
+            .singleResult
         val bunch = bunches.findLocked(command.bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         val member = members.findById(command.memberId).orElse(null)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)

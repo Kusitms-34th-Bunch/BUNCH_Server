@@ -8,6 +8,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
+import java.util.UUID
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -101,6 +102,33 @@ class PhotoUploadConcurrencyTest : PhotoUploadTestSupport() {
         assertThat(errorCodes(results)).containsOnly(ErrorCode.PHOTO_BUNCH_LIMIT_EXCEEDED)
         assertThat(photoCount(bunchId)).isEqualTo(PhotoUploadLimits.MAX_PHOTOS_PER_BUNCH.toLong())
     }
+
+    @Test
+    fun `one upload batch cannot pass 50 photos by uploading to different bunches at once`() {
+        val (ownerId, firstBunchId) = bunchWithOwner()
+        val secondBunchId = create(ownerId).id
+        val batchId = UUID.randomUUID()
+        val batchLimit = PhotoUploadLimits.MAX_PHOTOS_PER_BATCH
+        seedPhotos(firstBunchId, batchLimit - 1, ownerId, batchId = batchId)
+
+        val results = concurrently(
+            listOf(
+                { uploads.upload(command(firstBunchId, ownerId, batchId), image("batch-first")) },
+                { uploads.upload(command(secondBunchId, ownerId, batchId), image("batch-second")) }
+            )
+        )
+
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertThat(errorCodes(results)).containsExactly(ErrorCode.PHOTO_BATCH_LIMIT_EXCEEDED)
+        assertThat(batchUploadCount(batchId)).isEqualTo(batchLimit.toLong())
+    }
+
+    private fun batchUploadCount(batchId: UUID): Long =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM photo_uploaders WHERE upload_batch_id = CAST(? AS uuid)",
+            Long::class.java,
+            batchId.toString()
+        )!!
 
     private fun errorCodes(results: List<Result<*>>): List<ErrorCode> =
         results.filter { it.isFailure }.map { (it.exceptionOrNull() as BusinessException).errorCode }
