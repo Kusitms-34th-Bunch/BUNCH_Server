@@ -94,13 +94,34 @@ class PhotoService(
             return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
         }
 
+        deleteLocked(photo, finalDeletionCallback)
+        return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = true)
+    }
+
+    /**
+     * Deletes the photo together with every uploader, as an administrator does with a photo they did not upload.
+     * Returns false when the photo no longer exists, so a repeated request changes nothing.
+     */
+    @Transactional
+    fun deletePhoto(bunchId: Long, photoId: Long): Boolean {
+        lockBunch(bunchId)
+        val photo = photos.findAllLockedByIdInOrderByIdAsc(listOf(photoId)).singleOrNull() ?: return false
+
+        if (photo.bunch.id != bunchId) fail(ErrorCode.FORBIDDEN)
+
+        uploaders.deleteAll(uploaders.findAllLockedByPhotoIdOrderByIdAsc(photoId))
+        uploaders.flush()
+        deleteLocked(photo, PhotoFinalDeletionCallback.NONE)
+        return true
+    }
+
+    private fun deleteLocked(photo: Photo, finalDeletionCallback: PhotoFinalDeletionCallback) {
         deletionCallbacks.orderedStream().forEach { it.beforePhotoDelete(photo.id) }
         finalDeletionCallback.beforePhotoDelete(photo.id)
         val assetId = photo.imageAsset.id
         photos.delete(photo)
         photos.flush()
         imageAssets.releaseAfterCommit(assetId)
-        return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = true)
     }
 
     private fun lockBunch(bunchId: Long) =
