@@ -128,6 +128,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
+| GET /api/v1/bunches/{id}/members | 없음 | [{memberId,nickname,imageUrl,role}], 활성 멤버만([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
 | GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
@@ -171,6 +172,32 @@ Redis 세션 확인 장애는 기존 503 `AUTH_018`을 유지한다. 스키마·
 signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표시 정보·최근 사용/동률 순서·무효 소속/삭제 시 복귀,
 미인증·잘못된 토큰·refresh 토큰·해제된 세션,
 없는 회원·정지·탈퇴 계정의 401과 세션 해제를 확인하고 기존 온보딩 테스트를 유지한다.
+
+<a id="bunch-members"></a>
+### 번치 멤버 목록 조회 — 이슈 #43
+
+`GET /api/v1/bunches/{id}/members`는 번치의 활성 멤버를 내려준다. 사진함·번들 만들기의 멤버별 필터 칩
+(사진함 3.1.2, 번들 만들기 4.1.1), 번들 참여 멤버 추가(4.3.2), 멤버 관리(5.6.1)가 함께 쓴다.
+가입을 완료한 그 번치의 ACTIVE 멤버만 조회할 수 있다.
+
+| data 항목 | 타입·null 계약 |
+| --- | --- |
+| memberId | Long |
+| nickname | String 또는 null. 가입 완료 멤버는 항상 있다 |
+| imageUrl | String 또는 null. 미등록이면 null이며 앱이 기본 이미지를 표시 |
+| role | `OWNER`(메인 관리자) / `MEMBER`. 공동 관리자 역할이 생기면 값이 추가된다 |
+
+- 활성 멤버만 포함한다. 나가기·내보내짐으로 소속이 끝난 멤버와 탈퇴·정지 계정은 제외한다(3.1.2).
+  사진이 없는 멤버도 포함하고, 나갔다가 다시 참여한 멤버는 한 번만 나온다.
+- 정렬: 메인 관리자 먼저, 같은 역할 안에서는 닉네임 오름차순이다(5.6.1 로직 1). 닉네임은 DB 문자 코드
+  순서(`COLLATE "C"`)라 한글끼리는 가나다순이고 영문·숫자가 한글보다 앞에 온다.
+- 번치당 최대 8명이라 페이지가 없다. 출생연도·성별·계정 상태 등 다른 개인 정보는 내려주지 않는다(5.10.8 로직 2).
+- 오류: 미인증 401 `AUTH_001`, 가입 미완료 403 `AUTH_015`, 번치 멤버가 아님 403 `AUTH_002`, 번치 없음 404
+  `RESOURCE_001`.
+- 멤버 관리 작업(권한 변경·내보내기)과 다른 번치의 멤버 목록(5.10.8, 팔로우 상태 확인 필요)은 이 API의 범위가 아니다.
+
+검증 기준: 실제 PostgreSQL·JWT 인증을 거쳐 정렬(메인 관리자 우선, 닉네임순), 프로필 이미지 null,
+나간·내보내진·탈퇴 멤버 제외, 재참여 1회 표시, 다른 번치 멤버 미포함, 비멤버·가입 미완료·없는 번치·토큰 없음을 확인한다.
 
 오류는 ErrorCode enum을 확장한다: 입력400, 미인증/이용불가401, 가입미완료/권한403,
 무효초대404, 이름중복/필수동의버전/이미가입완료다른입력/정원/소속한도/요청키충돌409,
