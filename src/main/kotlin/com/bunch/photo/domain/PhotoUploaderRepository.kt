@@ -5,8 +5,25 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.time.Instant
+import java.util.UUID
 
 interface PhotoUploaderRepository : JpaRepository<PhotoUploader, Long> {
+    fun existsByPhotoIdAndMemberId(photoId: Long, memberId: Long): Boolean
+
+    @Query(
+        "select count(uploader) from PhotoUploader uploader " +
+            "where uploader.member.id = :memberId and uploader.photo.bunch.id = :bunchId " +
+            "and uploader.uploadedAt >= :since"
+    )
+    fun countByMemberInBunchSince(
+        @Param("memberId") memberId: Long,
+        @Param("bunchId") bunchId: Long,
+        @Param("since") since: Instant
+    ): Long
+
+    fun countByMemberIdAndUploadBatchId(memberId: Long, uploadBatchId: UUID): Long
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         "select uploader from PhotoUploader uploader " +

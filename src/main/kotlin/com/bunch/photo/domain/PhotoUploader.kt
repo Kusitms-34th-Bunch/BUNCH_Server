@@ -25,7 +25,8 @@ import java.util.UUID
         )
     ],
     indexes = [
-        Index(name = "ix_photo_uploaders_member_id", columnList = "member_id")
+        Index(name = "ix_photo_uploaders_member_id", columnList = "member_id"),
+        Index(name = "ix_photo_uploaders_member_uploaded_at", columnList = "member_id, uploaded_at")
     ]
 )
 class PhotoUploader(
