@@ -8,6 +8,10 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface PhotoRepository : JpaRepository<Photo, Long> {
+    fun findByBunchIdAndFileHash(bunchId: Long, fileHash: String): Photo?
+
+    fun countByBunchId(bunchId: Long): Long
+
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 
