@@ -20,8 +20,8 @@ kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_
 
 ## 2. type 호환성
 
-wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응답·생산자는 1~7, 9, 10이며,
-8, 11~21은 enum/storage compatibility만 유지한다. 미래 type의 producer나 fake routing은 이 API에서 만들지 않는다.
+wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응답·생산자는 1~7, 9, 10이고 #51은 17~19를 실제 관계 변경에 연결한다.
+8, 11~16, 20~21은 enum/storage compatibility만 유지한다. 미래 type의 producer나 fake routing은 이 API에서 만들지 않는다.
 
 전체 enum 표는 [저장 계약의 type 호환성](notification-schema.md#type과-target-호환성)을 따른다.
 
@@ -59,8 +59,10 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 읽음 저장이 성공한 뒤 이동 검사가 실패해도 읽음을 되돌리지 않는다. 읽음 저장 자체가 실패하면 이동하지 않는다.
 현재 번치 홈·멤버·역할 안내·초안 목록 target은 현재 번치 소속을 확인한다. ROLE_PERMISSIONS는 별도 조회 API 없이 여는 static target이다.
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
-`CANDIDATES`는 실제 #26 producer가 연결될 때까지 `available:false`다. `OTHER_BUNCH_PROFILE`과 `ACCESS_NOTICE`도 이 PR에서 접근을 허용하지 않으며 저장 payload를 근거로 이동하지 않는다.
-외부 번치 관계·차단 검사는 로컬에 #51 구현/계약이 없어 현재 inbox open에서 수행하지 않는다.
+`OTHER_BUNCH_PROFILE`은 #51의 실제 프로필 접근 검사로 현재 수신 번치 소속·대상 존재·양방향 차단을 확인한다.
+비공개 미승인도 최소 프로필은 열 수 있지만 상세 목록 권한을 부여하지 않는다.
+`CANDIDATES`와 `ACCESS_NOTICE`는 실제 접근 구현이 연결될 때까지 `available:false`다.
+저장 payload를 접근 권한의 근거로 사용하지 않으며 차단·삭제 후 open도 읽음 시각을 유지한다.
 
 ## 4. producer·시간 경계
 
