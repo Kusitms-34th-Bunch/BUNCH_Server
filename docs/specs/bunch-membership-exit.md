@@ -2,7 +2,9 @@
 
 이 문서는 #25 나가기·내보내기와 #38 사진 업로더 정리의 구현 연결을 기록한다.
 기준 HEAD는 #57 보정이 포함된 `8fbf45a`이며, V16은 #49의 `BunchActionRequest`/
-`BunchActionRequestRepository`를 merge해 재사용하고 이 기능에서는 복제하지 않는다.
+`BunchActionRequestRepository`를 merge해 재사용하고 이 기능에서는 복제하지 않는다. 푸시
+경계는 #60 소셜 선행 뒤 검증된 #65 `2f52c7e`를 병합해 사용하며, 이탈 기능은 그 writer
+호출부만 연결한다.
 
 ## API와 상태
 
@@ -44,7 +46,7 @@ FK·만료 index·recipient/membership/reason unique를 둔다. 직접 나가기
 않고, 내보내기와 #50 삭제가 `REMOVED`/`DELETED`를 같은 모델로 저장한다.
 
 조회·삭제는 활성 계정과 가입 완료를 먼저 확인하고, 본인 notice만 허용한다. 유효한
-notice는 만료 조회에서 숨기고 hourly retention이 물리 삭제한다. 재참여는 새
+notice 중 만료된 항목은 조회에서 숨기고 hourly retention이 물리 삭제한다. 재참여는 새
 Membership 저장과 같은 transaction에서 해당 member/bunch의 과거 notice를 지운다.
 
 현재 활성 Membership이 없고 본인의 유효 notice가 있으면 내부 bundle/members 접근
@@ -53,19 +55,29 @@ Membership 저장과 같은 transaction에서 해당 member/bunch의 과거 noti
 404를 먼저 내지 않도록 확인 경계를 먼저 호출한다. 범용 permission framework는
 추가하지 않았다.
 
-## 알림·후속 통합
+## 알림·푸시·재참여 통합
 
-OWNER 인계만 기존 `NotificationWriter`로 `OWNER_TRANSFERRED` inbox row를 저장한다.
-내보내기는 app Notification row를 만들지 않고 AccessNotice와 push-only type 14의
-저장 지점만 제공한다. #48의 실제 `push_jobs` 구현이 도착하면 notice 저장 직후 같은
-transaction에서 기기별 job을 연결하고, 재참여 시 `removeForRejoin`이 반환하는
-notice ID로 미전송 removal job을 취소해야 한다. 이 브랜치는 기기 job/fake push를
-만들지 않았으며 부모가 실제 job repository와 통합한다.
+OWNER 직접 나가기는 기존 `NotificationWriter.ownerTransferred`가 `OWNER_TRANSFERRED`
+inbox row를 저장하고, 현재 `NotificationWriter`의 `saveNotifications`가 같은
+transaction에서 수신 기기별 type 13 job을 만든다. 실행자에게는 보내지 않는다.
+내보내기는 app `Notification` row를 만들지 않고 `AccessNotice`를 먼저 기록한 뒤
+`PushJobWriter.enqueueDetached`로 대상 회원의 현재 허용 기기에만 type 14 detached job을
+만든다. job의 `notification_id`는 null이고 payload target은 `ACCESS_NOTICE`와 현재
+notice ID를 담으며, body는 승인 원문인 `번치 멤버 목록에서 제외되어 더 이상 번치에
+참여할 수 없어요.`를 그대로 사용한다. 번치 본체 FK를 요구하지 않는다.
+
+나가기·내보내기는 `cancelCommentRemindersForBunchLeave`를 같은 transaction에서 호출한다.
+재참여는 새 Membership 저장 후 `cancelPendingRemovalNoticeForRejoin`과
+`removeForRejoin`을 같은 transaction에서 실행하므로 과거 removal 안내와 대기 job을 함께
+취소한다. Push job insert/cancel 실패는 Membership·role·version·photo/notice·초대와 함께
+rollback하며 fake push나 APNs 호출을 만들지 않는다. 재생 요청은 업무와 job을 재생성하지
+않는다.
 
 사진 파일 API 변경은 추가하지 않았다. #46 `c04ecb6`의 `PhotoService.deleteLocked`
 추출/`deletePhoto`가 먼저 통합되면 이 브랜치의 member-wide uploader 정리와 같은
 final-delete 블록을 대조해 충돌을 해소해야 한다. #45의 PhotoRepository 목록 함수는
-보존한다. 따라서 #46 선행 후 최종 merge가 필요하며 타 사진 API는 확장하지 않는다.
+보존한다. 최종 PR에서는 #46 선행 변경과 final-delete 블록을 대조하고, 타 사진 API는
+확장하지 않는다.
 
 #50/#52는 `BunchAccessNotice`, repository, service의 `recordRemoval`/`recordDeletion`/get/delete/active/removeForRejoin
 계약을 재사용한다. 번치 본체 삭제·홈/목록의 호출부는 각각 자기 transaction에서

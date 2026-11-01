@@ -115,7 +115,7 @@ class NotificationWriter(
         bunchName: String,
         now: Instant
     ) {
-        notifications.save(
+        saveNotifications(listOf(
             Notification(
                 recipientMemberId = recipientMemberId,
                 bunchId = bunchId,
@@ -126,7 +126,7 @@ class NotificationWriter(
                 target = NotificationTarget(NotificationTargetKind.ROLE_PERMISSIONS, bunchId),
                 createdAt = now
             )
-        )
+        ))
     }
 
     // BundleService holds the bunch/bundle locks and invokes this only after a real photo-add mutation.
