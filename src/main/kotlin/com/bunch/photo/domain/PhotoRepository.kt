@@ -19,6 +19,16 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllLockedByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""select distinct photo from Photo photo
+        join PhotoUploader uploader on uploader.photo.id = photo.id
+        where photo.bunch.id = :bunchId and uploader.member.id = :memberId
+        order by photo.id asc""")
+    fun findAllLockedByBunchIdAndUploaderMemberIdOrderByIdAsc(
+        @Param("bunchId") bunchId: Long,
+        @Param("memberId") memberId: Long
+    ): List<Photo>
+
     // The status guard makes the change atomic and repeatable without loading the photo.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update Photo p set p.processingStatus = :to where p.id = :id and p.processingStatus = :from")
