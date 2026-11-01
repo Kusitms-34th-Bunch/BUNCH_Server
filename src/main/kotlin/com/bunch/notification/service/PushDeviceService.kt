@@ -35,8 +35,7 @@ class PushDeviceService(
         installationId: UUID,
         request: PushDeviceRegistrationRequest
     ): PushDeviceResponse {
-        members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
-            .requireCompleted()
+        members.findLockedById(memberId)?.requireCompleted() ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
         requireActiveSession(memberId, sessionId)
         val token = normalizeToken(request.deviceToken)
         val topic = settings.topic(request.environment)
@@ -98,8 +97,7 @@ class PushDeviceService(
 
     @Transactional
     fun unregister(memberId: Long, sessionId: UUID, installationId: UUID) {
-        members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
-            .requireCompleted()
+        members.findLockedById(memberId)?.requireCompleted() ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
         requireActiveSession(memberId, sessionId)
         val device = devices.findByInstallationIdLocked(installationId) ?: return
         if (device.memberId != memberId || device.sessionId != sessionId) {

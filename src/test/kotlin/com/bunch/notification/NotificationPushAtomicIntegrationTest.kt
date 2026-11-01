@@ -186,8 +186,14 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
         bundleService.changePhotos(BundleActor(owner, "atomic-owner"), bunchId, draft.id, firstKey, firstChange)
         val activity = notifications.findAll().single { it.type == NotificationType.DRAFT_ACTIVITY }
         val firstJob = jdbc.queryForMap("SELECT * FROM push_jobs WHERE notification_id = ?", activity.id)
+        val originalTitle = jdbc.queryForObject(
+            "SELECT payload -> 'aps' -> 'alert' ->> 'title' FROM push_jobs WHERE notification_id = ?",
+            String::class.java,
+            activity.id
+        )
         inbox.read(guest, bunchId, activity.id)
         device(guest)
+        jdbc.update("UPDATE bunches SET name = ? WHERE id = ?", uniqueName(), bunchId)
 
         bundleService.changePhotos(
             BundleActor(owner, "atomic-owner"),
@@ -210,6 +216,11 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
         assertThat(jobs.single()["status"]).isEqualTo("PENDING")
         assertThat(jobs.single()["available_at"]).isEqualTo(firstJob["available_at"])
         assertThat(jobs.single()["payload"].toString()).contains("사진 2장")
+        assertThat(jdbc.queryForObject(
+            "SELECT payload -> 'aps' -> 'alert' ->> 'title' FROM push_jobs WHERE notification_id = ?",
+            String::class.java,
+            activity.id
+        )).isEqualTo(originalTitle)
     }
 
     private fun device(memberId: Long) {

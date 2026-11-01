@@ -36,7 +36,7 @@ class PushJobWriter(
     fun refreshMergedActivity(notification: Notification) {
         val groupUntil = notification.groupUntil ?: return
         jobs.findAllByNotificationIdAndStatus(notification.id, PushJobStatus.PENDING).forEach { job ->
-            job.payload = payloads.forNotification(job.id, notification)
+            job.payload = payloads.forNotification(job.id, notification, job.payload.aps.alert.title)
             job.availableAt = groupUntil
         }
     }

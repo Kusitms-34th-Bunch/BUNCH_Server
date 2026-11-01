@@ -1,6 +1,8 @@
 package com.bunch.notification.service
 
 import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.exception.ErrorCode
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -25,7 +27,7 @@ class PushApnsSettings(
     fun topic(environment: PushDeviceEnvironment): String = when (environment) {
         PushDeviceEnvironment.SANDBOX -> sandboxTopic
         PushDeviceEnvironment.PRODUCTION -> productionTopic
-    }.also { require(it.isNotBlank()) { "APNs topic is not configured" } }
+    }.also { if (it.isBlank()) throw BusinessException(ErrorCode.INVALID_INPUT) }
 
     fun endpoint(environment: PushDeviceEnvironment): URI = when (environment) {
         PushDeviceEnvironment.SANDBOX -> sandboxEndpoint
