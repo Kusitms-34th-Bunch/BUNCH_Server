@@ -11,6 +11,11 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         status: MembershipStatus = MembershipStatus.ACTIVE
     ): BunchMembership?
 
+    fun findByIdAndBunchId(
+        id: Long,
+        bunchId: Long
+    ): BunchMembership?
+
     fun countByMemberIdAndStatus(
         memberId: Long,
         status: MembershipStatus = MembershipStatus.ACTIVE
@@ -20,6 +25,12 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         bunchId: Long,
         status: MembershipStatus = MembershipStatus.ACTIVE
     ): Long
+
+    fun existsByMemberIdAndBunchIdAndStatus(
+        memberId: Long,
+        bunchId: Long,
+        status: MembershipStatus = MembershipStatus.ACTIVE
+    ): Boolean
 
     fun findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(
         memberId: Long,

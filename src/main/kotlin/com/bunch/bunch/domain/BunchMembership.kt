@@ -28,7 +28,7 @@ class BunchMembership(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val status: MembershipStatus = MembershipStatus.ACTIVE,
+    var status: MembershipStatus = MembershipStatus.ACTIVE,
 
     @Column(nullable = false)
     val joinedAt: Instant,
@@ -40,7 +40,7 @@ class BunchMembership(
     var lastUsedAt: Instant = joinedAt,
 
     @Column
-    val endedAt: Instant? = null,
+    var endedAt: Instant? = null,
 
     @Column
     var roleGrantedBy: Long? = null,
@@ -74,5 +74,12 @@ class BunchMembership(
         outcome: JoinOutcome
     ) {
         joinRequests = joinRequests + (key.toString() to JoinRequest(fingerprint, outcome))
+    }
+
+    fun end(newStatus: MembershipStatus, endedAt: Instant) {
+        check(newStatus == MembershipStatus.LEFT || newStatus == MembershipStatus.REMOVED)
+        check(status == MembershipStatus.ACTIVE)
+        status = newStatus
+        this.endedAt = endedAt
     }
 }
