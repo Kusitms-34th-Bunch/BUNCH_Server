@@ -86,12 +86,12 @@ class InvitationService(
 
         memberships.findJoinReplay(userId, key.toString())?.let { previous ->
             val replay = previous.joinRequests.getValue(key.toString())
+            if (previous.status != MembershipStatus.ACTIVE) fail(ErrorCode.FORBIDDEN)
             if (
                 resolved == null ||
                     replay.fingerprint != fingerprint(resolved)
             )
                 fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-            if (previous.status != MembershipStatus.ACTIVE) fail(ErrorCode.FORBIDDEN)
             val bunch = bunches.findLocked(previous.bunch.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
             memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let {
                 // Replay was loaded before the bunch lock; retain activity committed while waiting.

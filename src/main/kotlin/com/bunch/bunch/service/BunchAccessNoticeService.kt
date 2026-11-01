@@ -29,11 +29,26 @@ class BunchAccessNoticeService(
         bunch: Bunch,
         membership: BunchMembership,
         occurredAt: Instant
+    ): BunchAccessNotice = record(bunch, membership, BunchAccessNoticeReason.REMOVED, occurredAt)
+
+    /** Called by #50 before deleting a bunch and its memberships. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun recordDeletion(
+        bunch: Bunch,
+        membership: BunchMembership,
+        occurredAt: Instant
+    ): BunchAccessNotice = record(bunch, membership, BunchAccessNoticeReason.DELETED, occurredAt)
+
+    private fun record(
+        bunch: Bunch,
+        membership: BunchMembership,
+        reason: BunchAccessNoticeReason,
+        occurredAt: Instant
     ): BunchAccessNotice {
         return notices.findByRecipientMemberIdAndMembershipIdAndReason(
             membership.member.id,
             membership.id,
-            BunchAccessNoticeReason.REMOVED
+            reason
         ) ?: notices.save(
             BunchAccessNotice(
                 recipientMemberId = membership.member.id,
@@ -41,7 +56,7 @@ class BunchAccessNoticeService(
                 membershipId = membership.id,
                 bunchName = bunch.name,
                 characterType = bunch.characterType,
-                reason = BunchAccessNoticeReason.REMOVED,
+                reason = reason,
                 occurredAt = occurredAt,
                 expiresAt = occurredAt.plus(ACCESS_NOTICE_RETENTION)
             )
@@ -73,6 +88,7 @@ class BunchAccessNoticeService(
         requireCompleted(memberId)
         return notices
             .findActiveByRecipientMemberId(memberId, clock.instant())
+            .filterNot { hasActiveMembership(memberId, it.bunchId) }
             .map(BunchAccessNoticeResponse::from)
     }
 
@@ -93,6 +109,24 @@ class BunchAccessNoticeService(
             )
         }
         fail(ErrorCode.FORBIDDEN)
+    }
+
+    /** Preserves a missing-bunch 404 while still surfacing the caller's own notice. */
+    @Transactional(readOnly = true)
+    fun requireNoticeIfPresent(memberId: Long, bunchId: Long) {
+        requireCompleted(memberId)
+        if (hasActiveMembership(memberId, bunchId)) return
+        val notice = notices.findActiveByRecipientMemberId(memberId, clock.instant())
+            .firstOrNull { it.bunchId == bunchId }
+        if (notice != null) {
+            fail(
+                ErrorCode.BUNCH_ACCESS_UNAVAILABLE,
+                mapOf(
+                    "noticeId" to notice.id,
+                    "reason" to notice.reason.name
+                )
+            )
+        }
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
