@@ -11,6 +11,11 @@ data class BunchMembershipExitRequest(
     val successorMembershipId: Long? = null
 )
 
+data class BunchRemovalRequest(
+    val actorMembershipId: Long,
+    val expectedMembershipVersion: Long
+)
+
 data class BunchDepartureResponse(
     val bunchId: Long,
     val departedMembershipId: Long,
