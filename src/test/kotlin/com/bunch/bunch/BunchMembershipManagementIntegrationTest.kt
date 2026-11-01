@@ -10,24 +10,36 @@ import com.bunch.bunch.service.BunchMembershipManagementService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.bunch.notification.domain.NotificationRepository
+import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataAccessException
 import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.sql.Timestamp
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @SpringBootTest
@@ -50,12 +62,24 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
     private lateinit var mvc: MockMvc
 
     @Autowired
+    private lateinit var mapper: ObjectMapper
+
+    @Autowired
     private lateinit var tokens: TokenProvider
 
     @Autowired
     private lateinit var sessions: RefreshTokenRepository
 
+    @MockitoBean
+    private lateinit var clock: Clock
+
     private val sessionIds = mutableListOf<Pair<String, Long>>()
+    private val testNow = Instant.parse("2026-11-02T00:00:00.123456Z")
+
+    @BeforeEach
+    fun setManagementClock() {
+        `when`(clock.instant()).thenReturn(testNow)
+    }
 
     @AfterEach
     fun cleanManagementSessions() {
@@ -104,6 +128,135 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `management HTTP contract validates authentication signup ids versions json and headers`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        val ownerAuth = sessionFor(owner)
+
+        mvc.perform(get("/api/v1/bunches/${bunch.id}/memberships"))
+            .expectError(ErrorCode.UNAUTHORIZED)
+
+        val incompleteAuth = sessionFor(member(completed = false))
+        listRequest(incompleteAuth, bunch.id).expectError(ErrorCode.SIGNUP_INCOMPLETE)
+
+        listOf(0, -1).forEach { invalidBunchId ->
+            listRequest(ownerAuth, invalidBunchId.toLong()).expectError(ErrorCode.INVALID_INPUT)
+        }
+
+        val currentVersion = version(bunch.id)
+        val validRole = ChangeMembershipRoleRequest(
+            actorMembershipId = ownerMembership.id,
+            expectedMembershipVersion = currentVersion,
+            role = MembershipRole.CO_OWNER
+        )
+        listOf(0, -1).forEach { invalidMembershipId ->
+            mvc.perform(
+                put("/api/v1/bunches/${bunch.id}/memberships/$invalidMembershipId/role")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(mapper.writeValueAsBytes(validRole))
+            ).expectError(ErrorCode.INVALID_INPUT)
+        }
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(validRole.copy(actorMembershipId = 0)))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(validRole.copy(expectedMembershipVersion = -1)))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{not-json".toByteArray())
+        ).expectError(ErrorCode.INVALID_JSON)
+
+        // Role changes deliberately do not require Idempotency-Key.
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(validRole))
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.membershipVersion").value(currentVersion + 1))
+            .andExpect(jsonPath("$.error").isEmpty)
+
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(validRole.copy(role = MembershipRole.MEMBER)))
+        ).expectError(ErrorCode.BUNCH_MEMBERSHIP_VERSION_CONFLICT)
+
+        val transfer = OwnerTransferRequest(ownerMembership.id, version(bunch.id), targetMembership.id)
+        val transferPath = "/api/v1/bunches/${bunch.id}/owner-transfer"
+        mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", "not-a-uuid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            post("/api/v1/bunches/-1/owner-transfer")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer.copy(targetMembershipId = -1)))
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer.copy(expectedMembershipVersion = -1)))
+        ).expectError(ErrorCode.INVALID_INPUT)
+
+        val key = UUID.randomUUID().toString()
+        val first = mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer))
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.success").value(true))
+            .andReturn().response.contentAsString
+        val replay = mvc.perform(
+            post(transferPath)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${ownerAuth.accessToken}")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(transfer))
+        ).andExpect(status().isOk)
+            .andExpect(jsonPath("$.success").value(true))
+            .andReturn().response.contentAsString
+        assertThat(mapper.readTree(replay).path("data")).isEqualTo(mapper.readTree(first).path("data"))
+    }
+
+    @Test
     fun `owner can grant and revoke co owner with metadata and target notification`() {
         val owner = member()
         val bunch = create(owner)
@@ -126,6 +279,8 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
             .extracting("role_granted_at")
             .isNotNull
         assertThat(roleNotifications(target, NotificationType.CO_OWNER_GRANTED)).hasSize(1)
+        assertThat(roleNotifications(target, NotificationType.CO_OWNER_GRANTED).single().target.kind)
+            .isEqualTo(NotificationTargetKind.ROLE_PERMISSIONS)
         assertThat(roleNotifications(owner, NotificationType.CO_OWNER_GRANTED)).isEmpty()
 
         val revoked = management.changeRole(
@@ -284,7 +439,129 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `expired owner transfer key is removed before a new success is recorded`() {
+    fun `concurrent owner transfer retries with one key apply once and replay one result`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        val key = UUID.randomUUID()
+        val request = OwnerTransferRequest(ownerMembership.id, version(bunch.id), targetMembership.id)
+
+        val results = concurrently(
+            listOf(
+                { management.transferOwner(owner, bunch.id, key, request) },
+                { management.transferOwner(owner, bunch.id, key, request) }
+            )
+        )
+
+        assertThat(results).allMatch { it.isSuccess }
+        assertThat(results.map { it.getOrThrow() }.distinct()).hasSize(1)
+        assertThat(actionRequests.count()).isEqualTo(1)
+        assertThat(roleNotifications(target, NotificationType.OWNER_TRANSFERRED)).hasSize(1)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bunch_memberships WHERE bunch_id = ? AND status = 'ACTIVE' AND role = 'OWNER'",
+            Long::class.java,
+            bunch.id
+        )).isEqualTo(1L)
+    }
+
+    @Test
+    fun `previous membership actor id is rejected after the member rejoins`() {
+        val owner = member()
+        val bunch = create(owner)
+        val former = joined(owner, bunch.id)
+        val target = joined(owner, bunch.id)
+        val formerMembership = membership(former, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        val invitation = issue(owner, bunch.id)
+
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT', ended_at = ? WHERE id = ?",
+            Timestamp.from(testNow),
+            formerMembership.id
+        )
+        join(former, invitation)
+        val currentMembership = membership(former, bunch.id)
+        assertThat(currentMembership.id).isNotEqualTo(formerMembership.id)
+
+        val formerAuth = sessionFor(former)
+        mvc.perform(
+            put("/api/v1/bunches/${bunch.id}/memberships/${targetMembership.id}/role")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${formerAuth.accessToken}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    mapper.writeValueAsBytes(
+                        ChangeMembershipRoleRequest(
+                            actorMembershipId = formerMembership.id,
+                            expectedMembershipVersion = version(bunch.id),
+                            role = MembershipRole.CO_OWNER
+                        )
+                    )
+                )
+        ).expectError(ErrorCode.FORBIDDEN)
+    }
+
+    @Test
+    fun `owner transfer replay survives leave and bunch deletion while a new key rechecks authority`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        val key = UUID.randomUUID()
+        val request = OwnerTransferRequest(ownerMembership.id, version(bunch.id), targetMembership.id)
+        val result = management.transferOwner(owner, bunch.id, key, request)
+
+        assertError(ErrorCode.FORBIDDEN) {
+            management.transferOwner(owner, bunch.id, UUID.randomUUID(), request)
+        }
+
+        // #25 owns the leave service; this DB transition proves the shared replay row is independent of it.
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT', ended_at = ? WHERE id = ?",
+            Timestamp.from(testNow),
+            ownerMembership.id
+        )
+        assertThat(management.transferOwner(owner, bunch.id, key, request)).isEqualTo(result)
+
+        // #50 owns deletion; V16 intentionally has no bunch FK so the successful result remains replayable.
+        jdbc.update("DELETE FROM bunches WHERE id = ?", bunch.id)
+        assertThat(management.transferOwner(owner, bunch.id, key, request)).isEqualTo(result)
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) {
+            management.transferOwner(owner, bunch.id, UUID.randomUUID(), request)
+        }
+        assertThat(actionRequests.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `owner transfer replay remains active just before the thirty day boundary`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        val key = UUID.randomUUID()
+        val request = OwnerTransferRequest(ownerMembership.id, version(bunch.id), targetMembership.id)
+        val result = management.transferOwner(owner, bunch.id, key, request)
+        val createdAt = testNow.minus(Duration.ofDays(30)).plus(1, ChronoUnit.MICROS)
+        val expiresAt = testNow.plus(1, ChronoUnit.MICROS)
+
+        jdbc.update(
+            "UPDATE bunch_action_requests SET created_at = ?, expires_at = ? WHERE member_id = ? AND bunch_id = ? AND request_key = ?",
+            Timestamp.from(createdAt),
+            Timestamp.from(expiresAt),
+            owner,
+            bunch.id,
+            key
+        )
+
+        assertThat(management.transferOwner(owner, bunch.id, key, request)).isEqualTo(result)
+        assertThat(actionRequests.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `owner transfer key at the exact thirty day boundary is expired before reuse`() {
         val owner = member()
         val bunch = create(owner)
         val target = joined(owner, bunch.id)
@@ -300,8 +577,8 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
                 requestKey = key,
                 fingerprint = "0".repeat(64),
                 result = mapOf("bunchId" to bunch.id),
-                createdAt = Instant.now().minusSeconds(60),
-                expiresAt = Instant.now().minusSeconds(1)
+                createdAt = testNow.minus(Duration.ofDays(30)),
+                expiresAt = testNow
             )
         )
 
@@ -313,7 +590,8 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
         )
 
         assertThat(actionRequests.count()).isEqualTo(1)
-        assertThat(actionRequests.findAll().single().expiresAt).isAfter(Instant.now())
+        assertThat(actionRequests.findAll().single().expiresAt)
+            .isEqualTo(testNow.plus(Duration.ofDays(30)))
     }
 
     @Test
@@ -407,6 +685,13 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
         sessionIds += sessionId to memberId
         return Auth(memberId, pair.accessToken)
     }
+
+    private fun ResultActions.expectError(error: ErrorCode): ResultActions =
+        andExpect(status().`is`(error.status))
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.data").isEmpty)
+            .andExpect(jsonPath("$.error.code").value(error.code))
+            .andExpect(jsonPath("$.error.message").value(error.messageKey))
 
     private data class Auth(val memberId: Long, val accessToken: String)
 }
