@@ -21,6 +21,8 @@ interface BunchRepository : JpaRepository<Bunch, Long> {
 
     fun existsByName(name: String): Boolean
 
+    fun existsByNameAndIdNot(name: String, id: Long): Boolean
+
     // ON CONFLICT preserves the duplicate-name response without aborting the transaction.
     @Modifying
     @Query(
