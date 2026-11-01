@@ -53,7 +53,10 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 
 저장 호환성을 유지하는 target kind는 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_LIST`,
 `BUNDLE`, `BUNDLE_COMMENTS`, `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다.
-외부 번치 관계와 접근 안내의 producer는 이 PR에서 만들지 않으며, 저장된 target JSON을 접근 증거로 사용하지 않는다.
+17~19는 #51의 실제 관계 ID·type·수신 회원으로 중복을 구분하며 관계 변경과 함께 저장한다.
+`OTHER_BUNCH_PROFILE`의 `bunchId`는 수신/현재 번치, `targetBunchId`는 상대 번치다.
+open은 #51의 실제 접근 검사를 사용하고 저장된 target JSON을 접근 증거로 사용하지 않는다.
+접근 안내 producer는 해당 이탈/삭제 기능에서 연결한다.
 
 ## 3. `DRAFT_ACTIVITY` 합산 저장
 
