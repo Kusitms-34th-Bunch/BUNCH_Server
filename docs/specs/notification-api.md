@@ -43,6 +43,7 @@ wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응�
 ### read / read-all
 
 - 개별 read는 본인·번치의 보관 행만 갱신하고 이미 읽은 행의 최초 `readAt`을 보존한다.
+  최초 read/open 시각은 PostgreSQL 저장 정밀도인 마이크로초로 절삭하여 첫 응답과 재조회 값이 같도록 한다.
 - read-all은 같은 회원·번치·30일 cutoff의 `read_at IS NULL` 행을 한 UPDATE로 처리한다.
 - 처리 후 새로 저장된 알림이나 활동은 미확인으로 남는다. 빈 목록도 성공 no-op이다.
 
