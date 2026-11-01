@@ -159,7 +159,7 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 | `DELETE` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}` | 없음 | 선택 `X-Request-Id` | `null` |
 
 `GET` 목록의 `status`는 필수이며 `DRAFT` 또는 `PUBLISHED`다. `page` 기본값은 `0`,
-`size` 기본값은 `20`이고 `size`는 1~50이다. 초안은 `createdAt` 내림차순, 발행본은
+`size` 기본값은 `20`이고 `size`는 1~50이다. 초안은 `updatedAt` 내림차순, 발행본은
 `publishedAt` 내림차순이며 동률은 `id` 내림차순이다.
 
 ### 생성·조회·요약
@@ -236,7 +236,7 @@ null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 
 `dateChips`는 빈 목록이다.
 
 초안의 text·date·visibility·caption 저장은 참여자만 할 수 있다. 발행본의 제목·날짜·
-공개 범위·사진·캡션 수정은 생성자 또는 번치 관리자만 할 수 있다. 발행본 코멘트는
+공개 범위·사진·캡션 수정은 현재 메인 관리자 OWNER만 할 수 있다. 발행본 코멘트는
 해당 번들의 참여자 본인만 수정한다.
 
 ### 참여자·나가기·삭제
@@ -256,7 +256,8 @@ null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 
 반환한다. 다른 참여자가 나가면 본인의 참여·코멘트·편집권을 제거한 `BundleSnapshot`을
 반환한다. 발행본에서는 이 경로를 사용할 수 없다.
 
-`DELETE /{bundleId}`는 생성자 또는 번치 관리자만 호출한다. 번들·번들 사진·참여자·
+`DELETE /{bundleId}`는 DRAFT에서 생성자 또는 해당 초안에 참여 중인 OWNER/CO_OWNER만,
+PUBLISHED에서 현재 OWNER만 호출한다. 번들·번들 사진·참여자·
 코멘트를 삭제하고 `data: null`을 반환한다. 사진함 원본 Photo는 삭제하지 않는다.
 
 ### 사진 구성·순서·캡션
@@ -303,7 +304,7 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 
 캡션 경로는 `BundleTextRequest`를 사용한다. 초안은 해당 `BundlePhoto`의
 `PHOTO:{bundlePhotoId}` 편집권이 필요하며, REST에서 현재 회원·session·target·
-`leaseToken`·만료·`expectedVersion`을 검증한다. 발행본은 생성자 또는 번치 관리자만
+`leaseToken`·만료·`expectedVersion`을 검증한다. 발행본은 현재 메인 관리자 OWNER만
 수정한다. 응답은 전체 `BundleSnapshot`이다.
 
 ### 발행
@@ -314,7 +315,7 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 }
 ```
 
-발행은 생성자 또는 번치 관리자가 호출해야 하며, 초안에서는 호출자도 참여자여야 한다.
+발행은 생성자 또는 참여 중인 OWNER/CO_OWNER가 호출해야 하며, 초안에서는 호출자도 참여자여야 한다.
 `expectedRevision`이 현재 `revision`과 다르면 `BUNDLE_003`이며 `detail`은 현재
 번들 내용과 `version`을 포함한다.
 
@@ -331,7 +332,7 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 
 발행은 사진 원본이 여전히 같은 번치의 `READY` 상태인지 다시 잠그고, 상태를
 `PUBLISHED`로 바꾸며 `publishedAt`을 기록하고 active lease를 해제한다. 발행 후
-생성자와 번치 관리자만 공용 내용·사진을 수정할 수 있고, `mode: "DRAFT"` 저장은
+현재 메인 관리자 OWNER만 공용 내용·사진을 수정할 수 있고, `mode: "DRAFT"` 저장은
 허용하지 않는다.
 
 발행 재시도 규칙은 다음과 같다.
@@ -448,9 +449,11 @@ version을 사용해야 한다.
 }
 ```
 
-`BundlePermissions`의 `canEdit`은 초안 참여자 또는 발행본 생성자·관리자에게,
-`canPublish`는 초안 참여자이면서 생성자·관리자일 때, `canDelete`는 생성자·관리자에게
-true다.
+`BundlePermissions.administrator`는 OWNER와 CO_OWNER, `creator`는 생성자,
+`participant`는 참여 여부를 각각 나타낸다. `canEdit`은 초안 참여자 또는 발행본 OWNER에게,
+`canPublish`는 초안 참여자이면서 생성자·관리자일 때 true다. `canDelete`는 초안에서
+참여 중인 생성자·OWNER/CO_OWNER, 발행본에서 OWNER에게만 true다. 미참여 관리자는
+초안 편집·발행·폐기 권한이 없다. `canEdit`은 공용 내용 권한이며 본인 코멘트 작성자 권한은 별도로 유지한다.
 
 ```json
 {
@@ -471,8 +474,10 @@ true다.
 }
 ```
 
-`BundleSummary.stage`는 published count로 계산한다. 0~3은 1, 4~7은 2, 8~11은
-3, 12~15는 4, 16 이상은 5다.
+`BundleSummary.stage`는 PUBLIC/PRIVATE 전체 published count로 계산한다. 0~1은 1,
+2~5는 2, 6~9는 3, 10 이상은 4다. 삭제 후에도 현재 수로 다시 계산한다.
+`bunch.bundle.stage-thresholds`의 기본값 `0,2,6,10`을 사용하며 환경 변수
+`BUNCH_BUNDLE_STAGE_THRESHOLDS`로 지정한다. 내부·외부 계산은 같은 정책을 재사용한다.
 
 ### 오류와 conflict detail
 
@@ -557,8 +562,10 @@ client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 enve
 /app/bunches/{bunchId}/bundles/{bundleId}/activity
 ```
 
-편집권 명령과 `COMMENT` 활동은 초안 참여자만 사용할 수 있다. `VIEW` 활동은 초안·
-발행본의 현재 번치 멤버가 사용할 수 있다.
+편집권 명령은 초안 참여자만 사용할 수 있다. `COMMENT` 활동은 초안 참여자와
+발행본 본인 코멘트 작성자에게 허용한다. `VIEW` 활동은 초안·발행본의 현재 번치 멤버가 사용할 수 있다.
+모든 명령에서 현재 소속·참여 상태를 재검사하며 역할만으로 편집권을 우회할 수 없다.
+활동 표시·VIEW·lease 획득·heartbeat는 `lastActivityAt`과 `updatedAt`을 바꾸지 않는다.
 
 ### 기본 연결·구독·REST 저장 흐름
 

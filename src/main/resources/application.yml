@@ -64,6 +64,8 @@ cloudinary:
   api-key: ${CLOUDINARY_API_KEY:}
   api-secret: ${CLOUDINARY_API_SECRET:}
 bunch:
+  bundle:
+    stage-thresholds: ${BUNCH_BUNDLE_STAGE_THRESHOLDS:0,2,6,10}
   invitation-base-url: ${BUNCH_INVITATION_BASE_URL:http://localhost:3000/invite}
   websocket:
     allowed-origins: ${BUNCH_WS_ALLOWED_ORIGINS:http://localhost:3000}

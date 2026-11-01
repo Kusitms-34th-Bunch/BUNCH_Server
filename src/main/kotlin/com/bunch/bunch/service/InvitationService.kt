@@ -99,7 +99,11 @@ class InvitationService(
             )
                 fail(ErrorCode.IDEMPOTENCY_CONFLICT)
             val bunch = bunches.findLocked(previous.bunch.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-            memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let { it.lastUsedAt = Instant.now() }
+            memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let {
+                // Replay was loaded before the bunch lock; retain activity committed while waiting.
+                entityManager.refresh(it)
+                it.lastUsedAt = Instant.now()
+            }
             return JoinResponse(replay.outcome, BunchResponse.from(bunch))
         }
 
@@ -130,6 +134,7 @@ class InvitationService(
             )
         )
         membership.rememberJoin(key, fingerprint(current), JoinOutcome.JOINED)
+        bunch.membershipVersion++
         notifications.memberJoined(bunch.id, membership.id, userId, member.nickname!!, now)
         return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch))
     }

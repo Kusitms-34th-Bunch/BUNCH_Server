@@ -40,7 +40,8 @@ class BundleService(
     private val leases: BundleLeaseService,
     private val images: ImageAssetService,
     private val events: ApplicationEventPublisher,
-    private val mapper: ObjectMapper
+    private val mapper: ObjectMapper,
+    private val stagePolicy: BundleStagePolicy
 ) {
     @Transactional
     fun create(actor: BundleActor, bunchId: Long, key: UUID, request: CreateBundleRequest): BundleSnapshot {
@@ -73,7 +74,7 @@ class BundleService(
     fun list(userId: Long, bunchId: Long, status: BundleStatus, page: Int, size: Int): BundlePage {
         access.lockBunch(userId, bunchId)
         if (page < 0 || size !in 1..50) fail(ErrorCode.INVALID_INPUT)
-        val sort = Sort.by(Sort.Direction.DESC, if (status == BundleStatus.DRAFT) "createdAt" else "publishedAt", "id")
+        val sort = Sort.by(Sort.Direction.DESC, if (status == BundleStatus.DRAFT) "updatedAt" else "publishedAt", "id")
         val result = bundles.findAllByBunchIdAndStatus(bunchId, status, PageRequest.of(page, size, sort))
         return BundlePage(result.content.map { snapshot(it, userId) }, page, size, result.totalElements)
     }
@@ -82,7 +83,7 @@ class BundleService(
     fun summary(userId: Long, bunchId: Long): BundleSummary {
         access.requireMember(userId, bunchId)
         val published = bundles.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
-        return BundleSummary(bundles.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT), published, stage(published))
+        return BundleSummary(bundles.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT), published, stagePolicy.stage(published))
     }
 
     @Transactional
@@ -102,6 +103,7 @@ class BundleService(
             bundle.title = value
             bundle.titleVersion++
             changed(bundle, requestId, BundleEventType.TITLE, mapOf("value" to value, "version" to bundle.titleVersion))
+            recordActivity(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -123,6 +125,7 @@ class BundleService(
                 "value" to request.value,
                 "version" to bundle.visibilityVersion
             ))
+            recordActivity(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -145,6 +148,7 @@ class BundleService(
             changed(bundle, requestId, BundleEventType.DATE, mapOf(
                 "value" to bundle.date, "version" to bundle.dateVersion, "dateChips" to dateChips(bundle)
             ))
+            recordActivity(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -159,7 +163,7 @@ class BundleService(
     ): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, request.mode)
-        if (!access.isParticipant(actor.memberId, id)) fail(ErrorCode.FORBIDDEN)
+        access.requireCommentAuthor(actor.memberId, bundle)
         val existing = comments.findByBundleIdAndMemberId(id, actor.memberId)
         version(existing?.version ?: 0, request.expectedVersion, mapOf("value" to (existing?.content ?: "")))
         val value = validateText { BundleText.comment(request.value) }
@@ -170,6 +174,7 @@ class BundleService(
             row.version++
             row.updatedAt = Instant.now()
             changed(bundle, requestId, BundleEventType.COMMENT, commentResponse(row))
+            recordActivity(bundle, actor.memberId, comment = true)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -199,6 +204,7 @@ class BundleService(
             photo.captionUpdatedBy = actor.memberId
             photo.captionUpdatedAt = Instant.now()
             changed(bundle, requestId, BundleEventType.CAPTION, photoResponse(photo))
+            recordActivity(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -227,7 +233,7 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
-        access.requireManager(actor.memberId, bundle, participating = true)
+        access.requireDraftManager(actor.memberId, bundle)
         if (memberId == bundle.createdBy) fail(ErrorCode.FORBIDDEN)
         removeParticipation(bundle, memberId, requestId)
         return snapshot(bundle, actor.memberId)
@@ -288,6 +294,7 @@ class BundleService(
         final.forEachIndexed { index, photo -> photo.position = index }
         if (removed.isNotEmpty() || selected.isNotEmpty()) {
             changed(bundle, key.toString(), BundleEventType.PHOTOS, photoChanges(bundle))
+            recordActivity(bundle, actor.memberId)
         }
         remember(actor.memberId, bundle, operation, key, fingerprint)
         return snapshot(bundle, actor.memberId)
@@ -323,6 +330,7 @@ class BundleService(
         if (rest.map { it.id } != current.map { it.id }) {
             rest.forEachIndexed { index, photo -> photo.position = index }
             changed(bundle, requestId, BundleEventType.PHOTOS, photoChanges(bundle))
+            recordActivity(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -330,7 +338,10 @@ class BundleService(
     @Transactional
     fun publish(actor: BundleActor, bunchId: Long, id: Long, key: UUID, request: PublishBundleRequest): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
-        access.requireManager(actor.memberId, bundle)
+        if (!access.isParticipant(actor.memberId, id) ||
+            (bundle.createdBy != actor.memberId && !access.isAdministrator(actor.memberId, bunchId))) {
+            fail(ErrorCode.FORBIDDEN)
+        }
         val operation = "PUBLISH:$id"
         val fingerprint = fingerprint(request)
         replay(actor.memberId, bunchId, operation, key, fingerprint)?.let { return snapshot(it, actor.memberId) }
@@ -359,7 +370,8 @@ class BundleService(
     @Transactional
     fun delete(actor: BundleActor, bunchId: Long, id: Long, requestId: String) {
         val bundle = access.lock(actor.memberId, bunchId, id)
-        access.requireManager(actor.memberId, bundle)
+        if (bundle.status == BundleStatus.DRAFT) access.requireDraftManager(actor.memberId, bundle)
+        else access.requireOwner(actor.memberId, bunchId)
         deleteInternal(bundle, requestId)
     }
 
@@ -402,7 +414,7 @@ class BundleService(
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, expected)
         if (bundle.status == BundleStatus.DRAFT) access.requireParticipant(actor.memberId, bundle)
-        else access.requireManager(actor.memberId, bundle)
+        else access.requireOwner(actor.memberId, bunchId)
         return bundle
     }
 
@@ -469,6 +481,13 @@ class BundleService(
         events.publishEvent(BundleChangedEvent(bundle.bunchId, bundle.id, bundle.revision, requestId, type, changes))
     }
 
+    private fun recordActivity(bundle: Bundle, memberId: Long, comment: Boolean = false) {
+        if (bundle.status == BundleStatus.DRAFT || comment) {
+            memberships.findByMemberIdAndBunchIdAndStatus(memberId, bundle.bunchId)
+                ?.recordActivity(bundle.updatedAt)
+        }
+    }
+
     private fun addPhoto(bundle: Bundle, photo: Photo, position: Int, userId: Long): BundlePhoto = photos.saveAndFlush(
         BundlePhoto(
             bundleId = bundle.id,
@@ -525,6 +544,8 @@ class BundleService(
         val creator = bundle.createdBy == userId
         val participant = access.isParticipant(userId, bundle.id)
         val draft = bundle.status == BundleStatus.DRAFT
+        val owner = access.isOwner(userId, bundle.bunchId)
+        val draftManager = participant && (creator || administrator)
         return BundleSnapshot(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
@@ -533,8 +554,14 @@ class BundleService(
                 .map { BundleParticipantResponse(it.memberId, it.joinedAt) },
             comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
-            BundlePermissions(administrator, creator, participant, if (draft) participant else creator || administrator,
-                draft && participant && (creator || administrator), creator || administrator),
+            BundlePermissions(
+                administrator = administrator,
+                creator = creator,
+                participant = participant,
+                canEdit = if (draft) participant else owner,
+                canPublish = draft && draftManager,
+                canDelete = if (draft) draftManager else owner
+            ),
             leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt
         )
     }
@@ -572,8 +599,6 @@ class BundleService(
     } catch (_: IllegalArgumentException) {
         fail(ErrorCode.INVALID_INPUT)
     }
-
-    private fun stage(count: Long): Int = (count / 4 + 1).coerceAtMost(5).toInt()
 
     private fun fail(code: ErrorCode, detail: Any? = null): Nothing = throw BusinessException(code, detail)
 }

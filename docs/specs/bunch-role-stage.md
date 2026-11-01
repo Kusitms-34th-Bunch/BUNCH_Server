@@ -1,0 +1,58 @@
+# 번치 역할·버전·활동기록 계약 (#47)
+
+2026-10-31 승인 번치 계약 중 #47 구현 범위를 기록한다. 전체 홈·프로필 일괄 저장,
+역할 변경 API(#49), 나가기·내보내기(#25), 알림 저장·전송(#28)은 각 이슈에서 연결한다.
+번들 REST·STOMP 계약은 [번들 API](bundle-api.md), 생성·초대는
+[로그인·온보딩 API](login-onboarding-api.md)를 함께 따른다.
+
+## 역할과 기존 응답 호환
+
+- `OWNER`는 메인 관리자 1명, `CO_OWNER`는 여러 명 가능한 공동 관리자, `MEMBER`는 일반 멤버다.
+- 활성 OWNER의 중복은 부분 유일 인덱스로 막는다. 마지막 OWNER 소멸 방지는 번치 잠금을 잡는
+  서비스 트랜잭션의 책임이다. V11은 기존 번치의 ACTIVE OWNER가 정확히 1명인지 검사하고,
+  OWNER 0명·복수 또는 활성 소속 없는 번치가 하나라도 있으면 전체 실패한다. 임의 승계하지 않는다.
+- 기존 `GET /api/v1/bunches/{bunchId}/members`의 배열·필드는 유지한다.
+  OWNER→CO_OWNER→MEMBER, 역할 안에서 닉네임 C collation ASC→Membership ID ASC다.
+  비활성 소속·탈퇴 계정은 제외한다. 새 역할 관리 API를 이 변경에 포함하지 않는다.
+- 번치 이미지 즉시 변경·초기화는 OWNER만 가능하다. CO_OWNER도 초대 발급·내부 조회가 가능하다.
+
+## 저장·버전
+
+V11은 기존 적용 파일을 변경하지 않고 다음 필드를 추가한다.
+
+| 대상 | 필드·제약 |
+| --- | --- |
+| bunches | profile_version, membership_version bigint NOT NULL DEFAULT 0, 각각 >=0 |
+| bunch_memberships | role CHECK OWNER/CO_OWNER/MEMBER |
+| bunch_memberships | ended_at timestamptz nullable, role_granted_by bigint nullable (members FK SET NULL) |
+| bunch_memberships | last_activity_at timestamptz nullable |
+
+기존 비활성 소속의 ended_at은 migration 시각으로 채우며 알림을 소급 생성하지 않는다.
+활동시각은 last_used_at으로 추정하지 않으므로 기존 행은 null이다.
+
+- 새 번치 생성과 첫 OWNER 생성은 하나의 트랜잭션이며 membershipVersion은 1이 된다.
+  기존 번치는 0으로 시작하고 새 참여 성공마다 한 번 증가한다. 생성·참여 성공 재생,
+  ALREADY_MEMBER·초대 발급·최근 사용·조회는 증가시키지 않는다. 참여 성공 재생은 번치 잠금 후
+  소속을 새로 반영하여 잠금 전에 읽은 값으로 동시 업로드 활동시각을 덮어쓰지 않는다.
+- 프로필 이미지 실제 교체와 이미지가 있던 상태의 초기화는 profileVersion을 한 번 증가시킨다.
+  이미지 없는 상태의 초기화는 무변경 성공이다. 저장 실패 시 이미지 참조와 버전 모두 롤백한다.
+- 후속 역할·인계·이탈 API는 같은 번치 잠금 아래 실제 변경 트랜잭션에서 membershipVersion을
+  갱신해야 한다. 새 API·미사용 범용 변경 프레임워크는 추가하지 않는다.
+
+## 실제 활동
+
+사진 새 저장·공동 업로더 신규 연결, 실제 초안 내용 편집, 코멘트 저장 성공은 해당 ACTIVE
+Membership의 lastActivityAt을 같은 트랜잭션에서 갱신한다. 성공 재생·동일 내용 저장·조회·최근 사용·
+presence·편집권 획득/heartbeat·발행/삭제·역할 변경은 활동으로 세지 않는다.
+발행 코멘트 수정은 기존 작성자 권한을 유지하며, 다른 사람의 코멘트를 관리자가 수정하지 못한다.
+
+## 통합·검증 경계
+
+- V11 적용·재실행·JPA validate, 기존 데이터 보존·이상 OWNER 전체 실패·동시 OWNER 중복 거부를
+  실제 PostgreSQL에서 검증한다. 버전·동시 참여·실패 롤백·활동 갱신도 검증한다.
+- 번들 권한은 DRAFT/PUBLISHED별 판정과 DTO/STOMP/lease가 일치해야 한다.
+  Stage는 PUBLIC/PRIVATE 전체 현재 발행 수 0/2/6/10 경계의 1~4단계이며 삭제 시 하락한다.
+  초안은 updatedAt DESC,id DESC다. 기존 BundlePage 형태를 유지한다.
+- #28 생산자는 이 브랜치의 BundleService/InvitationService 변경과 병합 시 함께 대조한다.
+  migration 번호·순서는 최종 dev 통합 직전에 다시 확인한다. CO_OWNER를 모르는 구서버와 혼합 운영하지 않는다.
+- 실제 iOS의 역할 배지·Stage·권한 변경 화면은 앱 준비 후 별도 수동 검증한다.
