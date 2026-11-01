@@ -1,6 +1,7 @@
 package com.bunch.bundle.service
 
 import com.bunch.bundle.domain.BundleEventType
+import com.bunch.bundle.dto.BundleActor
 import com.bunch.global.redis.RefreshTokenRepository
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -86,9 +87,9 @@ class BundleRealtimeOutboundInterceptor(
         }.getOrDefault(false)
     }
 
-    private fun isActive(connectionId: String, identity: BundleRealtimeIdentity): Boolean {
+    private fun isActive(connectionId: String, identity: BundleActor): Boolean {
         val active = try {
-            sessions.isActive(identity.authSessionId, identity.memberId)
+            sessions.isActive(identity.sessionId, identity.memberId)
         } catch (_: RuntimeException) {
             false
         }

@@ -77,9 +77,9 @@ Repository를 재사용한다. 성공 재생 조회는 `expiresAt > now`만 허�
 
 역할이 실제 변경되면 11/12/13번 `Notification`을 같은 DB 트랜잭션에 일반 저장한다.
 수신자는 변경된 대상이며 실행자는 제외하고, `target.kind`는 `ROLE_PERMISSIONS`다.
-`NotificationWriter`와 #48의 기기별 push job 구현은 수정하지 않으며, 해당 job 연결은
-부모 통합에서 이 커밋의 저장 지점 뒤에 연결한다. 알림 저장 실패는 역할 변경·버전·재생
-기록과 함께 롤백된다.
+실제 notification 저장 행을 #48의 `PushJobWriter.enqueue`에 전달해 현재 기기의 전송 대기도
+같은 트랜잭션에서 기록한다. 알림 또는 job 저장 실패는 역할 변경·버전·재생 기록과 함께
+롤백된다. 기기 없는 과거 알림의 소급 전송은 없으며 요청 replay는 알림·job을 만들지 않는다.
 
 ## 실제 활동
 
