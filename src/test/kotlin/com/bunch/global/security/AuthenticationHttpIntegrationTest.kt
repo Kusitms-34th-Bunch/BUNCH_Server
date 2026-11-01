@@ -2,6 +2,8 @@ package com.bunch.global.security
 
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.exception.ErrorCode
+import com.bunch.member.domain.Member
+import com.bunch.member.domain.MemberRepository
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.SignatureAlgorithm
 import io.jsonwebtoken.security.Keys
@@ -35,16 +37,18 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val tokenProvider: TokenProvider,
     private val refreshTokens: RefreshTokenRepository,
+    private val members: MemberRepository,
     @Value("\${jwt.secret}") private val secret: String
 ) {
-    // These filter/logout tests need a live session but no persisted member.
-    private val userId = UUID.randomUUID().mostSignificantBits.and(Long.MAX_VALUE).coerceAtLeast(1L)
+    // Logout serializes device cleanup with registration using the real member row.
+    private val userId = members.saveAndFlush(Member()).id
 
     private val sessionIds = mutableListOf<String>()
 
     @AfterEach
     fun removeOwnRefreshToken() {
         sessionIds.forEach { refreshTokens.delete(it, userId) }
+        members.deleteById(userId)
     }
 
     @ParameterizedTest

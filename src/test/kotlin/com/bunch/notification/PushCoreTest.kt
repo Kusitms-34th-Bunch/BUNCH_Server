@@ -20,6 +20,7 @@ import com.bunch.notification.service.PushJobWriter
 import com.bunch.notification.service.PushPayloadFactory
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
@@ -39,7 +40,12 @@ class PushCoreTest {
         val encrypted = cipher.encrypt(token)
 
         assertThat(cipher.decrypt(encrypted)).isEqualTo(token)
-        assertThat(encrypted).doesNotContain(*token.toByteArray())
+        assertThat(encrypted).isNotEqualTo(token.toByteArray())
+        assertThat(cipher.encrypt(token)).isNotEqualTo(encrypted)
+        val tampered = encrypted.copyOf()
+        tampered[tampered.lastIndex] = (tampered.last().toInt() xor 1).toByte()
+        assertThatThrownBy { cipher.decrypt(tampered) }
+            .isInstanceOf(javax.crypto.AEADBadTagException::class.java)
         assertThat(cipher.hash(token)).hasSize(64)
     }
 
