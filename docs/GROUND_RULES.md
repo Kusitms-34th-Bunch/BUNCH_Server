@@ -5,7 +5,10 @@
 **요구사항·Spec 확인 → 이슈 → 작업 브랜치 → 테스트·구현 → 문서 갱신 → 검증 → PR·리뷰 → 머지**
 
 - 제품 범위·우선순위·원문 우선순위는 [PRD](PRD.md), 기능 동작과 계약은
-  [인증 Spec](specs/auth.md)과 [온보딩 Spec](specs/onboarding.md)을 따른다.
+  [인증 Spec](specs/auth.md)·[온보딩 Spec](specs/onboarding.md)·[번치 Spec](specs/bunch.md)을 따른다.
+  번치 HTTP·저장 계약은 [번치 API](specs/bunch-api.md)·[번치 스키마](specs/bunch-schema.md)로 연결한다.
+  알림·푸시는 [알림 Spec](specs/notification.md)·[알림 API](specs/notification-api.md)·[알림 스키마](specs/notification-schema.md)가 소유한다.
+  2026-10-29 번치 계약은 해당 범위의 과거 정책보다 우선하며 계약 확정과 구현 완료를 구분한다.
 - 관련 Spec에 정상·실패 동작과 완료 조건을 정한 뒤 기능 구현에 착수한다.
   미정 항목과 충돌하는 동작을 추측해서 구현하지 않는다. 무관한 작업은 계속할 수 있다.
 - 제품의 확정 요구사항, 제안, 미정과 현재 구현 상태를 분리해서 기록한다.

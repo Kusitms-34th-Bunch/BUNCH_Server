@@ -3,6 +3,11 @@
 2026-10-17 사용자 합의. [인증](auth.md)·[온보딩](onboarding.md)의 미정 항목 중
 아래 항목을 확정한다. 요구사항의 확정과 구현·실제 앱 연동 완료는 별개다.
 
+2026-10-29 번치 역할·프로필 확장은 [번치 Spec](bunch.md)·[번치 API](bunch-api.md)·
+[번치 스키마](bunch-schema.md), 알림·푸시는 [알림 Spec](notification.md)·[알림 API](notification-api.md)·
+[알림 스키마](notification-schema.md)를 따른다. 아래 #5 계약 중 대체된 요구는 현재 목표 정책으로
+정렬했으며, 기존 코드·마이그레이션에 적용됐다는 뜻은 아니다.
+
 ## 범위와 최소 구현
 
 AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 기능을 구현한다.
@@ -56,8 +61,10 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   DB도 대소문자를 구분하는 유일성 제약을 둔다. 서버는 금지 문자를 임의 삭제하지 않는다.
 - 소개는 앞뒤 공백·빈 줄 제거 후 1~50개 grapheme. 이모지·내부 줄바꿈을 허용한다.
 - CharacterType: TYPE_1 / TYPE_2 / TYPE_3 / TYPE_4. 생성 후 변경하지 않는다.
-  이미지·분위기 이름은 앱 매핑이며 초기 Stage는 1이다. Stage·발행 개수는 저장하지 않는다.
-- 앱은 JPEG/PNG/HEIC/WebP를 선택받아 정사각형 JPEG로 변환한다. 서버 wire는 JPEG만 받는다.
+  이미지·분위기 이름은 앱 매핑이며 초기 Stage는 1이다. 0/2/6/10개의 설정 기준으로
+  1~4단계를 계산하고 Stage·발행 개수는 저장하지 않는다.
+- 앱은 JPEG/PNG/HEIC/WebP를 선택받아 정사각형 JPEG로 변환한다. 번치 프로필 선택 원본은
+  10MB 이내이며, 선택 원본 제한과 변환 후 서버 전송 제한을 구분한다. 서버 wire는 JPEG만 받는다.
   파일 최대 5MiB, 가로·세로 각각 최대 1024, 정사각형. decode 전에 크기를 확인하고
   JPEG로 재인코딩해 불필요한 EXIF 등 메타데이터를 제외한다.
 - Cloudinary는 서버 RestClient의 HTTPS Basic Auth로 Upload API를 호출한다.
@@ -67,7 +74,10 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   재업로드 없이 백필하고 기존 응답 URL을 유지한다. [사진함 기반 계약](photo-foundation.md)을 따른다.
   회원 사진은 가입 multipart 요청에서 최종 저장한다. 사진 검증/저장만 실패하면 null로 가입을 완료한다.
   필수 프로필 오류·요청 전체의 파싱/전송 실패는 가입을 완료하지 않는다.
-- 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→커밋 후 미참조 기존 자산·파일 삭제 순서다.
+- 생성 완료 화면의 번치 사진은 메인 관리자 OWNER만 즉시 변경·초기화 가능하다.
+  번치 프로필 편집 화면에서는 사진·이름·소개·공개 범위를 한 번에 저장하며 별도 공개 범위
+  확인 모달을 두지 않는다. 전용 이미지 API는 생성 완료 흐름에 유지하고 새 일괄 저장 계약은
+  [번치 API](bunch-api.md)를 따른다. 새 파일 업로드→DB 반영→커밋 후 미참조 기존 자산·파일 삭제 순서다.
   DB 실패 시 새 파일 삭제를 시도하며 기존 파일·참조는 유지한다.
   다른 프로필·Photo·발행본의 FK 참조가 있으면 자산·파일을 유지한다.
   외부 파일 삭제 실패는 publicId만 기록하고 수동 정리 대상으로 남긴다.
@@ -75,13 +85,15 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 ## 생성·초대·참여
 
 - Visibility: PUBLIC / PRIVATE. 생성 시 명시적으로 선택한다.
-- MembershipRole: OWNER / MEMBER, MembershipStatus: ACTIVE / LEFT / REMOVED.
-  같은 회원·번치의 ACTIVE 소속은 하나다. 다시 참여하면 새 소속을 만든다.
-- 번치 생성+첫 OWNER+마지막 사용 시각은 한 트랜잭션이다. 가입·권한 부여 시각을 남긴다.
+- MembershipRole: OWNER(메인 관리자) / CO_OWNER(공동 관리자) / MEMBER(일반 멤버),
+  MembershipStatus: ACTIVE / LEFT / REMOVED. 활성 번치의 OWNER는 정확히 1명이며 CO_OWNER는 여러 명 가능하다.
+  같은 회원·번치의 ACTIVE 소속은 하나다. LEFT·REMOVED 모두 유효 초대로 재참여할 수 있다.
+  과거 소속을 활성화하지 않고 새 Membership을 MEMBER로 생성하며 현재 시각을 joinedAt으로 쓴다.
+- 번치 생성+유일한 첫 OWNER+마지막 사용 시각은 한 트랜잭션이다. 가입·권한 부여 시각을 남긴다.
 - 소속 한도 10개, 번치 정원 8명. 변경 작업은 회원 행→번치 행 순으로 잠그고 최종 시점에 확인한다.
 - 마지막 번치는 ACTIVE 소속의 lastUsedAt 내림차순으로 조회한다. 같으면 소속 ID 내림차순이다.
   무효 소속은 제외하므로 최근의 다른 유효 소속으로 복귀한다. 없으면 defaultBunchId:null이다.
-- 초대 발급은 ACTIVE OWNER/MEMBER 모두 가능하다. 번치 잠금 아래 유효한 초대 하나를 재사용한다.
+- 초대 발급은 ACTIVE OWNER/CO_OWNER/MEMBER 모두 가능하다. 번치 잠금 아래 유효한 초대 하나를 재사용한다.
   만료/폐기면 기존 것을 폐기 표시하고 새로 발급한다. 최초 발급자 표시는 재공유해도 유지한다.
 - 토큰은 SecureRandom 32바이트의 Base64URL, 보조 코드는 23456789ABCDEFGHJKLMNPQRSTUVWXYZ 중
   8자리다. 코드는 trim+대문자로 정규화한다. 충돌 시 재발급한다.
@@ -92,16 +104,23 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   정원·멤버 목록·내부 콘텐츠는 공개하지 않는다. 발급자가 비활성 계정/소속이면 From은 null이다.
 - 인증 확인은 같은 카드와 InviteEligibility(AVAILABLE / ALREADY_MEMBER / FULL /
   LIMIT_EXCEEDED)를 반환한다. 수동·외부 링크 모두 10개 소속 상태에서도 카드 확인은 허용한다.
-- 판단 순서: 초대 무효 → 이미 ACTIVE 소속 → 정원 8명 → 소속 10개.
+- 판단 순서: 초대 무효 → 이미 ACTIVE 소속 → 정원 8명 → 소속 10개. LEFT·REMOVED 이력은 참여 거부 사유가 아니다.
   무효는 404로 통합하며 존재/만료/폐기를 구분하지 않는다.
 - 참여는 가입 완료·초대·정원·소속 한도를 다시 확인하고 MEMBER 소속·최근 사용 시각·
-  기존 멤버별 새 멤버 알림을 한 트랜잭션으로 저장한다. JoinOutcome: JOINED / ALREADY_MEMBER.
+  기존 멤버별 새 멤버 알림과 푸시 전송 대기를 한 트랜잭션으로 저장한다.
+  21종 알림·행동자 제외(미작성 참여자 본인의 리마인드는 예외)·30일/100개·개인 푸시 설정은
+  [알림 Spec](notification.md)을 따른다. APNs 전송 실패로 참여를 롤백하지 않는다. JoinOutcome: JOINED / ALREADY_MEMBER.
   이미 소속이면 200으로 반환하고 소속·알림을 중복 생성하지 않는다.
-- 성공 참여 재시도는 초대 만료·폐기 이후에도 기존 성공 대상을 반환한다.
+- 성공 참여 재시도는 원래 결과 소속이 현재 ACTIVE이면 초대 만료·폐기 이후에도 기존 성공 대상을 반환한다.
+  원래 결과가 LEFT·REMOVED이면 기존 403 FORBIDDEN으로 거부하고 소속을 복원하거나 새 참여로 바꿔 처리하지 않는다.
+  재참여는 현재 유효한 초대와 새 요청 키를 요구하며, 재참여 뒤에도 과거 소속의 성공 키를 새 소속에 적용하지 않는다.
 - 생성·참여 Idempotency-Key는 앱이 만든 UUID이며 회원+작업 단위로 해당 번치/소속에 보존한다.
   정규화 입력의 fingerprint를 비교하고 다른 입력은 409다. 참여 입력의 token/code/URL은
   같은 초대 ID로 비교한다. 성공 재생은 현재 유효성·정원 검사보다 먼저 한다.
-  같은 결과의 ID는 유지하고 이름·사진은 현재 값을 반환한다. 새 참여는 새 키를 사용한다.
+  현재 ACTIVE인 같은 결과의 ID는 유지하고 이름·사진은 현재 값을 반환한다. 새 참여에는 새 키를 사용한다.
+- 재참여 성공 시 남아 있는 발행본 기여·코멘트의 동일 memberId 연결을 통해 현재 닉네임·프로필 표시를 복구한다.
+  기여·코멘트 행을 복제하지 않으며 이전 관리자 권한·삭제된 사진함/업로더/초안/초안 코멘트/편집권을 복구하지 않는다.
+  해당 번치의 과거 내보내짐 안내 제거·미전송 안내 푸시 취소는 새 소속 생성·새 멤버 참여 알림과 같은 트랜잭션이다.
 - 인증 확인/참여의 무효 입력은 회원별 10분 10회 실패까지 허용하고 이후 429.
   공개 조회는 원격 IP별 분당 60회. 설정으로 변경 가능하며 임의 X-Forwarded-For는 신뢰하지 않는다.
 - 가입 완료와 자동 참여는 별도 요청/트랜잭션이다. 자동 참여 실패로 가입을 되돌리지 않는다.
@@ -126,8 +145,8 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
 | GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available |
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
-| PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
-| DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
+| PUT /api/v1/bunches/{id}/profile-image | 메인 관리자, multipart photo; 생성 완료 흐름 | id,name,characterType,imageUrl |
+| DELETE /api/v1/bunches/{id}/profile-image | 메인 관리자; 생성 완료 흐름 | 같은 번치 정보, imageUrl:null |
 | GET /api/v1/bunches/{id}/members | 없음 | [{memberId,nickname,imageUrl,role}], 활성 멤버만([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |

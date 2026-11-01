@@ -16,6 +16,9 @@ USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES 
 | 제품 목표·기능 ID·우선순위·공통 정책 | [PRD](docs/PRD.md) |
 | 로그인·가입 계약 | [인증 Spec](docs/specs/auth.md) |
 | 번치 생성·초대·참여 계약 | [온보딩 Spec](docs/specs/onboarding.md) |
+| 번치 홈·관리·소셜 정책 | [번치 Spec](docs/specs/bunch.md) |
+| 번치 HTTP·저장 계약 | [번치 API](docs/specs/bunch-api.md) · [번치 스키마](docs/specs/bunch-schema.md) |
+| 알림·푸시 정책과 계약 | [알림 Spec](docs/specs/notification.md) · [알림 API](docs/specs/notification-api.md) · [알림 스키마](docs/specs/notification-schema.md) |
 
 작업 경로의 하위 AGENTS.md도 읽는다. 공통 규칙을 복제하지 않는다.
 제품 정책은 PRD와 관련 Spec을 확인하고, 충돌은 PRD의 원문 우선순위를 따른다.
