@@ -4,13 +4,13 @@ import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchActionOperation
 import com.bunch.bunch.domain.BunchActionRequest
 import com.bunch.bunch.domain.BunchActionRequestRepository
-import com.bunch.bunch.domain.BunchFollow
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.ProfileImageAction
+import com.bunch.bunch.domain.Visibility
 import com.bunch.bunch.dto.BunchProfileRequest
 import com.bunch.bunch.dto.BunchProfileResponse
 import com.bunch.global.common.ProfileText
@@ -25,7 +25,9 @@ import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.notification.service.NotificationWriter
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Propagation
@@ -46,6 +48,7 @@ class BunchProfileService(
     private val actionRequests: BunchActionRequestRepository,
     private val follows: BunchFollowRepository,
     private val notifications: NotificationRepository,
+    private val notificationWriter: NotificationWriter,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
     private val clock: Clock,
@@ -81,8 +84,12 @@ class BunchProfileService(
                     requestKey
                 )
                 if (previous != null) {
-                    if (previous.fingerprint != input.fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-                    return@execute TransactionResult(responseFrom(previous.result), false)
+                    if (now.isBefore(previous.expiresAt)) {
+                        if (previous.fingerprint != input.fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+                        return@execute TransactionResult(responseFrom(previous.result), false)
+                    }
+                    actionRequests.delete(previous)
+                    actionRequests.flush()
                 }
 
                 if (context.bunch.profileVersion != input.expectedProfileVersion) {
@@ -111,11 +118,11 @@ class BunchProfileService(
                     context.bunch.visibility = input.visibility
                     context.bunch.profileImageAsset = newAsset
                     context.bunch.profileVersion++
-                    if (oldVisibility == com.bunch.bunch.domain.Visibility.PRIVATE &&
-                        input.visibility == com.bunch.bunch.domain.Visibility.PUBLIC
-                    ) {
-                        approvePending(context.bunch, memberId, now)
-                        writeVisibilityNotification(context.bunch, now)
+                    if (oldVisibility != input.visibility) {
+                        if (oldVisibility == Visibility.PRIVATE && input.visibility == Visibility.PUBLIC) {
+                            approvePending(context.bunch, memberId, now)
+                        }
+                        writeVisibilityNotification(context.bunch, memberId, input.visibility, now)
                     }
                     imageAssets.releaseAfterCommit(previousAssetId.takeUnless {
                         newAsset?.id == it
@@ -165,13 +172,17 @@ class BunchProfileService(
         val name = ProfileText.name(request.name)
         val introduction = ProfileText.introduction(request.introduction)
         when (request.imageAction) {
-            ProfileImageAction.KEEP, ProfileImageAction.RESET -> if (photo != null && !photo.isEmpty) {
+            ProfileImageAction.KEEP, ProfileImageAction.RESET -> if (photo != null) {
                 fail(ErrorCode.INVALID_INPUT)
             }
-            ProfileImageAction.REPLACE -> if (photo == null || photo.isEmpty) fail(ErrorCode.INVALID_INPUT)
+            ProfileImageAction.REPLACE -> if (
+                photo == null || photo.isEmpty || photo.size !in 1..MAX_PROFILE_IMAGE_BYTES.toLong()
+            ) {
+                fail(ErrorCode.INVALID_INPUT)
+            }
         }
         val imageHash = if (request.imageAction == ProfileImageAction.REPLACE) {
-            digest(requireNotNull(photo).bytes)
+            digest(readProfileImageBytes(requireNotNull(photo)))
         } else {
             "-"
         }
@@ -195,12 +206,19 @@ class BunchProfileService(
         )
     }
 
+    private fun readProfileImageBytes(photo: MultipartFile): ByteArray {
+        val bytes = photo.inputStream.use { it.readNBytes(MAX_PROFILE_IMAGE_BYTES + 1) }
+        if (bytes.size !in 1..MAX_PROFILE_IMAGE_BYTES) fail(ErrorCode.INVALID_INPUT)
+        return bytes
+    }
+
     private fun preflight(
         memberId: Long,
         bunchId: Long,
         requestKey: UUID,
         input: Input
     ): BunchProfileResponse? = transactions.execute {
+        val now = clock.instant()
         val context = lockOwner(memberId, bunchId)
         val previous = actionRequests.findByMemberIdAndBunchIdAndOperationAndRequestKey(
             memberId,
@@ -209,8 +227,12 @@ class BunchProfileService(
             requestKey
         )
         if (previous != null) {
-            if (previous.fingerprint != input.fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-            return@execute responseFrom(previous.result)
+            if (now.isBefore(previous.expiresAt)) {
+                if (previous.fingerprint != input.fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+                return@execute responseFrom(previous.result)
+            }
+            actionRequests.delete(previous)
+            actionRequests.flush()
         }
         if (context.bunch.profileVersion != input.expectedProfileVersion) {
             fail(
@@ -231,53 +253,56 @@ class BunchProfileService(
     }
 
     private fun approvePending(bunch: Bunch, actorMemberId: Long, now: Instant) {
-        val pending = follows.findAllByFollowedBunchIdAndStatusOrderByIdAsc(
+        val pending = follows.findAllByFollowedBunchIdAndStatus(
             bunch.id,
-            BunchFollowStatus.PENDING
-        )
+            BunchFollowStatus.PENDING,
+            Pageable.unpaged()
+        ).content.sortedBy { it.id }
         if (pending.isEmpty()) return
 
+        val followerBunches = follows.findCardBunches(pending.map { it.followerBunchId })
+            .associateBy { it.id }
         pending.forEach { follow ->
             follow.approve(actorMemberId, now)
-            writeApprovalNotification(follow, bunch, now)
-        }
-    }
-
-    private fun writeApprovalNotification(follow: BunchFollow, target: Bunch, now: Instant) {
-        memberships.findActiveMembers(follow.followerBunchId).forEach { recipient ->
-            notifications.save(
-                Notification(
-                    recipientMemberId = recipient.member.id,
-                    bunchId = follow.followerBunchId,
-                    type = NotificationType.FOLLOW_REQUEST_APPROVED,
-                    dedupeKey = "FOLLOW_REQUEST_APPROVED:${follow.id}",
-                    title = "${target.name} 번치가 팔로우 요청을 승인했어요",
-                    body = "이제 '${target.name}' 번치의 새로운 기록을 만나볼 수 있어요.",
-                    target = NotificationTarget(
-                        kind = NotificationTargetKind.OTHER_BUNCH_PROFILE,
-                        bunchId = follow.followerBunchId,
-                        targetBunchId = target.id
-                    ),
-                    createdAt = now
-                )
+            notificationWriter.followApproved(
+                follower = followerBunches[follow.followerBunchId] ?: fail(ErrorCode.INTERNAL_ERROR),
+                target = bunch,
+                follow = follow,
+                actorId = actorMemberId
             )
         }
     }
 
-    private fun writeVisibilityNotification(bunch: Bunch, now: Instant) {
-        memberships.findActiveMembers(bunch.id).forEach { recipient ->
-            notifications.save(
-                Notification(
-                    recipientMemberId = recipient.member.id,
-                    bunchId = bunch.id,
-                    type = NotificationType.BUNCH_VISIBILITY_CHANGED,
-                    dedupeKey = "BUNCH_VISIBILITY_CHANGED:${bunch.id}:${bunch.profileVersion}",
-                    title = "우리 번치가 공개로 바뀌었어요",
-                    body = "이제 누구나 우리 번치와 번들을 볼 수 있어요.",
-                    target = NotificationTarget(NotificationTargetKind.BUNCH_HOME, bunch.id),
-                    createdAt = now
+    private fun writeVisibilityNotification(
+        bunch: Bunch,
+        actorMemberId: Long,
+        visibility: Visibility,
+        now: Instant
+    ) {
+        val public = visibility == Visibility.PUBLIC
+        memberships.findActiveMembers(bunch.id)
+            .filter { it.member.id != actorMemberId }
+            .forEach { recipient ->
+                notifications.save(
+                    Notification(
+                        recipientMemberId = recipient.member.id,
+                        bunchId = bunch.id,
+                        type = NotificationType.BUNCH_VISIBILITY_CHANGED,
+                        dedupeKey = "BUNCH_VISIBILITY_CHANGED:${bunch.id}:${bunch.profileVersion}",
+                        title = if (public) {
+                            "우리 번치가 공개로 바뀌었어요"
+                        } else {
+                            "우리 번치가 비공개로 바뀌었어요"
+                        },
+                        body = if (public) {
+                            "이제 누구나 우리 번치와 번들을 볼 수 있어요."
+                        } else {
+                            "이제 팔로우를 승인한 번치만 우리 번치와 번들을 볼 수 있어요."
+                        },
+                        target = NotificationTarget(NotificationTargetKind.BUNCH_HOME, bunch.id),
+                        createdAt = now
+                    )
                 )
-            )
         }
     }
 
@@ -309,6 +334,7 @@ class BunchProfileService(
     private data class Locked(val bunch: Bunch, val membership: com.bunch.bunch.domain.BunchMembership)
 
     companion object {
+        private const val MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024
         private val IDEMPOTENCY_RETENTION: Duration = Duration.ofDays(30)
     }
 }

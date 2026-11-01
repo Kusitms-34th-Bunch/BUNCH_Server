@@ -22,6 +22,7 @@ import java.time.Duration
 class BunchHomeService(
     private val members: MemberRepository,
     private val memberships: BunchMembershipRepository,
+    private val notices: BunchAccessNoticeService,
     private val bundles: BundleService,
     private val follows: BunchFollowRepository,
     private val notifications: NotificationRepository,
@@ -32,7 +33,7 @@ class BunchHomeService(
         members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
             .requireCompleted()
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(memberId, bunchId)
-            ?: fail(ErrorCode.FORBIDDEN)
+            ?: missingMembership(memberId, bunchId)
         val bunch = membership.bunch
         val summary = bundles.summary(memberId, bunchId)
         val cutoff = clock.instant().minus(RETENTION)
@@ -69,6 +70,20 @@ class BunchHomeService(
     )
 
     private fun fail(code: ErrorCode): Nothing = throw BusinessException(code)
+
+    private fun missingMembership(memberId: Long, bunchId: Long): Nothing {
+        if (memberships.countByMemberIdAndStatus(memberId) == 0L) {
+            notices.active(memberId)
+                .firstOrNull { it.bunchId == bunchId }
+                ?.let { notice ->
+                    throw BusinessException(
+                        ErrorCode.BUNCH_ACCESS_UNAVAILABLE,
+                        mapOf("noticeId" to notice.id, "reason" to notice.reason)
+                    )
+                }
+        }
+        fail(ErrorCode.FORBIDDEN)
+    }
 
     companion object {
         private val RETENTION: Duration = Duration.ofDays(30)
