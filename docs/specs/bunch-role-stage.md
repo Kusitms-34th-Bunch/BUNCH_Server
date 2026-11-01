@@ -39,6 +39,12 @@ V11은 기존 적용 파일을 변경하지 않고 다음 필드를 추가한다
 - 후속 역할·인계·이탈 API는 같은 번치 잠금 아래 실제 변경 트랜잭션에서 membershipVersion을
   갱신해야 한다. 새 API·미사용 범용 변경 프레임워크는 추가하지 않는다.
 
+이 버전은 현재 생성·참여·이미지 API의 실제 변경에서 이미 기록된다. 버전 노출·충돌 검사를 하는
+프로필 일괄 저장·역할 관리 API까지 제공한다는 뜻은 아니다. 해당 API는 #49·#52의 범위다.
+`endedAt`·`roleGrantedBy`는 현재 API의 조회·변경 대상이 아니지만 승인된 소속 스키마의 필수 컬럼이다.
+V11의 기존 종료 소속 시각 백필·nullable 권한 부여자 FK 계약과 JPA 매핑을 함께 유지한다.
+이 필드를 위한 별도 조회·변경 헬퍼나 임시 API는 만들지 않는다.
+
 ## 실제 활동
 
 사진 새 저장·공동 업로더 신규 연결, 실제 초안 내용 편집, 코멘트 저장 성공은 해당 ACTIVE
@@ -53,6 +59,7 @@ presence·편집권 획득/heartbeat·발행/삭제·역할 변경은 활동으�
 - 번들 권한은 DRAFT/PUBLISHED별 판정과 DTO/STOMP/lease가 일치해야 한다.
   Stage는 PUBLIC/PRIVATE 전체 현재 발행 수 0/2/6/10 경계의 1~4단계이며 삭제 시 하락한다.
   초안은 updatedAt DESC,id DESC다. 기존 BundlePage 형태를 유지한다.
+  현재 Stage 제공 경로는 기존 번들 summary API다. 홈·외부 프로필 API 자체는 #51·#52의 범위다.
 - #28 생산자는 이 브랜치의 BundleService/InvitationService 변경과 병합 시 함께 대조한다.
   migration 번호·순서는 최종 dev 통합 직전에 다시 확인한다. CO_OWNER를 모르는 구서버와 혼합 운영하지 않는다.
 - 실제 iOS의 역할 배지·Stage·권한 변경 화면은 앱 준비 후 별도 수동 검증한다.
