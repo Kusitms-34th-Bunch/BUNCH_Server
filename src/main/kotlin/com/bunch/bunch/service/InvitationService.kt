@@ -6,6 +6,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
+import com.bunch.notification.service.PushJobWriter
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -23,6 +24,7 @@ class InvitationService(
     private val invitations: InvitationRepository,
     private val members: MemberRepository,
     private val notifications: NotificationWriter,
+    private val pushJobs: PushJobWriter,
     private val accessNotices: BunchAccessNoticeService,
     private val input: InvitationInput,
     private val rateLimiter: InvitationRateLimiter,
@@ -128,6 +130,7 @@ class InvitationService(
             )
         )
         membership.rememberJoin(key, fingerprint(current), JoinOutcome.JOINED)
+        pushJobs.cancelPendingRemovalNoticeForRejoin(userId, bunch.id)
         accessNotices.removeForRejoin(userId, bunch.id)
         bunch.membershipVersion++
         notifications.memberJoined(bunch.id, membership.id, userId, member.nickname!!, now)

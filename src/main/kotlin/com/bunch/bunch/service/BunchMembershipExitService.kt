@@ -19,6 +19,10 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
+import com.bunch.notification.service.PushJobWriter
+import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.domain.NotificationTargetKind
+import com.bunch.notification.dto.NotificationTarget
 import com.bunch.photo.service.PhotoService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -39,6 +43,7 @@ class BunchMembershipExitService(
     private val photos: PhotoService,
     private val accessNotices: BunchAccessNoticeService,
     private val notifications: NotificationWriter,
+    private val pushJobs: PushJobWriter,
     private val clock: Clock
 ) {
     @Transactional
@@ -72,6 +77,7 @@ class BunchMembershipExitService(
 
         bundles.memberDeparted(bunch.id, actor.member.id)
         photos.removeAllUploaders(bunch.id, actor.member.id)
+        pushJobs.cancelCommentRemindersForBunchLeave(bunch.id, actor.member.id)
         actor.end(MembershipStatus.LEFT, now)
         bunch.membershipVersion++
         memberships.flush()
@@ -140,12 +146,27 @@ class BunchMembershipExitService(
             target.changeRole(MembershipRole.MEMBER, actorMember.id, now)
             memberships.flush()
         }
-        accessNotices.recordRemoval(bunch, target, now)
+        val notice = accessNotices.recordRemoval(bunch, target, now)
         bundles.memberDeparted(bunch.id, target.member.id)
         photos.removeAllUploaders(bunch.id, target.member.id)
+        pushJobs.cancelCommentRemindersForBunchLeave(bunch.id, target.member.id)
         target.end(MembershipStatus.REMOVED, now)
         bunch.membershipVersion++
         memberships.flush()
+        pushJobs.enqueueDetached(
+            recipientMemberIds = listOf(target.member.id),
+            bunchId = bunch.id,
+            type = NotificationType.MEMBER_REMOVED,
+            dedupeKey = "MEMBER_REMOVED:${target.id}",
+            title = "${bunch.name} 번치에서 내보내졌어요",
+            body = "번치 멤버 목록에서 제외되어 더 이상 번치에 참여할 수 없어요.",
+            target = NotificationTarget(
+                kind = NotificationTargetKind.ACCESS_NOTICE,
+                bunchId = bunch.id,
+                noticeId = notice.id
+            ),
+            now = now
+        )
         invitations.rotateAfterRemoval(bunch.id, actorMember.id, now)
         return removalResult(bunch, target.id)
     }

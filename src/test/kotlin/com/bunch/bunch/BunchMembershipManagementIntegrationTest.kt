@@ -14,6 +14,12 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.domain.PushAuthorizationStatus
+import com.bunch.notification.domain.PushDevice
+import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.PushDeviceRepository
+import com.bunch.notification.domain.PushJobRepository
+import com.bunch.notification.service.DeviceTokenCipher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -42,7 +48,9 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-@SpringBootTest
+@SpringBootTest(properties = [
+    "notification.push.device-encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+])
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
@@ -57,6 +65,15 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var notifications: NotificationRepository
+
+    @Autowired
+    private lateinit var pushDevices: PushDeviceRepository
+
+    @Autowired
+    private lateinit var pushJobs: PushJobRepository
+
+    @Autowired
+    private lateinit var tokenCipher: DeviceTokenCipher
 
     @Autowired
     private lateinit var mvc: MockMvc
@@ -84,6 +101,10 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
     @AfterEach
     fun cleanManagementSessions() {
         jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_role_notification ON notifications")
+        jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_role_push_job ON push_jobs")
+        jdbc.update("DELETE FROM push_jobs")
+        jdbc.update("DELETE FROM push_devices")
+        jdbc.update("DELETE FROM push_preferences")
         jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
         sessionIds.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
         sessionIds.clear()
@@ -302,6 +323,67 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
             Long::class.java,
             bunch.id
         )).isEqualTo(1L)
+    }
+
+    @Test
+    fun `role notifications enqueue target jobs exclude actor and replay without duplicates`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        pushDevice(owner)
+        pushDevice(target)
+
+        val before = version(bunch.id)
+        val granted = management.changeRole(
+            owner,
+            bunch.id,
+            targetMembership.id,
+            ChangeMembershipRoleRequest(ownerMembership.id, before, MembershipRole.CO_OWNER)
+        )
+
+        assertThat(roleNotifications(target, NotificationType.CO_OWNER_GRANTED)).hasSize(1)
+        assertThat(roleNotifications(owner, NotificationType.CO_OWNER_GRANTED)).isEmpty()
+        assertThat(roleJobs(target, NotificationType.CO_OWNER_GRANTED)).hasSize(1)
+        assertThat(roleJobs(owner, NotificationType.CO_OWNER_GRANTED)).isEmpty()
+
+        val grantReplay = management.changeRole(
+            owner,
+            bunch.id,
+            targetMembership.id,
+            ChangeMembershipRoleRequest(ownerMembership.id, before, MembershipRole.CO_OWNER)
+        )
+        assertThat(grantReplay.changedMembershipIds).isEmpty()
+        assertThat(roleNotifications(target, NotificationType.CO_OWNER_GRANTED)).hasSize(1)
+        assertThat(roleJobs(target, NotificationType.CO_OWNER_GRANTED)).hasSize(1)
+
+        val revoked = management.changeRole(
+            owner,
+            bunch.id,
+            targetMembership.id,
+            ChangeMembershipRoleRequest(ownerMembership.id, granted.membershipVersion, MembershipRole.MEMBER)
+        )
+        assertThat(revoked.membershipVersion).isEqualTo(granted.membershipVersion + 1)
+        assertThat(roleNotifications(target, NotificationType.CO_OWNER_REVOKED)).hasSize(1)
+        assertThat(roleNotifications(owner, NotificationType.CO_OWNER_REVOKED)).isEmpty()
+        assertThat(roleJobs(target, NotificationType.CO_OWNER_REVOKED)).hasSize(1)
+        assertThat(roleJobs(owner, NotificationType.CO_OWNER_REVOKED)).isEmpty()
+
+        val key = UUID.randomUUID()
+        val transferRequest = OwnerTransferRequest(
+            ownerMembership.id,
+            revoked.membershipVersion,
+            targetMembership.id
+        )
+        val transferred = management.transferOwner(owner, bunch.id, key, transferRequest)
+        val transferReplay = management.transferOwner(owner, bunch.id, key, transferRequest)
+
+        assertThat(transferReplay).isEqualTo(transferred)
+        assertThat(roleNotifications(target, NotificationType.OWNER_TRANSFERRED)).hasSize(1)
+        assertThat(roleNotifications(owner, NotificationType.OWNER_TRANSFERRED)).isEmpty()
+        assertThat(roleJobs(target, NotificationType.OWNER_TRANSFERRED)).hasSize(1)
+        assertThat(roleJobs(owner, NotificationType.OWNER_TRANSFERRED)).isEmpty()
     }
 
     @Test
@@ -623,6 +705,36 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `push job failure rolls back role change notification and job atomically`() {
+        val owner = member()
+        val bunch = create(owner)
+        val target = joined(owner, bunch.id)
+        val ownerMembership = membership(owner, bunch.id)
+        val targetMembership = membership(target, bunch.id)
+        pushDevice(target)
+        val before = version(bunch.id)
+        rejectWrite("bunch_test_reject_role_push_job", "push_jobs", "INSERT")
+
+        assertThatThrownBy {
+            management.changeRole(
+                owner,
+                bunch.id,
+                targetMembership.id,
+                ChangeMembershipRoleRequest(ownerMembership.id, before, MembershipRole.CO_OWNER)
+            )
+        }.isInstanceOf(DataAccessException::class.java)
+
+        assertThat(version(bunch.id)).isEqualTo(before)
+        assertThat(jdbc.queryForObject(
+            "SELECT role FROM bunch_memberships WHERE id = ?",
+            String::class.java,
+            targetMembership.id
+        )).isEqualTo("MEMBER")
+        assertThat(roleNotifications(target, NotificationType.CO_OWNER_GRANTED)).isEmpty()
+        assertThat(roleJobs(target, NotificationType.CO_OWNER_GRANTED)).isEmpty()
+    }
+
+    @Test
     fun `concurrent transfers leave exactly one active owner`() {
         val owner = member()
         val bunch = create(owner)
@@ -672,6 +784,29 @@ class BunchMembershipManagementIntegrationTest : BunchIntegrationSupport() {
 
     private fun roleNotifications(memberId: Long, type: NotificationType) =
         notifications.findAll().filter { it.recipientMemberId == memberId && it.type == type }
+
+    private fun roleJobs(memberId: Long, type: NotificationType) =
+        pushJobs.findAll().filter { it.recipientMemberId == memberId && it.type == type }
+
+    private fun pushDevice(memberId: Long): PushDevice {
+        val sessionId = UUID.randomUUID()
+        sessions.save(sessionId.toString(), memberId, "role-push-test", 3600)
+        sessionIds += sessionId.toString() to memberId
+        val token = UUID.randomUUID().toString().replace("-", "")
+        return pushDevices.saveAndFlush(
+            PushDevice(
+                installationId = UUID.randomUUID(),
+                memberId = memberId,
+                sessionId = sessionId,
+                environment = PushDeviceEnvironment.SANDBOX,
+                topic = "test.bunch",
+                tokenCiphertext = tokenCipher.encrypt(token),
+                tokenHash = tokenCipher.hash(token),
+                authorizationStatus = PushAuthorizationStatus.AUTHORIZED,
+                registeredAt = testNow
+            )
+        )
+    }
 
     private fun listRequest(auth: Auth, bunchId: Long): ResultActions = mvc.perform(
         get("/api/v1/bunches/$bunchId/memberships")
