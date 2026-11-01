@@ -1,8 +1,17 @@
 package com.bunch.notification
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.BunchBlock
+import com.bunch.bunch.domain.BunchBlockRepository
 import com.bunch.global.redis.RefreshTokenRepository
+import com.bunch.bundle.domain.Bundle
+import com.bunch.bundle.domain.BundleComment
+import com.bunch.bundle.domain.BundleCommentRepository
+import com.bunch.bundle.domain.BundleParticipant
+import com.bunch.bundle.domain.BundleParticipantRepository
+import com.bunch.bundle.domain.BundleRepository
 import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.PushAuthorizationStatus
 import com.bunch.notification.domain.PushDevice
 import com.bunch.notification.domain.PushDeviceEnvironment
@@ -48,6 +57,18 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var cipher: DeviceTokenCipher
+
+    @Autowired
+    private lateinit var blocks: BunchBlockRepository
+
+    @Autowired
+    private lateinit var bundles: BundleRepository
+
+    @Autowired
+    private lateinit var participants: BundleParticipantRepository
+
+    @Autowired
+    private lateinit var comments: BundleCommentRepository
 
     @Autowired
     private lateinit var sessions: RefreshTokenRepository
@@ -171,6 +192,84 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
         assertThat(jobs.findById(job.id).orElseThrow().status).isEqualTo(PushJobStatus.PENDING)
     }
 
+    @Test
+    fun `left member job is cancelled before APNs`() {
+        val job = fixture()
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?",
+            job.bunchId,
+            job.recipientMemberId
+        )
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `reverse social block cancels other bunch profile job before APNs`() {
+        val targetMemberId = member()
+        val targetBunchId = create(targetMemberId).id
+        val job = fixture(type = NotificationType.BUNCH_FOLLOWED) { _, bunchId ->
+            mapOf(
+                "kind" to NotificationTargetKind.OTHER_BUNCH_PROFILE.name,
+                "bunchId" to bunchId,
+                "targetBunchId" to targetBunchId
+            )
+        }
+        blocks.saveAndFlush(
+            BunchBlock(
+                blockerBunchId = targetBunchId,
+                blockedBunchId = job.bunchId,
+                createdByMemberId = targetMemberId,
+                createdAt = now
+            )
+        )
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `completed comment reminder is cancelled before APNs`() {
+        val job = fixture(type = NotificationType.COMMENT_REMINDER) { memberId, bunchId ->
+            val bundle = bundles.saveAndFlush(Bundle(bunchId = bunchId, createdBy = memberId))
+            participants.saveAndFlush(BundleParticipant(bundleId = bundle.id, memberId = memberId))
+            comments.saveAndFlush(
+                BundleComment(bundleId = bundle.id, memberId = memberId, content = "작성 완료")
+            )
+            mapOf(
+                "kind" to NotificationTargetKind.DRAFT.name,
+                "bunchId" to bunchId,
+                "bundleId" to bundle.id
+            )
+        }
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `cancelled comment reminder is cancelled before APNs`() {
+        val job = fixture(type = NotificationType.COMMENT_REMINDER) { memberId, bunchId ->
+            val bundle = bundles.saveAndFlush(Bundle(bunchId = bunchId, createdBy = memberId))
+            participants.saveAndFlush(
+                BundleParticipant(
+                    bundleId = bundle.id,
+                    memberId = memberId,
+                    remindersCancelledAt = now
+                )
+            )
+            mapOf(
+                "kind" to NotificationTargetKind.DRAFT.name,
+                "bunchId" to bunchId,
+                "bundleId" to bundle.id
+            )
+        }
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
     private fun respond(job: PushJob, response: ApnsResponse, duringHttp: () -> Unit = {}) {
         `when`(apns.send(
             PushDeviceEnvironment.SANDBOX, "test.bunch",
@@ -182,7 +281,28 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
         }
     }
 
-    private fun fixture(createdAt: Instant = now): PushJob {
+    private fun assertCancelledWithoutProvider(job: PushJob, reason: String) {
+        val current = jobs.findById(job.id).orElseThrow()
+        assertThat(current.status).isEqualTo(PushJobStatus.CANCELLED)
+        assertThat(current.lastErrorCode).isEqualTo(reason)
+        val device = devices.findById(requireNotNull(current.deviceId)).orElseThrow()
+        org.mockito.Mockito.verify(apns, org.mockito.Mockito.never()).send(
+            device.environment,
+            device.topic,
+            cipher.decrypt(device.tokenCiphertext),
+            current.id,
+            current.payload,
+            current.expiresAt
+        )
+    }
+
+    private fun fixture(
+        createdAt: Instant = now,
+        type: NotificationType = NotificationType.MEMBER_JOINED,
+        target: (memberId: Long, bunchId: Long) -> Map<String, Any?> = { _, bunchId ->
+            mapOf("kind" to NotificationTargetKind.MEMBERS.name, "bunchId" to bunchId)
+        }
+    ): PushJob {
         val memberId = member()
         val bunchId = create(memberId).id
         val sid = UUID.randomUUID()
@@ -198,10 +318,9 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
         val id = UUID.randomUUID()
         jobs.saveAndFlush(PushJob(
             id = id, deviceId = device.id, recipientMemberId = memberId, sessionId = sid,
-            bunchId = bunchId, notificationId = null, dedupeKey = "worker:$id", type = NotificationType.MEMBER_JOINED,
+            bunchId = bunchId, notificationId = null, dedupeKey = "worker:$id", type = type,
             payload = PushPayload(
-                PushAps(PushAlert("제목", "내용")), id, NotificationType.MEMBER_JOINED,
-                mapOf("kind" to "MEMBERS", "bunchId" to bunchId)
+                PushAps(PushAlert("제목", "내용")), id, type, target(memberId, bunchId)
             ),
             availableAt = now, expiresAt = createdAt.plus(Duration.ofHours(24)), createdAt = createdAt
         ))

@@ -14,14 +14,24 @@ interface PushDeviceRepository : JpaRepository<PushDevice, Long> {
     fun findByInstallationIdLocked(installationId: UUID): PushDevice?
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select d from PushDevice d where d.environment = :environment and d.topic = :topic and d.tokenHash = :tokenHash")
-    fun findByTokenLocked(
+    @Query("""
+        select d from PushDevice d
+        where d.installationId = :installationId
+           or (d.environment = :environment and d.topic = :topic and d.tokenHash = :tokenHash)
+        order by d.id
+    """)
+    fun findForRegistrationLocked(
+        installationId: UUID,
         environment: PushDeviceEnvironment,
         topic: String,
         tokenHash: String
     ): List<PushDevice>
 
     fun findAllByMemberId(memberId: Long): List<PushDevice>
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from PushDevice d where d.memberId = :memberId and d.sessionId = :sessionId order by d.id")
+    fun findBySessionLocked(memberId: Long, sessionId: UUID): List<PushDevice>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from PushDevice d where d.id = :id")

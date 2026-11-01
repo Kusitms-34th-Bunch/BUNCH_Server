@@ -167,6 +167,9 @@ class PushWorker(
     }
 
     private fun finish(attempt: PushAttempt, response: ApnsResponse, now: Instant) {
+        val invalidatesDevice = response.reason in setOf("Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic")
+        // Registration also locks device before cancelling its jobs.
+        val current = if (invalidatesDevice) devices.findLocked(attempt.deviceId) else null
         val job = jobs.findLocked(attempt.jobId) ?: return
         if (job.status != PushJobStatus.PENDING || job.attempts != attempt.attempt) return
         job.lastErrorCode = response.reason
@@ -175,8 +178,7 @@ class PushWorker(
             job.sentAt = now
             return
         }
-        if (response.reason in setOf("Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic")) {
-            val current = devices.findLocked(attempt.deviceId)
+        if (invalidatesDevice) {
             if (current?.memberId == attempt.memberId && current.tokenHash == attempt.tokenHash &&
                 current.registeredAt == attempt.registeredAt
             ) {
