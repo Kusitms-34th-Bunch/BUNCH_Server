@@ -8,16 +8,17 @@
 ## 1. 현재 기준과 선행 게이트
 
 작업 브랜치는 `origin/feat/28-notification-foundation`의 `8fbf45a`에서 시작한다.
-현재 기준에는 V1~V13만 있으며, 아래 실제 선행 산출물이 병합되기 전에는 동일한
-이름의 임시 테이블·adapter·범용 이벤트·빈 service를 만들지 않는다.
+현재 브랜치에는 실제 선행 migration V14~V17까지 병합되어 있으며, 아래 선행
+산출물의 소유 파일을 복제해 임시 테이블·adapter·범용 이벤트·빈 service를
+만들지 않는다.
 
 | 선행 | 이 작업에서 재사용할 실제 산출물 | 없을 때의 처리 |
 | --- | --- | --- |
-| #25 `feat/25-bunch-membership-exit` | V17 `AccessNotice` entity/repository/API와 이탈 정리 callback 경계 | 문서·시나리오만 준비하고 안내 API를 복제하지 않음 |
-| #49 `feat/49-bunch-member-admin` | V16 `bunch_action_requests` entity/repository와 30일 성공 결과 저장 계약 | 임시 멱등성 테이블·범용 request adapter를 만들지 않음 |
-| #51 `feat/51-bunch-social` | V14 실제 양방향 follow/block/report 관계와 삭제 repository 경계 | 가짜 소셜 테이블이나 native SQL skeleton을 만들지 않음 |
-| #48 `feat/48-bunch-push` | 기기별 `push_jobs` 저장/전송 계약 | inbox·임시 큐·가짜 push bridge를 만들지 않음 |
-| #57 `origin/feat/28-notification-foundation` | `NotificationService.readAt` PostgreSQL microsecond 보정 `8fbf45a` | 최종 검증 전에 fetch 후 fast-forward 병합 |
+| #25 `feat/25-bunch-membership-exit` (`fcdd435`, `d022c7c`) | V17 `AccessNotice` entity/repository/API와 이탈 정리 callback 경계 | 문서·시나리오만 준비하고 안내 API를 복제하지 않음 |
+| #49 `feat/49-bunch-member-admin` (`4ab0020`) | V16 `bunch_action_requests` entity/repository와 30일 성공 결과 저장 계약 | 임시 멱등성 테이블·범용 request adapter를 만들지 않음 |
+| #51 `feat/51-bunch-social` (`9116ee6`) | V14 실제 양방향 follow/block/report 관계와 삭제 repository 경계 | 가짜 소셜 테이블이나 native SQL skeleton을 만들지 않음 |
+| #48 `feat/48-bunch-push` (`9cac1ad`, `958ae52`) | 기기별 `push_jobs` 저장/전송 계약 | inbox·임시 큐·가짜 push bridge를 만들지 않음 |
+| #57 `origin/feat/28-notification-foundation` (`8fbf45a`) | `NotificationService.readAt` PostgreSQL microsecond 보정 | 최종 검증 전에 fetch 후 해당 SHA 포함 여부를 확인 |
 
 선행 산출물의 소유 파일은 수정하지 않는다. 특히 `BundleService`,
 `BundleRealtime*`, `BunchService`, `InvitationService`, 이탈/공유 service,
@@ -77,8 +78,9 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
 
 ### 3.1 Transaction 내부
 
-1. 기존 caller의 실제 lock graph를 기준으로 번치 row를 먼저 잠근다. 현재 코드의
-   근거는 다음과 같다.
+1. 기존 caller의 실제 lock graph를 기준으로 삭제자 회원 row를 먼저 잠근 뒤 대상
+   번치 row를 잠근다. 이후 수신자 member/device row를 잠그지 않고, 번치 아래
+   bundle/photo/lease를 ID 오름차순으로 처리한다. 현재 코드의 근거는 다음과 같다.
 
    - `BundleAccessService`/`BundleService`와 `PhotoService`는 `bunches.findLocked`
      후 bundle/photo/lease를 잠근다.
@@ -90,8 +92,9 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
    - #25의 안내 저장/조회 자체는 bunch row를 잠그지 않으며, 실제 이탈 callback의
      최종 commit graph는 최초 commit 후 다시 대조한다.
 
-   따라서 삭제는 단일 bunch row lock으로 같은 번치의 bundle/photo/관리 변경을
-   직렬화하고, 수신자 member/device row를 임의 순서로 잠그지 않는다. 선행 branch의
+   따라서 삭제는 삭제자 member → 단일 bunch row lock으로 같은 번치의
+   bundle/photo/관리 변경을 직렬화하고, 수신자 member/device row를 임의 순서로
+   잠그지 않는다. 선행 branch의
    최종 lock graph와 함께 삭제·leave/remove·owner-transfer·publish·upload 경합을
    실제 PostgreSQL에서 deadlock 없이 검증한다.
 2. 성공 request replay를 확인한 뒤 fingerprint와 요청 입력을 비교한다.
@@ -109,6 +112,9 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
    - Photo uploader와 Photo, 번치 프로필 참조 및 번치 소속/역할/종료 이력
    - #51의 실제 양방향 follow/block/report 관계
    - 번치 본체
+   - 기존 `notifications`는 번치 FK cascade로 제거하고, pending comment reminder
+     push job은 #48 `PushJobWriter`를 통해 취소한다. 삭제 안내 type 15 job은
+     기기별 snapshot을 새로 저장한다.
    - #49 `bunch_action_requests` 성공 행과 #25 AccessNotice 및 #48 push job은
      번치 FK 없이 보존되도록 먼저 결과를 저장하고 본체 cascade 대상에서 제외
 
@@ -119,9 +125,11 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
    `BunchActionRequestRepository`에 같은 transaction으로 직접 저장한다. #49의
    `Map<String, Any?>` result shape와 `expiresAt=+30일`을 재사용하고 entity/repository
    계약은 수정하지 않는다.
-8. transaction commit 뒤에만 realtime lease/registry 정리와 외부 파일 삭제가
-   실행되도록 실제 선행 callback 경계에 연결한다. 커밋 전에 접근 검증은 이미
-   번치/소속 상태로 거부되어야 하며, commit 후 열린 socket의 발신도 차단돼야 한다.
+8. DB lease row는 번치 삭제 transaction 안에서 명시적으로 release하고, 외부 파일은
+   `releaseAfterCommit`으로 commit 뒤에만 정리한다. 현재 선행 `BundleRealtime*`에는
+   번치별 registry enumeration/removal hook이 없으므로 해당 in-memory registry 제거는
+   부모 #59 통합 항목으로 남긴다. 대신 commit 후 권한 검증은 삭제된 번치/번들 상태를
+   다시 확인해 열린 socket의 command/subscription 발신을 차단한다.
 
 ### 3.2 소유 범위 밖 연계 보고
 
@@ -179,8 +187,8 @@ DB·공유 Redis key를 사용하지 않는다.
   먼저 성공한 업무는 자기 원자성 규칙을 유지한다.
 - 삭제 후 재생·재조회·새 업로드·새 bundle 접근·STOMP command/subscription은
   서버 권한 검증에서 거부된다. 발신 registry 정리 전후 모두 접근 차단을 유지한다.
-- lease가 존재하는 draft를 삭제한 뒤 lease row와 registry/session 상태가
-  commit 후 정리되고, 만료 lease가 새 접근을 허용하는 우회가 없다.
+- lease가 존재하는 draft를 삭제한 뒤 lease row가 정리되고, 만료 lease가 새 접근을
+  허용하는 우회가 없다. registry/session 제거 hook은 #59 부모 통합에서 실제 연결한다.
 - AccessNotice는 본인 수신자만 조회/확인할 수 있고, `LEFT`/`REMOVED` 번치에
   새 참여 회차가 생긴 경우에도 과거 notice를 혼동하지 않는다. 영구 삭제된
   번치에는 새 참여 회차가 생기지 않는다. 확인은 200 no-op 또는 성공 후 목록에서
@@ -212,3 +220,16 @@ DB·공유 Redis key를 사용하지 않는다.
 - 최종 검증 직전에 `origin/feat/28-notification-foundation`을 fetch하고
   `8fbf45a`가 포함된 상태를 확인한다.
 - 기기/APNs 수동 검증은 자동 테스트 통과와 별도로 보고한다.
+
+## 6. 현재 구현·통합 상태
+
+- 신규 소유 파일은 `BunchDeletionController`, `BunchDeletionRequest`,
+  `BunchDeletionService`, `BunchDeletionIntegrationTest`다. V18은 추가하지 않았다.
+  V1~V17의 기존 SQL/도메인만으로 삭제 cascade·독립 안내·요청 결과 계약을 충족한다.
+- 실제 통합 테스트 4개는 isolated PostgreSQL/Redis에서 통과했다. 테스트 실행 시
+  #48 `PushDevice.tokenHash`의 JPA `char(64)`/Flyway `CHAR(64)` 타입 불일치 때문에
+  `SPRING_JPA_HIBERNATE_DDL_AUTO=none`을 명시했으며, 정상 `validate`는 부모 #48
+  수정 후 재실행해야 한다.
+- 열린 realtime registry의 commit 후 제거는 기존 `BundleRealtime*`를 수정하지 않고
+  부모 #59에서 hook을 연결해야 한다. 삭제 후 DB 권한 검증 및 발신 frame 차단 자체는
+  기존 interceptor 경로를 재사용한다.
