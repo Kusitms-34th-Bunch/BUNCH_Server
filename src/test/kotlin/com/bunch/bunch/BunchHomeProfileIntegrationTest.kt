@@ -501,13 +501,14 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
     ): Long = jdbc.queryForObject(
         """INSERT INTO bundles
             (bunch_id, created_by, status, title, visibility, created_at, updated_at, published_at)
-            VALUES (?, ?, ?, 'fixture', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+            VALUES (?, ?, ?, 'fixture', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                CASE WHEN ? = 'PUBLISHED' THEN CURRENT_TIMESTAMP ELSE NULL END)
             RETURNING id""",
         Long::class.java,
         bunchId,
         createdBy,
         status,
         visibility?.name,
-        if (status == "PUBLISHED") Timestamp.from(Instant.now()) else null
+        status
     )!!
 }
