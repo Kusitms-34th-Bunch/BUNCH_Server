@@ -15,11 +15,17 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.redis.RefreshTokenRepository
+import com.bunch.global.security.TokenProvider
 import com.bunch.notification.domain.Notification
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.domain.PushAuthorizationStatus
+import com.bunch.notification.domain.PushDeviceEnvironment
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.notification.dto.PushDeviceRegistrationRequest
+import com.bunch.notification.service.PushDeviceService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -34,7 +40,13 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
-@SpringBootTest
+@SpringBootTest(
+    properties = [
+        "notification.push.apns.sandbox-topic=com.bunch.integration.test",
+        "notification.push.apns.production-topic=com.bunch.integration.test.production",
+        "notification.push.device-encryption-key=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+    ]
+)
 @ActiveProfiles("test")
 class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
     @Autowired
@@ -61,11 +73,29 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var notifications: NotificationRepository
 
+    @Autowired
+    private lateinit var pushDevices: PushDeviceService
+
+    @Autowired
+    private lateinit var tokens: TokenProvider
+
+    @Autowired
+    private lateinit var sessions: RefreshTokenRepository
+
     @MockitoBean
     private lateinit var images: ProfileImageStorage
 
+    private val pushSessions = mutableListOf<Pair<String, Long>>()
+
     @AfterEach
     fun cleanProfileAssets() {
+        jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_push_job ON push_jobs")
+        jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_visibility_push_job()")
+        jdbc.update("DELETE FROM push_jobs")
+        jdbc.update("DELETE FROM push_devices")
+        jdbc.update("DELETE FROM push_preferences")
+        pushSessions.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
+        pushSessions.clear()
         jdbc.update(
             """UPDATE bunches SET profile_image_asset_id = NULL
                 WHERE profile_image_asset_id IN (
@@ -248,6 +278,9 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         val follower = create(followerOwner)
         val pending = social.follow(followerOwner, follower.id, target.id)
         val followId = pending.followId!!
+        registerPushDevice(targetOwner)
+        registerPushDevice(targetMember)
+        registerPushDevice(followerOwner)
 
         val publicResult = profiles.update(
             targetOwner,
@@ -267,6 +300,12 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         assertThat(recipientNotifications(followerOwner, follower.id, NotificationType.FOLLOW_REQUEST_APPROVED))
             .extracting<String> { it.dedupeKey }
             .containsExactly("FOLLOW_REQUEST_APPROVED:$followId")
+        assertThat(pushJobRecipients(NotificationType.BUNCH_VISIBILITY_CHANGED)).containsExactly(targetMember)
+        assertThat(pushJobRecipients(NotificationType.BUNCH_FOLLOWED)).containsExactly(targetMember)
+        assertThat(pushJobRecipients(NotificationType.FOLLOW_REQUEST_APPROVED)).containsExactly(followerOwner)
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM push_jobs", Long::class.java)).isEqualTo(3)
+        assertThat(pushJobRecipientsFor(NotificationType.BUNCH_VISIBILITY_CHANGED, targetOwner)).isEmpty()
+        assertThat(pushJobRecipientsFor(NotificationType.BUNCH_FOLLOWED, targetOwner)).isEmpty()
 
         val privateResult = profiles.update(
             targetOwner,
@@ -284,6 +323,9 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
                 "이제 팔로우를 승인한 번치만 우리 번치와 번들을 볼 수 있어요."
             )
         assertThat(recipientNotifications(targetOwner, target.id, NotificationType.BUNCH_VISIBILITY_CHANGED)).isEmpty()
+        assertThat(pushJobRecipients(NotificationType.BUNCH_VISIBILITY_CHANGED))
+            .containsExactly(targetMember, targetMember)
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM push_jobs", Long::class.java)).isEqualTo(4)
     }
 
     @Test
@@ -312,6 +354,50 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         assertThat(bunchRepository.findById(target.id).orElseThrow().visibility).isEqualTo(Visibility.PRIVATE)
         assertThat(bunchRepository.findById(target.id).orElseThrow().profileVersion).isZero()
         assertThat(follows.findById(followId).orElseThrow().status).isEqualTo(BunchFollowStatus.PENDING)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bunch_action_requests WHERE bunch_id = ? AND operation = 'PROFILE'",
+            Long::class.java,
+            target.id
+        )).isZero()
+    }
+
+    @Test
+    fun `push job failure rolls back profile approval and every notification`() {
+        val targetOwner = member()
+        val target = create(targetOwner)
+        val targetMember = member()
+        join(targetMember, issue(targetOwner, target.id))
+        val followerOwner = member()
+        val follower = create(followerOwner)
+        val followId = social.follow(followerOwner, follower.id, target.id).followId!!
+        registerPushDevice(targetMember)
+        registerPushDevice(followerOwner)
+        rejectVisibilityPushJobs()
+
+        try {
+            assertThatThrownBy {
+                profiles.update(
+                    targetOwner,
+                    target.id,
+                    UUID.randomUUID(),
+                    profile("푸시 실패", "푸시 실패 소개", 0, Visibility.PUBLIC),
+                    null
+                )
+            }.isInstanceOf(RuntimeException::class.java)
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_push_job ON push_jobs")
+            jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_visibility_push_job()")
+        }
+
+        assertThat(bunchRepository.findById(target.id).orElseThrow().visibility).isEqualTo(Visibility.PRIVATE)
+        assertThat(bunchRepository.findById(target.id).orElseThrow().profileVersion).isZero()
+        assertThat(follows.findById(followId).orElseThrow().status).isEqualTo(BunchFollowStatus.PENDING)
+        assertThat(notifications.findAll()).noneMatch {
+            it.type == NotificationType.BUNCH_VISIBILITY_CHANGED ||
+                it.type == NotificationType.BUNCH_FOLLOWED ||
+                it.type == NotificationType.FOLLOW_REQUEST_APPROVED
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM push_jobs", Long::class.java)).isZero()
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM bunch_action_requests WHERE bunch_id = ? AND operation = 'PROFILE'",
             Long::class.java,
@@ -492,6 +578,60 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         notifications.findAll().filter {
             it.recipientMemberId == memberId && it.bunchId == bunchId && it.type == type
         }
+
+    private fun registerPushDevice(memberId: Long): UUID {
+        val sessionId = UUID.randomUUID()
+        val pair = tokens.generateToken(memberId, "ROLE_USER", sessionId.toString())
+        sessions.save(
+            sessionId.toString(),
+            memberId,
+            pair.refreshToken,
+            tokens.getRefreshTokenValiditySeconds()
+        )
+        pushSessions += sessionId.toString() to memberId
+        val installationId = UUID.randomUUID()
+        pushDevices.register(
+            memberId,
+            sessionId,
+            installationId,
+            PushDeviceRegistrationRequest(
+                deviceToken = installationId.toString().replace("-", "").repeat(2),
+                environment = PushDeviceEnvironment.SANDBOX,
+                authorizationStatus = PushAuthorizationStatus.AUTHORIZED
+            )
+        )
+        return installationId
+    }
+
+    private fun pushJobRecipients(type: NotificationType): List<Long> = jdbc.queryForList(
+        "SELECT recipient_member_id FROM push_jobs WHERE type = ? ORDER BY recipient_member_id",
+        Long::class.java,
+        type.name
+    )
+
+    private fun pushJobRecipientsFor(type: NotificationType, memberId: Long): List<Long> = jdbc.queryForList(
+        "SELECT recipient_member_id FROM push_jobs WHERE type = ? AND recipient_member_id = ?",
+        Long::class.java,
+        type.name,
+        memberId
+    )
+
+    private fun rejectVisibilityPushJobs() {
+        jdbc.execute(
+            """CREATE FUNCTION bunch_test_reject_visibility_push_job() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN
+                    IF NEW.type = 'BUNCH_VISIBILITY_CHANGED' THEN
+                        RAISE EXCEPTION 'injected visibility push job failure';
+                    END IF;
+                    RETURN NEW;
+                END
+            $$"""
+        )
+        jdbc.execute(
+            "CREATE TRIGGER bunch_test_reject_push_job BEFORE INSERT ON push_jobs " +
+                "FOR EACH ROW EXECUTE FUNCTION bunch_test_reject_visibility_push_job()"
+        )
+    }
 
     private fun insertBundle(
         bunchId: Long,

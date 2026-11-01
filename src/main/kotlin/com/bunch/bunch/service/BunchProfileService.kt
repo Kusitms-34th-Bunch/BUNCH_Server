@@ -27,6 +27,7 @@ import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.service.NotificationWriter
+import com.bunch.notification.service.PushJobWriter
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -50,6 +51,7 @@ class BunchProfileService(
     private val follows: BunchFollowRepository,
     private val notifications: NotificationRepository,
     private val notificationWriter: NotificationWriter,
+    private val pushJobs: PushJobWriter,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
     private val clock: Clock,
@@ -280,30 +282,32 @@ class BunchProfileService(
         now: Instant
     ) {
         val public = visibility == Visibility.PUBLIC
-        memberships.findActiveMembers(bunch.id)
+        val rows = memberships.findActiveMembers(bunch.id)
             .filter { it.member.id != actorMemberId }
-            .forEach { recipient ->
-                notifications.save(
-                    Notification(
-                        recipientMemberId = recipient.member.id,
-                        bunchId = bunch.id,
-                        type = NotificationType.BUNCH_VISIBILITY_CHANGED,
-                        dedupeKey = "BUNCH_VISIBILITY_CHANGED:${bunch.id}:${bunch.profileVersion}",
-                        title = if (public) {
-                            "우리 번치가 공개로 바뀌었어요"
-                        } else {
-                            "우리 번치가 비공개로 바뀌었어요"
-                        },
-                        body = if (public) {
-                            "이제 누구나 우리 번치와 번들을 볼 수 있어요."
-                        } else {
-                            "이제 팔로우를 승인한 번치만 우리 번치와 번들을 볼 수 있어요."
-                        },
-                        target = NotificationTarget(NotificationTargetKind.BUNCH_HOME, bunch.id),
-                        createdAt = now
-                    )
+            .map { recipient ->
+                Notification(
+                    recipientMemberId = recipient.member.id,
+                    bunchId = bunch.id,
+                    type = NotificationType.BUNCH_VISIBILITY_CHANGED,
+                    dedupeKey = "BUNCH_VISIBILITY_CHANGED:${bunch.id}:${bunch.profileVersion}",
+                    title = if (public) {
+                        "우리 번치가 공개로 바뀌었어요"
+                    } else {
+                        "우리 번치가 비공개로 바뀌었어요"
+                    },
+                    body = if (public) {
+                        "이제 누구나 우리 번치와 번들을 볼 수 있어요."
+                    } else {
+                        "이제 팔로우를 승인한 번치만 우리 번치와 번들을 볼 수 있어요."
+                    },
+                    target = NotificationTarget(NotificationTargetKind.BUNCH_HOME, bunch.id),
+                    createdAt = now
                 )
             }
+        if (rows.isEmpty()) return
+        val saved = notifications.saveAll(rows)
+        notifications.flush()
+        pushJobs.enqueue(saved, now)
     }
 
     private fun responseFrom(result: Map<String, Any?>) = BunchProfileResponse(

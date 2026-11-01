@@ -41,10 +41,10 @@
 - #51/V14의 `BunchFollow`, block 필터, social count, `NotificationWriter.followApproved`를 재사용한다.
 - #25/V17의 AccessNotice entity/repository/service를 목록과 home의 최소 접근 검사에만 연결한다.
 - profileVersion은 기존 V11 컬럼을 사용하므로 #52에는 V19 placeholder를 추가하지 않는다. 새 스키마가 실제로 필요해지는 경우에만 다음 마이그레이션을 추가한다.
-- #48의 push job 원자 연결은 부모 통합 작업의 연결 지점이다. 이 기능은 기존 `NotificationRepository`/`NotificationWriter`의 inbox 저장을 같은 transaction으로 보장하고 fake adapter나 별도 큐를 만들지 않는다.
+- #48의 실제 `PushJobWriter`를 같은 transaction에서 사용한다. type 16 공개 범위 변경은 `NotificationRepository.saveAll → flush`로 반환된 행을 `PushJobWriter.enqueue(rows, now)`에 직접 넘기고, 공개 전환으로 생긴 type 19 승인 알림은 기존 `NotificationWriter.followApproved`가 저장·enqueue하는 경로를 재사용한다. actor는 두 경로에서 제외하며 fake adapter나 별도 큐를 만들지 않는다.
 
 ## 추적·검증
 
 제품 색인의 47개 기능 ID와 최종 문서 링크는 부모가 관리하는 [번치 색인](bunch.md)을 따른다. 이 문서는 원문 1009줄을 복제하지 않고 #52의 실제 endpoint·코드·선행 migration만 추적한다.
 
-관련 검증은 `BunchHomeProfileIntegrationTest`, 기존 name-availability 회귀, 실제 PostgreSQL/Redis의 V14/V16/V17 Flyway 적용, 프로필 version/idempotency/image 보상 및 공개 전환·block 경합 테스트를 포함한다. 실제 iOS SDK·APNs 수신은 환경 밖이며 #48의 push 통합 검증과 별도로 기록한다.
+관련 검증은 `BunchHomeProfileIntegrationTest`, 기존 name-availability 회귀, 실제 PostgreSQL/Redis의 V14/V15/V16/V17 Flyway 적용, 프로필 version/idempotency/image 보상 및 공개 전환·block 경합·실제 기기 등록 후 type 16/19 job·push_jobs 쓰기 실패 rollback 테스트를 포함한다. 실제 iOS SDK·APNs 수신은 환경 밖이며, #48의 worker 최종 lock-order 보정은 부모가 전달할 후속 SHA에서 별도로 기록한다.
