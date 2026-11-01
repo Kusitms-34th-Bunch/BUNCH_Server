@@ -8,7 +8,6 @@ import com.bunch.global.image.PhotoImageUrls
 import com.bunch.member.domain.MemberRepository
 import com.bunch.photo.domain.PhotoListCursor
 import com.bunch.photo.domain.PhotoRepository
-import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.dto.PhotoListItem
 import com.bunch.photo.dto.PhotoListResponse
 import org.springframework.data.domain.Limit
@@ -20,8 +19,7 @@ class PhotoListService(
     private val members: MemberRepository,
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
-    private val photos: PhotoRepository,
-    private val photoUploaders: PhotoUploaderRepository
+    private val photos: PhotoRepository
 ) {
     // Reads only. The list is not kept in step with other members' uploads; the app asks again (3.1.1).
     @Transactional(readOnly = true)
@@ -44,7 +42,7 @@ class PhotoListService(
         val uploaders = if (page.isEmpty()) {
             emptyMap()
         } else {
-            photoUploaders.findUploaderIdsByPhotoIdIn(page.map { it.id }).groupBy({ it.photoId }, { it.memberId })
+            photos.findUploaderIdsByPhotoIds(page.map { it.id }).groupBy({ it.photoId }, { it.memberId })
         }
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) {

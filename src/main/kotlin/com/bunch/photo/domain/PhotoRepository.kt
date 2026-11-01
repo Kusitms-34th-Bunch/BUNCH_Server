@@ -45,6 +45,13 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
         limit: Limit
     ): List<PhotoListRow>
 
+    // IDs only, in the order they uploaded: the list shows the uploader badges without loading any member.
+    @Query(
+        "select u.photo.id as photoId, u.member.id as memberId from PhotoUploader u " +
+            "where u.photo.id in :photoIds order by u.photo.id asc, u.id asc"
+    )
+    fun findUploaderIdsByPhotoIds(@Param("photoIds") photoIds: Collection<Long>): List<PhotoUploaderIds>
+
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 
