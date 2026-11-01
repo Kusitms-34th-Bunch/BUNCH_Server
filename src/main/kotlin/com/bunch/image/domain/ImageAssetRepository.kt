@@ -10,4 +10,6 @@ interface ImageAssetRepository : JpaRepository<ImageAsset, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select asset from ImageAsset asset where asset.id = :id")
     fun findLockedById(@Param("id") id: Long): ImageAsset?
+
+    fun existsByPublicId(publicId: String): Boolean
 }

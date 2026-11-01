@@ -37,5 +37,8 @@ enum class ErrorCode(
     BUNDLE_LEASE_CONFLICT("BUNDLE_004", "error.bundle_lease_conflict", 409),
     BUNDLE_PUBLISH_BLOCKED("BUNDLE_005", "error.bundle_publish_blocked", 409),
     BUNDLE_PHOTO_CONFLICT("BUNDLE_006", "error.bundle_photo_conflict", 409),
+    PHOTO_BUNCH_LIMIT_EXCEEDED("PHOTO_001", "error.photo_bunch_limit_exceeded", 409),
+    PHOTO_DAILY_LIMIT_EXCEEDED("PHOTO_002", "error.photo_daily_limit_exceeded", 409),
+    PHOTO_BATCH_LIMIT_EXCEEDED("PHOTO_003", "error.photo_batch_limit_exceeded", 409),
     RATE_LIMITED("REQUEST_002", "error.rate_limited", 429)
 }

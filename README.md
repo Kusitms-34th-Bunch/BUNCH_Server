@@ -144,7 +144,10 @@ V5는 기존 개인·번치 프로필을 공용 `image_assets`로 백필하고 n
 데이터를 바꾸지 않고 실패한다. 배포 전 해당 데이터를 점검한다.
 
 Photo·공동 업로더 스키마와 조회·최종 삭제 연결은
-[사진함 기반 계약](docs/specs/photo-foundation.md)을 따른다. 사진함 HTTP 업로드·목록·중복 병합은
+[사진함 기반 계약](docs/specs/photo-foundation.md)을 따른다. 사진함 업로드 저장 규칙(한도·같은 사진 합치기·
+결과 구분)은 [사진함 업로드 계약](docs/specs/photo-box.md)을 따르며, V10은 하루 업로드 한도 집계용
+`photo_uploaders(member_id, uploaded_at)` 인덱스를 추가한다. 업로드 API(`POST /api/v1/bunches/{bunchId}/photos`)는
+[사진함 업로드 클라이언트 계약](docs/specs/photo-box-api.md)을 따르고, 목록·상세·날짜 변경·삭제는
 별도 구현 범위다. 파일 정리는 참조가 모두 해제된 DB 커밋 후 시도하며 실패 식별자만 기록한다.
 파일 정리 실패의 자동 재시도는 아직 연결하지 않았다. 재시도가 필요한 후속 작업은 아래 비동기 작업 기반을 쓴다.
 

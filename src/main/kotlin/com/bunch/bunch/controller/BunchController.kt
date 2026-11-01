@@ -39,6 +39,12 @@ class BunchController(private val bunches: BunchService, private val invitations
         @PathVariable id: Long
     ) = ApiResponse.ok(bunches.resetProfileImage(userId.toLong(), id))
 
+    @GetMapping("/{id}/members")
+    fun members(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable id: Long
+    ) = ApiResponse.ok(bunches.members(userId.toLong(), id))
+
     @PutMapping("/{id}/last-used")
     fun lastUsed(
         @AuthenticationPrincipal userId: String,
