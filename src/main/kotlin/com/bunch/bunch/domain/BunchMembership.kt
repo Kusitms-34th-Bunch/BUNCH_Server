@@ -52,16 +52,6 @@ class BunchMembership(
     @Column(nullable = false, columnDefinition = "jsonb")
     var joinRequests: Map<String, JoinRequest> = emptyMap()
 ) {
-    fun changeRole(
-        newRole: MembershipRole,
-        grantorMemberId: Long,
-        now: Instant
-    ) {
-        role = newRole
-        roleGrantedAt = now
-        roleGrantedBy = grantorMemberId
-    }
-
     fun recordActivity(now: Instant = Instant.now()) {
         if (lastActivityAt == null || now > lastActivityAt) {
             lastActivityAt = now
