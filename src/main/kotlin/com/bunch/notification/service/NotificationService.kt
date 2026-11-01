@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 @Service
 class NotificationService(
@@ -107,7 +108,9 @@ class NotificationService(
             ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
 
     private fun markRead(notification: Notification): Instant {
-        if (notification.readAt == null) notification.readAt = clock.instant()
+        if (notification.readAt == null) {
+            notification.readAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
+        }
         return notification.readAt!!
     }
 

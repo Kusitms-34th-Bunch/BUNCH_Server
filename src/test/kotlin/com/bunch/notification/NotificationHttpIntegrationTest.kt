@@ -18,12 +18,15 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpHeaders
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.ResultActions
@@ -32,7 +35,9 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @SpringBootTest
@@ -60,7 +65,17 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var participants: BundleParticipantRepository
 
+    @MockitoBean
+    private lateinit var clock: Clock
+
+    private lateinit var now: Instant
     private val sessionIds = mutableListOf<Pair<String, Long>>()
+
+    @BeforeEach
+    fun setNanosecondClock() {
+        now = Instant.now().truncatedTo(ChronoUnit.SECONDS).plusNanos(123_456_995)
+        `when`(clock.instant()).thenReturn(now)
+    }
 
     @AfterEach
     fun cleanNotificationBundleReferencesBeforeBunchSupport() {
@@ -116,7 +131,7 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(fieldNames(firstReadData)).containsExactlyInAnyOrder("id", "readAt")
         assertThat(firstReadData.path("id").asLong()).isEqualTo(notificationId)
         val readAt = firstReadData.path("readAt").asText()
-        assertThat(readAt).isNotBlank()
+        assertThat(readAt).isEqualTo(now.truncatedTo(ChronoUnit.MICROS).toString())
 
         val repeatedReadData = readRequest(fixture.owner, fixture.bunchId, notificationId)
             .expectSuccessEnvelope()
@@ -249,7 +264,8 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
                 "notificationId", "readAt", "available", "target"
             )
             assertThat(opened.path("notificationId").asLong()).isEqualTo(notification.id)
-            assertThat(opened.path("readAt").isNull).isFalse()
+            assertThat(opened.path("readAt").asText())
+                .isEqualTo(now.truncatedTo(ChronoUnit.MICROS).toString())
             assertThat(opened.path("available").asBoolean()).isFalse()
             assertThat(opened.path("target").isNull).isTrue()
 
