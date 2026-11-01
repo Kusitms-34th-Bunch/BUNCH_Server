@@ -30,10 +30,16 @@ class BunchService(
     private val transactions = TransactionTemplate(transactionManager)
 
     @Transactional(readOnly = true)
-    fun nameAvailability(userId: Long, name: String): NameAvailability {
+    fun nameAvailability(userId: Long, name: String, excludeBunchId: Long? = null): NameAvailability {
         completed(userId)
         val normalized = ProfileText.name(name)
-        return NameAvailability(normalized, !bunches.existsByName(normalized))
+        val available = if (excludeBunchId == null) {
+            !bunches.existsByName(normalized)
+        } else {
+            requireOwner(userId, excludeBunchId)
+            !bunches.existsByNameAndIdNot(normalized, excludeBunchId)
+        }
+        return NameAvailability(normalized, available)
     }
 
     @Transactional
@@ -156,6 +162,14 @@ class BunchService(
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
         if (ownerOnly && membership.role != MembershipRole.OWNER) fail(ErrorCode.FORBIDDEN)
         return bunch
+    }
+
+    private fun requireOwner(userId: Long, bunchId: Long) {
+        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)?.let {
+            if (it.role == MembershipRole.OWNER) return
+        }
+        if (!bunches.existsById(bunchId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        fail(ErrorCode.FORBIDDEN)
     }
 
     private fun fingerprint(vararg values: String): String = MessageDigest.getInstance("SHA-256")

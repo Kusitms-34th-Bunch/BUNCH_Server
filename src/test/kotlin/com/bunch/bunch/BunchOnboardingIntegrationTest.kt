@@ -85,6 +85,27 @@ class BunchOnboardingIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `owner can exclude the current bunch from availability without changing uniqueness`() {
+        val owner = member()
+        val bunch = create(owner, "현재 번치")
+
+        assertThat(bunches.nameAvailability(owner, "현재 번치").available).isFalse()
+        assertThat(bunches.nameAvailability(owner, "  현재 번치  ", bunch.id)).isTrue()
+        assertThat(bunches.nameAvailability(owner, "새 번치", bunch.id).available).isTrue()
+    }
+
+    @Test
+    fun `only the current bunch owner can use the exclude parameter`() {
+        val owner = member()
+        val other = member()
+        val bunch = create(owner)
+
+        assertError(ErrorCode.FORBIDDEN) {
+            bunches.nameAvailability(other, "새 번치", bunch.id)
+        }
+    }
+
+    @Test
     fun `concurrent same name creation returns a domain conflict and leaves no orphan owner`() {
         val owners = listOf(member(), member())
         val name = uniqueName()
