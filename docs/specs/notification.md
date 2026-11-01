@@ -1,0 +1,113 @@
+# 알림·푸시 Spec — #28 inbox
+
+> #28은 앱 내 알림 inbox를 완성한다. notifications 이관, 실제 업무 변경의 알림 생산,
+> 목록·읽음·open, 활동 합산, 참여별 코멘트 리마인드를 같은 기능 PR 범위로 둔다.
+> 이 문서는 APNs·기기 등록·개인 푸시 설정의 wire 계약이나 전체 21종 producer 완료를 선언하지 않는다.
+
+승인된 5.12.1~5.12.3의 문구·수신자·이동 정책을 이 문서에서 소유한다.
+
+- [알림 inbox API](notification-api.md): 목록·읽음·모두 읽음·open의 입출력.
+- [알림 inbox 저장 계약](notification-schema.md): notifications, 활동 합산, V13 상태와 트랜잭션 경계.
+- [번들 기능 계약](bundle.md)·[번들 API](bundle-api.md): BundleService의 실제 상태 변경과 멱등 재생.
+- [역할·Stage 계약](bunch-role-stage.md)·[로그인·온보딩 API](login-onboarding-api.md): 접근·멤버십 판정.
+
+## 1. 현재 #28 범위
+
+- 앱 내 알림은 현재 번치와 현재 회원의 inbox에 저장한다. 알림이 업무 변경을 대신하거나 접근 권한을 부여하지 않는다.
+- 실제 성공한 업무 변경만 producer에서 직접 저장한다. 독립 이벤트 원장, 전달 wrapper, fake producer/routing은 만들지 않는다.
+- 현재 연결하는 producer는 `InvitationService`의 멤버 참여와 `BundleService.create`, `addParticipant`, `removeParticipant`, `leave`, `changePhotos`, `comment`, `publish`, ready 판정(hooks: `title`/`visibility`/`comment`/`removeParticipation`/`changePhotos`), `BundleStagePolicy` 흐름이다.
+- 알림 행과 업무 변경은 같은 DB 트랜잭션에 속한다. 원래 성공 기록은 업무 서비스가 소유하고,
+  같은 요청의 재생은 알림을 다시 만들거나 합산하지 않는다.
+
+## 2. inbox 동작
+
+- 보관 기준은 `created_at > now - 30 days`이며 정확히 30일 지난 행부터 만료다. 조회·미확인 집계·open은 정리 작업 전에도 같은 기준을 쓴다.
+- 목록은 최신 `created_at DESC, id DESC` 순으로 SQL에서 최신 100개를 먼저 제한한 뒤 page/size를 적용한다. 기본 page는 0, size는 20, 허용 범위는 1~50이다.
+- 서버는 UTC `createdAt`을 제공하고 상대 시간은 앱이 표시한다: 1분 미만 「방금 전」, 1시간 미만 「N분 전」, 24시간 미만 「N시간 전」, 7일 미만 「N일 전」, 이후 「M월 D일」이다.
+- `unreadCount`는 화면 밖의 과거 행을 포함한 30일 보관 전체의 미확인 수다. 모두 읽음은 해당 회원·번치의 보관 미확인 행을 한 UPDATE로 처리하며 빈 목록도 성공 no-op이다.
+- 개별 읽음과 open은 최초 `readAt`을 보존한다. open은 먼저 읽고 현재 대상·소속·참여·공개 상태를 검사한다.
+  대상이 없거나 접근할 수 없으면 `available:false,target:null`을 200으로 반환하고 읽음은 되돌리지 않는다.
+- 알림의 제목·번치 이름·행위자 닉네임은 발생 당시 snapshot이다. 제목이 비면 `제목 미정`을 사용하며 이후 업무 데이터 변경으로 기존 문구를 다시 계산하지 않는다.
+- 모든 시간 경계는 주입한 `Clock`을 기준으로 한다.
+
+## 3. 현재 producer와 문구 계약
+
+아래 9종만 이 PR의 실제 inbox producer다. 문구와 수신자는 승인 원문을 그대로 유지한다.
+
+| 번호·종류 | 수신자 | 제목 | 설명 | 이동 대상 | 채널·중복 방지 기준 |
+| --- | --- | --- | --- | --- | --- |
+| 1. 초안 참여 멤버가 됨(생성 시 포함) | 추가된 참여 멤버 | 「'{번들 제목}' 번들에 함께하게 됐어요」 | 「코멘트를 남기고 번들 완성을 함께해 주세요.」 | 공동 편집 | 참여 추가 이벤트·참여 회차당 1회 |
+| 2. 참여한 초안에 새 활동 | 다른 참여 멤버 | 「'{번들 제목}' 번들에 새 활동이 있어요」 | 「{닉네임}님이 사진 N장을 추가했어요.」 | 공동 편집 | 동일 사진 추가 이벤트 중복 제외·같은 초안 활동 10분 이내 합산 |
+| 3. 코멘트 작성 리마인드 | 코멘트를 쓰지 않은 참여 멤버 | 「'{번들 제목}' 번들 코멘트를 기다리고 있어요!」 | 「코멘트를 남기고 번들 완성을 함께해 주세요.」 | 공동 편집 | 참여 회차별 24·72시간에 각 1회 |
+| 4. 참여 멤버에서 제외됨 | 제외된 멤버 | 「'{번들 제목}' 번들 참여 멤버에서 빠졌어요」 | 「추가한 사진은 번들에 그대로 남아요.」 | 작성 중인 번들 목록 | 참여 제외 이벤트당 1회 |
+| 5. 발행 조건이 모두 채워짐 | 초안 생성자와 참여 중인 관리자 | 「'{번들 제목}' 번들을 이제 발행할 수 있어요」 | 「함께한 순간을 하나의 번들로 완성해 보세요.」 | 공동 편집 | 초안 발행 조건 최초 충족 시 1회·생성자/관리자 중복 수신 제거 |
+| 6. 참여 멤버가 1명만 남음 | 초안 생성자 | 「'{번들 제목}'에 참여 멤버가 부족해요」 | 「함께할 멤버를 추가해 주세요.」 | 공동 편집 | 1명으로 감소한 전이 이벤트당 1회 |
+| 7. 번들 발행 | 번치 멤버 전원 | 「'{번들 제목}' 번들이 완성됐어요」 | 「함께한 순간들이 하나의 소중한 기록으로 남았어요.」 | 번들 상세 | 번들 발행 이벤트당 1회 |
+| 9. 뭉치 성장 | 번치 멤버 전원 | 「우리 번치의 뭉치가 성장했어요!」 | 「차곡차곡 쌓인 추억이 뭉치를 키웠어요.」 | 번치 메인 | 단계 상승 전이당 1회·하락 제외 |
+| 10. 새 멤버 참여 | 기존 멤버 전원 | 「새 멤버가 들어왔어요」 | 「{닉네임}님이 번치에 참여했어요.」 | 멤버 관리 | 새 활성 Membership 생성 이벤트당 1회 |
+
+### 실제 연결 지점
+
+| 실제 변경 지점 | 생산자 규칙 |
+| --- | --- |
+| `InvitationService`의 실제 Membership 생성 | type 10을 새 활성 Membership 회차당 한 번 저장하고 행동자는 제외한다. 성공 요청 재생에는 다시 저장하지 않는다. |
+| `BundleService.create`·`addParticipant` | type 1을 실제 참여 행이 생긴 추가 참여자에게 저장한다. 생성 시 포함되는 참여자도 같은 참여 회차 규칙을 따른다. |
+| `BundleService.changePhotos`의 사진 추가 성공 | type 2를 같은 초안의 다른 참여자에게 저장한다. 실제 사진 mutation key를 dedupe 기준으로 삼고 요청 재생·사진 삭제에는 만들지 않는다. |
+| `BundleService.removeParticipant`·`leave`·멤버 이탈 정리 | 별도 멤버를 실제 제외할 때만 type 4를 대상자에게 저장한다. self-leave와 이미 번치 Membership이 종료된 departed member는 active recipient가 아니므로 type 4를 저장하지 않는다. 남은 참여자가 1명으로 바뀌는 전이의 type 6은 생성자에게 보내되 actor가 생성자면 제외한다. |
+| `BundleService.comment`의 코멘트 저장 | 코멘트가 작성된 참여자의 미전송 type 3을 취소한다. 발행 가능 조건도 다시 계산하며 코멘트 자체는 소셜 댓글 type 20으로 라우팅하지 않는다. |
+| `BundleService.title`·`visibility`·`comment`·`removeParticipation`·`changePhotos` 후 ready 판정 | 처음 모든 발행 조건이 충족된 순간에만 type 5를 저장하고 `ready_notified_at`을 함께 기록한다. `create`는 항상 제목/공개 범위가 비어 있고 `addParticipant`는 빈 코멘트를 만들므로 새 ready 전이를 만들지 않는다. 조건이 깨졌다가 다시 채워져도 재발송하지 않는다. |
+| `BundleService.publish` | type 7을 발행 이벤트당 저장한다. 발행 상태에서는 worker가 남은 리마인드를 eligible로 보지 않으며, 발행으로 Stage가 상승한 경우에만 type 9를 같은 업무 흐름에서 저장한다. |
+| 참여별 reminder worker | 참여자의 참여 시각 기준 24/72시간에 type 3을 각각 최대 한 번 저장한다. 실행이 늦어도 발송 직전에 현재 자격을 다시 검사하고, 자격이 없으면 저장하지 않는다. |
+
+직접 행동으로 발생한 알림은 행동한 본인을 제외한다. 예약 리마인드는 코멘트를 쓰지 않은 참여자 본인을 포함한다.
+현재 producer는 현재 유효한 소속을 기준으로 수신자를 고른다. 외부 번치 관계·차단 검사는 로컬에 #51 구현/계약이 없어 현재 inbox에서 수행하지 않으며,
+알림 target은 접근 권한의 근거가 아니다. 사진함 업로드/삭제·초안 삭제·발행본 수정/삭제·Stage 하락·일반 나가기 등에는 알림을 만들지 않는다.
+위 표의 명시적 예외인 새 활동·참여 제외·발행·ready·Stage만 해당 producer가 처리한다.
+
+### 활동 합산
+
+`DRAFT_ACTIVITY`는 같은 수신자·초안의 첫 행부터 10분 동안만 합산한다. `group_until`을 연장하지 않고
+행의 ID·제목·`created_at`을 유지하며 body, 행위자 snapshot, 사진 수를 갱신하고 `read_at`을 비운다.
+JSONB object key 순서에 의존하지 않도록 첫 표시 행위자 ID를 별도로 저장한다.
+창이 끝난 뒤의 활동은 새 행이다. 별도 활동 원장이나 합산 이벤트는 만들지 않는다.
+
+### 리마인드
+
+생성 후 일괄 24·72시간이 아니라 각 참여자의 참여 후 24·72시간에 최대 2회다.
+최초 참여자는 초안 생성 시점, 나중 참여자는 추가 시점부터 계산한다.
+코멘트 작성 시에는 `reminders_cancelled_at`을 기록한다. 참여 행 삭제, 발행 상태, 번들 삭제, 번치 이탈은
+현재 worker의 eligibility에서 제외하는 방식으로 남은 리마인드를 막으며, 모든 참여 행에 cancellation timestamp를 물리적으로 쓸 필요는 없다.
+worker는 실제 실행 직전에 참여 상태·코멘트·초안 상태·현재 소속을 다시 확인한다.
+
+## 4. 미래 enum 호환성
+
+아래 type 8, 11~21은 승인된 enum·DB CHECK·target 저장 호환성만 유지한다.
+이 PR은 해당 producer, 알림 문구의 재구현, 이벤트 라우팅, backfill, fake adapter를 만들지 않는다.
+
+| 번호 | enum | 향후 책임 영역(호환 메모) |
+| --- | --- | --- |
+| 8 | `CANDIDATE_CREATED` | 후보/추천 기능 |
+| 11 | `CO_OWNER_GRANTED` | 역할 변경 |
+| 12 | `CO_OWNER_REVOKED` | 역할 변경 |
+| 13 | `OWNER_TRANSFERRED` | 관리자 인계 |
+| 14 | `MEMBER_REMOVED` | 멤버십 접근 안내; 앱 inbox 행은 만들지 않는 push-only 호환 값 |
+| 15 | `BUNCH_DELETED` | 번치 삭제 접근 안내; 앱 inbox 행은 만들지 않는 push-only 호환 값 |
+| 16 | `BUNCH_VISIBILITY_CHANGED` | 번치 공개 범위 |
+| 17 | `BUNCH_FOLLOWED` | 번치 follow |
+| 18 | `FOLLOW_REQUESTED` | 번치 follow 요청 |
+| 19 | `FOLLOW_REQUEST_APPROVED` | 번치 follow 승인 |
+| 20 | `SOCIAL_COMMENT_CREATED` | 외부 번치 댓글 |
+| 21 | `BUNDLE_LIKED` | 최초 좋아요 |
+
+## 5. 앱·iOS·#48 경계
+
+앱 inbox는 기기 등록 여부와 분리한다. 실제 iOS SDK, 권한, APNs 수신·복귀는 별도 앱 검증이며 이 문서에서 완료로 표시하지 않는다.
+기기 등록·개인 푸시 종류 설정·payload·retry와 전송 job의 세부 계약은 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)의 소유다.
+
+#48을 연결하는 운영 출시 조건은 다음과 같다.
+
+- 실제 업무 변경과 notification을 저장하는 같은 트랜잭션에서 **현재 바인딩된 기기별 job**도 원자적으로 저장한다.
+- 10분 활동 합산 때 아직 전송되지 않은 현재 기기 job의 payload도 같은 트랜잭션에서 갱신한다. worker가 notification을 재생성하거나 재합산하지 않는다.
+- 당시 기기가 없으면 job을 만들지 않고, 나중에 등록한 기기로 과거 알림을 소급 전송하지 않는다.
+
+이 조건을 충족하지 않은 상태에서 현재 producer를 push 포함 출시로 표시하지 않는다.

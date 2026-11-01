@@ -5,8 +5,7 @@ import com.bunch.bunch.dto.*
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
-import com.bunch.notification.domain.JoinNotification
-import com.bunch.notification.domain.JoinNotificationRepository
+import com.bunch.notification.service.NotificationWriter
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -22,7 +21,7 @@ class InvitationService(
     private val memberships: BunchMembershipRepository,
     private val invitations: InvitationRepository,
     private val members: MemberRepository,
-    private val notifications: JoinNotificationRepository,
+    private val notifications: NotificationWriter,
     private val input: InvitationInput,
     private val rateLimiter: InvitationRateLimiter,
     private val entityManager: EntityManager
@@ -100,7 +99,11 @@ class InvitationService(
             )
                 fail(ErrorCode.IDEMPOTENCY_CONFLICT)
             val bunch = bunches.findLocked(previous.bunch.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-            memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let { it.lastUsedAt = Instant.now() }
+            memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let {
+                // Replay was loaded before the bunch lock; retain activity committed while waiting.
+                entityManager.refresh(it)
+                it.lastUsedAt = Instant.now()
+            }
             return JoinResponse(replay.outcome, BunchResponse.from(bunch))
         }
 
@@ -131,20 +134,8 @@ class InvitationService(
             )
         )
         membership.rememberJoin(key, fingerprint(current), JoinOutcome.JOINED)
-        val recipients = memberships
-            .findAllByBunchIdAndStatus(bunch.id)
-            .filter { it.member.id != userId }
-        notifications.saveAll(
-            recipients.map {
-                JoinNotification(
-                    bunchId = bunch.id,
-                    joinedMembershipId = membership.id,
-                    recipientMemberId = it.member.id,
-                    joinedMemberId = userId,
-                    createdAt = now
-                )
-            }
-        )
+        bunch.membershipVersion++
+        notifications.memberJoined(bunch.id, membership.id, userId, member.nickname!!, now)
         return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch))
     }
 

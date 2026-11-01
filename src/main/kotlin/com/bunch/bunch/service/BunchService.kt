@@ -79,6 +79,7 @@ class BunchService(
             )
         )
 
+        bunch.membershipVersion++
         return BunchResponse.from(bunch)
     }
 
@@ -118,6 +119,7 @@ class BunchService(
                 val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
                 val previousAssetId = current.profileImageAsset?.id
                 current.profileImageAsset = imageAssets.store(uploaded)
+                current.profileVersion++
                 imageAssets.releaseAfterCommit(previousAssetId)
                 bunches.flush()
                 BunchResponse.from(current)
@@ -134,6 +136,7 @@ class BunchService(
         val result = transactions.execute {
             val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
             val previousAssetId = current.profileImageAsset?.id
+            if (previousAssetId != null) current.profileVersion++
             current.profileImageAsset = null
             imageAssets.releaseAfterCommit(previousAssetId)
             bunches.flush()

@@ -120,7 +120,13 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
         mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $joiningAccess"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.defaultBunchId").value(bunchId))
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bunch_memberships WHERE bunch_id = ?", Int::class.java, bunchId)).isEqualTo(2)
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM bunch_join_notifications WHERE bunch_id = ?", Int::class.java, bunchId)).isEqualTo(1)
+        assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM notifications WHERE bunch_id = ? AND type = 'MEMBER_JOINED'",
+                Int::class.java,
+                bunchId
+            )
+        ).isEqualTo(1)
     }
 
     @Test

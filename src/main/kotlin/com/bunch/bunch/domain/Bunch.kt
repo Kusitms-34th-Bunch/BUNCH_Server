@@ -51,7 +51,13 @@ class Bunch(
     val creationFingerprint: String,
 
     @Column(nullable = false)
-    val createdAt: Instant
+    val createdAt: Instant,
+
+    @Column(nullable = false)
+    var profileVersion: Long = 0,
+
+    @Column(nullable = false)
+    var membershipVersion: Long = 0
 ) {
     val imagePublicId: String?
         get() = profileImageAsset?.publicId

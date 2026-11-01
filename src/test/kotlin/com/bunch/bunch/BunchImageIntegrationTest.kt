@@ -102,8 +102,12 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
         assertThat(result.imageUrl).isEqualTo("https://images.example/${uploaded.single()}.jpg")
         assertThat(deleted).containsExactly(oldImage.publicId)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(1)
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(uploaded.single())
         val reset = imageBunches.resetProfileImage(owner, bunch.id)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(2)
+        imageBunches.resetProfileImage(owner, bunch.id)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(2)
         assertThat(reset.imageUrl).isNull()
         assertThat(reset.characterType).isEqualTo(bunch.characterType)
         assertThat(deleted).containsExactly(oldImage.publicId, uploaded.single())
@@ -121,6 +125,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         assertThat(deleted).containsExactly(uploaded.single())
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(oldImage.publicId)
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(oldImage.url)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isZero()
     }
 
     @Test
@@ -161,6 +166,21 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
         assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(result.imageUrl)
         assertThat(deleted).contains(oldImage.publicId)
+    }
+
+    @Test
+    fun `concurrent image resets increment the version and release the file only once`() {
+        val owner = member()
+        val bunch = create(owner)
+        val previous = attachImage(bunch.id, "concurrent-reset", "https://images.example/reset.jpg")
+
+        concurrently(List(4) { { imageBunches.resetProfileImage(owner, bunch.id) } })
+            .forEach { it.getOrThrow() }
+
+        val current = bunchRepository.findById(bunch.id).orElseThrow()
+        assertThat(current.profileImageAsset).isNull()
+        assertThat(current.profileVersion).isEqualTo(1)
+        assertThat(deleted).containsExactly(previous.publicId)
     }
 
     @Test
