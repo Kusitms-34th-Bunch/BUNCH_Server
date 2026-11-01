@@ -1,7 +1,6 @@
 package com.bunch.bundle.service
 
 import com.bunch.bundle.domain.BundleActivityType
-import com.bunch.bundle.domain.Bundle
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
@@ -57,7 +56,7 @@ class BundleRealtimeAuthorizationInterceptor(
         }
 
         val parsed = BundleRealtimeDestinations.parseTopic(destination) ?: return null
-        val bundle = resolveTopic(memberId, parsed) ?: return null
+        val bundle = access.read(memberId, parsed.bunchId, parsed.bundleId)
         if (!registry.addSubscription(
                 connectionId,
                 BundleRealtimeSubscription(
@@ -84,7 +83,8 @@ class BundleRealtimeAuthorizationInterceptor(
 
     private fun send(message: Message<*>, accessor: StompHeaderAccessor, memberId: Long): Message<*>? {
         val parsed = BundleRealtimeDestinations.parseCommand(accessor.destination) ?: return null
-        val bundle = resolveCommand(memberId, parsed) ?: return null
+        val bundle = access.read(memberId, parsed.bunchId, parsed.bundleId)
+        // Reject unauthorized commands before dispatch to preserve silent frame dropping.
         if (parsed.command != BundleRealtimeCommand.ACTIVITY) {
             access.requireParticipant(memberId, bundle)
         } else if (activityType(message) == BundleActivityType.COMMENT.name) {
@@ -101,14 +101,4 @@ class BundleRealtimeAuthorizationInterceptor(
         }
         body.path("type").asText().trim().uppercase(Locale.ROOT)
     }.getOrDefault("")
-
-    private fun resolveCommand(memberId: Long, destination: BundleRealtimeCommandDestination): Bundle? {
-        val bundle = access.read(memberId, destination.bunchId, destination.bundleId)
-        return bundle.takeIf { it.bunchId == destination.bunchId }
-    }
-
-    private fun resolveTopic(memberId: Long, destination: BundleRealtimeTopicDestination): Bundle? {
-        return access.read(memberId, destination.bunchId, destination.bundleId)
-            .takeIf { it.bunchId == destination.bunchId }
-    }
 }

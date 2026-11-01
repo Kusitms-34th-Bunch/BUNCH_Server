@@ -1,5 +1,6 @@
 package com.bunch.bundle.service
 
+import com.bunch.bundle.dto.BundleActor
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.JwtSessionDetails
 import com.bunch.global.security.TokenProvider
@@ -60,7 +61,7 @@ class BundleRealtimeAuthInterceptor(
         } catch (_: RuntimeException) {
             false
         }
-        if (!active || !registry.bind(connectionId, BundleRealtimeIdentity(memberId, authSessionId))) {
+        if (!active || !registry.bind(connectionId, BundleActor(memberId, authSessionId))) {
             return null
         }
         accessor.user = authentication
@@ -80,9 +81,9 @@ class BundleRealtimeAuthInterceptor(
         val authentication = accessor.user as? Authentication ?: return null
         val memberId = authentication.principal.toString().toLongOrNull() ?: return null
         val authSessionId = (authentication.details as? JwtSessionDetails)?.sessionId ?: return null
-        if (memberId != identity.memberId || authSessionId != identity.authSessionId) return null
+        if (memberId != identity.memberId || authSessionId != identity.sessionId) return null
         val active = try {
-            sessions.isActive(identity.authSessionId, identity.memberId)
+            sessions.isActive(identity.sessionId, identity.memberId)
         } catch (_: RuntimeException) {
             false
         }
