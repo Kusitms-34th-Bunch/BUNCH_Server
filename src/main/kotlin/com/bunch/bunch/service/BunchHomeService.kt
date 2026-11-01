@@ -1,17 +1,17 @@
 package com.bunch.bunch.service
 
+import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.bunch.dto.BunchHomeProfileResponse
 import com.bunch.bunch.dto.BunchHomeResponse
 import com.bunch.bunch.dto.BunchPermissions
-import com.bunch.bunch.dto.BunchHomeProfileResponse
 import com.bunch.bunch.dto.toMyMembershipResponse
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.domain.NotificationRepository
-import com.bunch.bunch.domain.BunchFollowRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
@@ -71,7 +71,6 @@ class BunchHomeService(
     )
 
     private fun fail(code: ErrorCode): Nothing = throw BusinessException(code)
-
 
     companion object {
         private val RETENTION: Duration = Duration.ofDays(30)

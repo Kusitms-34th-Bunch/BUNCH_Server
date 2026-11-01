@@ -6,6 +6,7 @@ import com.bunch.bunch.domain.BunchActionRequest
 import com.bunch.bunch.domain.BunchActionRequestRepository
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
+import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
@@ -186,16 +187,15 @@ class BunchProfileService(
         } else {
             "-"
         }
-        val fingerprint = digest(
-            listOf(
-                name,
-                introduction,
-                request.visibility.name,
-                request.imageAction.name,
-                request.expectedProfileVersion,
-                imageHash
-            ).joinToString("|").toByteArray(Charsets.UTF_8)
-        )
+        val fingerprintInput = listOf(
+            name,
+            introduction,
+            request.visibility.name,
+            request.imageAction.name,
+            request.expectedProfileVersion.toString(),
+            imageHash
+        ).joinToString("") { "${it.length}:$it" }
+        val fingerprint = digest(fingerprintInput.toByteArray(Charsets.UTF_8))
         return Input(
             name = name,
             introduction = introduction,
@@ -303,7 +303,7 @@ class BunchProfileService(
                         createdAt = now
                     )
                 )
-        }
+            }
     }
 
     private fun responseFrom(result: Map<String, Any?>) = BunchProfileResponse(
@@ -320,7 +320,7 @@ class BunchProfileService(
     private data class Input(
         val name: String,
         val introduction: String,
-        val visibility: com.bunch.bunch.domain.Visibility,
+        val visibility: Visibility,
         val imageAction: ProfileImageAction,
         val expectedProfileVersion: Long,
         val fingerprint: String
@@ -331,7 +331,7 @@ class BunchProfileService(
         val attached: Boolean
     )
 
-    private data class Locked(val bunch: Bunch, val membership: com.bunch.bunch.domain.BunchMembership)
+    private data class Locked(val bunch: Bunch, val membership: BunchMembership)
 
     companion object {
         private const val MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024

@@ -1,6 +1,5 @@
 package com.bunch.bunch
 
-import com.bunch.bunch.domain.BunchAccessNoticeReason
 import com.bunch.bunch.domain.BunchAccessNoticeRepository
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
@@ -31,8 +30,8 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
-import java.time.Instant
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 
 @SpringBootTest
@@ -181,6 +180,62 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
             )
         }
         org.mockito.Mockito.verifyNoInteractions(images)
+    }
+
+    @Test
+    fun `replace and reset reuse image assets while a failed save compensates the remote file`() {
+        val owner = member()
+        val bunch = create(owner, "사진 번치")
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
+        val stored = StoredImage("test-profile/${UUID.randomUUID()}", "https://images.example/profile.jpg")
+        `when`(images.upload(photo)).thenReturn(stored)
+
+        val replaced = profiles.update(
+            owner,
+            bunch.id,
+            UUID.randomUUID(),
+            profile("사진 번치", "사진 소개", 0, imageAction = ProfileImageAction.REPLACE),
+            photo
+        )
+        assertThat(replaced.profileVersion).isEqualTo(1)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imagePublicId).isEqualTo(stored.publicId)
+
+        val reset = profiles.update(
+            owner,
+            bunch.id,
+            UUID.randomUUID(),
+            profile("사진 번치", "사진 소개", 1, imageAction = ProfileImageAction.RESET),
+            null
+        )
+        assertThat(reset.profileVersion).isEqualTo(2)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imagePublicId).isNull()
+        org.mockito.Mockito.verify(images).delete(stored.publicId)
+
+        val rollbackBunch = create(owner, "보상 번치")
+        val rollbackPhoto = MockMultipartFile("photo", "rollback.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
+        val rollbackStored = StoredImage(
+            "test-profile/${UUID.randomUUID()}",
+            "https://images.example/rollback.jpg"
+        )
+        `when`(images.upload(rollbackPhoto)).thenReturn(rollbackStored)
+        rejectWrite("bunch_test_reject_image", "bunches", "UPDATE")
+        try {
+            assertThatThrownBy {
+                profiles.update(
+                    owner,
+                    rollbackBunch.id,
+                    UUID.randomUUID(),
+                    profile("보상 번치", "실패 소개", 0, imageAction = ProfileImageAction.REPLACE),
+                    rollbackPhoto
+                )
+            }.isInstanceOf(RuntimeException::class.java)
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_image ON bunches")
+            jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
+        }
+        org.mockito.Mockito.verify(images).delete(rollbackStored.publicId)
+        assertThat(bunchRepository.findById(rollbackBunch.id).orElseThrow().profileVersion).isZero()
+        assertThat(bunchRepository.findById(rollbackBunch.id).orElseThrow().imagePublicId).isNull()
     }
 
     @Test
