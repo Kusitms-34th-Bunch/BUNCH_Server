@@ -90,7 +90,7 @@ class BunchOnboardingIntegrationTest : BunchIntegrationSupport() {
         val bunch = create(owner, "현재 번치")
 
         assertThat(bunches.nameAvailability(owner, "현재 번치").available).isFalse()
-        assertThat(bunches.nameAvailability(owner, "  현재 번치  ", bunch.id)).isTrue()
+        assertThat(bunches.nameAvailability(owner, "  현재 번치  ", bunch.id).available).isTrue()
         assertThat(bunches.nameAvailability(owner, "새 번치", bunch.id).available).isTrue()
     }
 
