@@ -43,10 +43,10 @@ abstract class BunchIntegrationSupport {
 
     private fun cleanBunchData() {
         jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_owner ON bunch_memberships")
-        jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_notification ON bunch_join_notifications")
+        jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_notification ON notifications")
         jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_image ON bunches")
         jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
-        jdbc.update("DELETE FROM bunch_join_notifications")
+        jdbc.update("DELETE FROM notifications")
         jdbc.update("DELETE FROM bunch_invitations")
         jdbc.update("DELETE FROM bunch_memberships")
         jdbc.update("DELETE FROM bunches")
@@ -66,6 +66,10 @@ abstract class BunchIntegrationSupport {
     protected fun issue(owner: Long, bunchId: Long): InvitationResponse = invitations.issue(owner, bunchId)
     protected fun join(memberId: Long, invitation: InvitationResponse, key: UUID = UUID.randomUUID()) = invitations.join(memberId, key, invitation.url)
     protected fun count(table: String): Long = jdbc.queryForObject("SELECT count(*) FROM $table", Long::class.java)!!
+    protected fun countMemberJoinedNotifications(): Long = jdbc.queryForObject(
+        "SELECT count(*) FROM notifications WHERE type = 'MEMBER_JOINED'",
+        Long::class.java
+    )!!
 
     protected fun assertError(code: ErrorCode, block: () -> Any?) {
         val error = catchThrowable { block() }

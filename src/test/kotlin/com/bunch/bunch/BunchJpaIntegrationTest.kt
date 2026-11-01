@@ -53,6 +53,6 @@ class BunchJpaIntegrationTest : BunchIntegrationSupport() {
         assertThat(join(visitor, invitation, legacyKey).outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(join(visitor, invitation, newKey).outcome).isEqualTo(JoinOutcome.ALREADY_MEMBER)
         assertThat(count("bunch_memberships")).isEqualTo(2)
-        assertThat(count("bunch_join_notifications")).isEqualTo(1)
+        assertThat(countMemberJoinedNotifications()).isEqualTo(1)
     }
 }
