@@ -41,7 +41,8 @@ class PushDeviceService(
         val topic = settings.topic(request.environment)
         val tokenHash = cipher.hash(token)
         lockRegistration(installationId, request.environment.name, topic, tokenHash)
-        val current = devices.findByInstallationIdLocked(installationId)
+        val registrations = devices.findForRegistrationLocked(installationId, request.environment, topic, tokenHash)
+        val current = registrations.find { it.installationId == installationId }
         if (
             current != null && current.memberId == memberId && current.sessionId == sessionId &&
             current.environment == request.environment && current.topic == topic &&
@@ -56,7 +57,7 @@ class PushDeviceService(
         }
         val registrationAt = nextRegistrationAt(clock.instant(), current?.registeredAt)
 
-        devices.findByTokenLocked(request.environment, topic, tokenHash)
+        registrations
             .filter { it.id != current?.id }
             .forEach { previous ->
                 jobs.cancelPendingForDevice(previous.memberId, previous.id)
@@ -110,6 +111,7 @@ class PushDeviceService(
 
     @Transactional
     fun logoutSession(memberId: Long, sessionId: UUID) {
+        devices.findBySessionLocked(memberId, sessionId)
         jobs.cancelPendingForSession(memberId, sessionId)
         devices.deleteByMemberIdAndSessionId(memberId, sessionId)
     }

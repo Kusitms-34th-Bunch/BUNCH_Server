@@ -95,7 +95,7 @@ payload는 UTF-8 JSON 4096 bytes 이하, `aps.alert.title/body`, `sound:default`
 target은 내부 ID만 포함하며 실제 열기 시 현재 접근 권한을 재검사한다.
 
 ```json
-{"aps":{"alert":{"title":"[퇴근런클럽] 새로운 멤버가 참여했어요","body":"새 멤버와 함께 추억을 쌓아 보세요."},"sound":"default"},"eventId":"c340f5c9-1208-4692-a782-cebf4a76b316","type":"MEMBER_JOINED","target":{"kind":"MEMBERS","bunchId":42}}
+{"aps":{"alert":{"title":"[퇴근런클럽] 새 멤버가 들어왔어요","body":"민수님이 번치에 참여했어요."},"sound":"default"},"eventId":"c340f5c9-1208-4692-a782-cebf4a76b316","type":"MEMBER_JOINED","target":{"kind":"MEMBERS","bunchId":42}}
 ```
 
 ## 환경·검증

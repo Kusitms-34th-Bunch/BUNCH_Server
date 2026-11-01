@@ -25,6 +25,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -36,6 +37,11 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 
 @SpringBootTest(
     properties = [
@@ -67,6 +73,9 @@ class PushDeviceIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var cipher: DeviceTokenCipher
+
+    @Autowired
+    private lateinit var transactionManager: PlatformTransactionManager
 
     private val sessionIds = mutableListOf<Pair<String, Long>>()
 
@@ -193,6 +202,42 @@ class PushDeviceIntegrationTest : BunchIntegrationSupport() {
             .containsExactly(secondInstallation)
         assertThat(jobs.findById(secondJobId).orElseThrow().status)
             .isEqualTo(PushJobStatus.PENDING)
+    }
+
+    @Test
+    fun `logout does not hold job locks while waiting for a device rebinding`() {
+        val memberId = member()
+        val auth = sessionFor(memberId)
+        register(auth, UUID.randomUUID(), "ab".repeat(17)).expectSuccessEnvelope()
+        val device = devices.findAllByMemberId(memberId).single()
+        val jobId = UUID.randomUUID()
+        jobs.saveAndFlush(testJob(jobId, device.id, memberId, UUID.fromString(auth.sessionId),
+            create(memberId).id, Instant.now().truncatedTo(ChronoUnit.MICROS)))
+        val executor = Executors.newSingleThreadExecutor()
+        lateinit var pending: Future<MvcResult>
+        try {
+            TransactionTemplate(transactionManager).executeWithoutResult {
+                devices.findLocked(device.id)
+                val holder = jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!
+                pending = executor.submit<MvcResult> { logout(auth).andReturn() }
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                var blocked = false
+                while (!blocked && System.nanoTime() < deadline) {
+                    blocked = jdbc.queryForObject(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid)))",
+                        Boolean::class.java, holder
+                    )!!
+                    if (!blocked) Thread.sleep(20)
+                }
+                check(blocked) { "logout did not reach the held device lock" }
+                assertThat(jdbc.queryForObject("SELECT id FROM push_jobs WHERE id = ? FOR UPDATE NOWAIT",
+                    UUID::class.java, jobId)).isEqualTo(jobId)
+            }
+            assertThat(pending.get(10, TimeUnit.SECONDS).response.status).isEqualTo(200)
+        } finally {
+            executor.shutdownNow()
+            check(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     @Test
