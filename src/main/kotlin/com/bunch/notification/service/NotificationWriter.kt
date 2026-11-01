@@ -106,6 +106,29 @@ class NotificationWriter(
         })
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun ownerTransferred(
+        bunchId: Long,
+        membershipId: Long,
+        recipientMemberId: Long,
+        version: Long,
+        bunchName: String,
+        now: Instant
+    ) {
+        notifications.save(
+            Notification(
+                recipientMemberId = recipientMemberId,
+                bunchId = bunchId,
+                type = NotificationType.OWNER_TRANSFERRED,
+                dedupeKey = "OWNER_TRANSFERRED:$membershipId:$version",
+                title = "$bunchName 번치의 관리자가 되었어요",
+                body = "관리자 권한으로 번치를 자유롭게 관리해 보세요.",
+                target = NotificationTarget(NotificationTargetKind.ROLE_PERMISSIONS, bunchId),
+                createdAt = now
+            )
+        )
+    }
+
     // BundleService holds the bunch/bundle locks and invokes this only after a real photo-add mutation.
     @Transactional(propagation = Propagation.MANDATORY)
     fun draftActivity(actorId: Long, bundle: Bundle, mutationKey: String, photoCount: Int) {
