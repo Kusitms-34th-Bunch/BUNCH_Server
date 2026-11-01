@@ -1,14 +1,22 @@
 package com.bunch.bunch.service
 
 import com.bunch.bunch.domain.Bunch
+import com.bunch.bunch.domain.BunchBlock
+import com.bunch.bunch.domain.BunchBlockRepository
 import com.bunch.bunch.domain.BunchFollow
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
-import com.bunch.bunch.domain.BunchMembershipRepository
+import com.bunch.bunch.domain.BunchProfileReport
+import com.bunch.bunch.domain.BunchProfileReportRepository
+import com.bunch.bunch.domain.BunchReportReason
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.Visibility
+import com.bunch.bunch.dto.BunchBlockItem
 import com.bunch.bunch.dto.BunchFollowRequestItem
 import com.bunch.bunch.dto.BunchRelationItem
+import com.bunch.bunch.dto.BunchReportRequest
+import com.bunch.bunch.dto.BunchReportResult
 import com.bunch.bunch.dto.BunchSocialCard
 import com.bunch.bunch.dto.BunchSocialPage
 import com.bunch.bunch.dto.FollowCancellationResult
@@ -20,26 +28,34 @@ import com.bunch.bunch.dto.FollowState
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
+import com.bunch.notification.service.NotificationWriter
+import jakarta.persistence.EntityManager
+import java.time.Instant
+import java.util.regex.Pattern
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
-import java.time.Instant
 
 @Service
 class BunchSocialService(
     private val bunches: BunchRepository,
-    private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
-    private val follows: BunchFollowRepository
+    private val follows: BunchFollowRepository,
+    private val blockRepository: BunchBlockRepository,
+    private val reports: BunchProfileReportRepository,
+    private val access: BunchSocialAccessService,
+    private val notifications: NotificationWriter,
+    private val entityManager: EntityManager
 ) {
     @Transactional
     fun follow(userId: Long, viewerId: Long, targetId: Long): FollowResult {
         prepareMutation(userId, viewerId, targetId)
         val locked = lockPair(viewerId, targetId)
-        requireViewer(userId, viewerId)
+        access.viewer(userId, viewerId)
         val target = locked[targetId] ?: fail(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        access.visible(viewerId, targetId)
         follows.findByFollowerBunchIdAndFollowedBunchId(viewerId, targetId)?.let { return FollowResult.from(it) }
 
         val now = Instant.now()
@@ -54,6 +70,7 @@ class BunchSocialService(
                 approvedAt = if (approved) now else null
             )
         )
+        notifications.followCreated(locked.getValue(viewerId), target, follow, userId)
         return FollowResult.from(follow)
     }
 
@@ -62,7 +79,7 @@ class BunchSocialService(
         positive(followId)
         prepareMutation(userId, viewerId, targetId)
         lockPair(viewerId, targetId)
-        requireViewer(userId, viewerId)
+        access.viewer(userId, viewerId)
         val current = follows.findByFollowerBunchIdAndFollowedBunchId(viewerId, targetId)
         if (current?.id != followId) {
             val result = FollowResult.from(current)
@@ -78,18 +95,18 @@ class BunchSocialService(
     fun decide(userId: Long, viewerId: Long, requestId: Long, decision: FollowDecision): FollowDecisionResult {
         positive(viewerId, requestId)
         members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
-        requireViewer(userId, viewerId)
+        access.viewer(userId, viewerId)
         // Read only coordinates before acquiring the pair. Loading the entity here would cache a stale state.
         val requesterId = follows.findRequesterId(requestId, viewerId)
         if (requesterId == null) {
             bunches.findLocked(viewerId)
-            requireViewer(userId, viewerId)
+            access.viewer(userId, viewerId)
             if (follows.existsById(requestId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
             return FollowDecisionResult(requestId, false, FollowDecisionState.UNAVAILABLE)
         }
 
-        lockPair(viewerId, requesterId)
-        requireViewer(userId, viewerId)
+        val locked = lockPair(viewerId, requesterId)
+        access.viewer(userId, viewerId)
         val current = follows.findById(requestId).orElse(null)
             ?: return FollowDecisionResult(requestId, false, FollowDecisionState.UNAVAILABLE)
         if (current.status == BunchFollowStatus.APPROVED) {
@@ -98,6 +115,7 @@ class BunchSocialService(
         return when (decision) {
             FollowDecision.APPROVE -> {
                 current.approve(userId, Instant.now())
+                notifications.followApproved(locked.getValue(requesterId), locked.getValue(viewerId), current, userId)
                 FollowDecisionResult(requestId, true, FollowDecisionState.APPROVED)
             }
             FollowDecision.REJECT -> {
@@ -111,7 +129,7 @@ class BunchSocialService(
     fun requests(userId: Long, viewerId: Long, page: Int, size: Int): BunchSocialPage<BunchFollowRequestItem> {
         positive(viewerId)
         completed(userId)
-        requireViewer(userId, viewerId)
+        access.viewer(userId, viewerId)
         val result = follows.findAllByFollowedBunchIdAndStatus(
             viewerId,
             BunchFollowStatus.PENDING,
@@ -138,22 +156,11 @@ class BunchSocialService(
     ): BunchSocialPage<BunchRelationItem> {
         positive(targetId)
         val pageable = pageable(page, size, "approvedAt")
-        completed(userId)
-        if (viewerBunchId == null) {
-            if (memberships.countByMemberIdAndStatus(userId) != 0L) fail(ErrorCode.CURRENT_BUNCH_REQUIRED)
-        } else {
-            positive(viewerBunchId)
-            requireViewer(userId, viewerBunchId)
-        }
-        val target = bunches.findById(targetId).orElseThrow { BusinessException(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) }
-        if (target.visibility != Visibility.PUBLIC && viewerBunchId != targetId) {
-            val relation = viewerBunchId?.let { follows.findByFollowerBunchIdAndFollowedBunchId(it, targetId) }
-            if (relation?.status != BunchFollowStatus.APPROVED) fail(ErrorCode.FORBIDDEN)
-        }
+        access.target(userId, targetId, viewerBunchId, requireContent = true)
         val result = if (following) {
-            follows.findAllByFollowerBunchIdAndStatus(targetId, BunchFollowStatus.APPROVED, pageable)
+            follows.visibleFollowing(targetId, viewerBunchId, pageable)
         } else {
-            follows.findAllByFollowedBunchIdAndStatus(targetId, BunchFollowStatus.APPROVED, pageable)
+            follows.visibleFollowers(targetId, viewerBunchId, pageable)
         }
         val ids = result.content.map { if (following) it.followedBunchId else it.followerBunchId }
         val cards = cards(ids)
@@ -170,22 +177,93 @@ class BunchSocialService(
         return BunchSocialPage(items, page, size, result.totalElements, result.hasNext())
     }
 
+    @Transactional
+    fun block(userId: Long, viewerId: Long, targetId: Long) {
+        prepareMutation(userId, viewerId, targetId)
+        val locked = lockPair(viewerId, targetId)
+        requireBlockManager(userId, viewerId)
+        if (locked[targetId] == null) fail(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        if (blockRepository.findByBlockerBunchIdAndBlockedBunchId(viewerId, targetId) == null) {
+            blockRepository.save(
+                BunchBlock(
+                    blockerBunchId = viewerId,
+                    blockedBunchId = targetId,
+                    createdByMemberId = userId,
+                    createdAt = Instant.now()
+                )
+            )
+        }
+        follows.deleteBetween(viewerId, targetId)
+    }
+
+    @Transactional
+    fun unblock(userId: Long, viewerId: Long, targetId: Long, blockId: Long) {
+        positive(blockId)
+        prepareMutation(userId, viewerId, targetId)
+        lockPair(viewerId, targetId)
+        requireBlockManager(userId, viewerId)
+        val current = blockRepository.findByBlockerBunchIdAndBlockedBunchId(viewerId, targetId)
+        if (current?.id == blockId) blockRepository.delete(current)
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    fun blocks(userId: Long, viewerId: Long, page: Int, size: Int): BunchSocialPage<BunchBlockItem> {
+        completed(userId)
+        access.viewer(userId, viewerId)
+        val result = blockRepository.findAllByBlockerBunchId(viewerId, pageable(page, size, "createdAt"))
+        val cards = cards(result.content.map { it.blockedBunchId })
+        return BunchSocialPage(
+            result.content.map { BunchBlockItem(it.id, cards.getValue(it.blockedBunchId), it.createdAt) },
+            page,
+            size,
+            result.totalElements,
+            result.hasNext()
+        )
+    }
+
+    @Transactional
+    fun report(userId: Long, viewerId: Long, request: BunchReportRequest): BunchReportResult {
+        val detail = request.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if ((detail != null && Pattern.compile("\\X").matcher(detail).results().count() > 200) ||
+            (request.reason == BunchReportReason.OTHER && detail.isNullOrBlank())
+        ) fail(ErrorCode.INVALID_INPUT)
+        prepareMutation(userId, viewerId, request.targetBunchId)
+        val locked = lockPair(viewerId, request.targetBunchId)
+        access.viewer(userId, viewerId)
+        if (locked[request.targetBunchId] == null) fail(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        reports.findByReporterBunchIdAndTargetBunchId(viewerId, request.targetBunchId)?.let {
+            return BunchReportResult(it.id)
+        }
+        access.visible(viewerId, request.targetBunchId)
+        val saved = reports.save(
+            BunchProfileReport(
+                reporterBunchId = viewerId,
+                targetBunchId = request.targetBunchId,
+                reportedByMemberId = userId,
+                reason = request.reason,
+                detail = detail,
+                createdAt = Instant.now()
+            )
+        )
+        return BunchReportResult(saved.id)
+    }
+
+    private fun requireBlockManager(userId: Long, viewerId: Long) {
+        val membership = access.viewer(userId, viewerId)
+        // Preflight may have loaded this entity before waiting for the bunch lock and a role change.
+        entityManager.refresh(membership)
+        if (membership.role == MembershipRole.MEMBER) fail(ErrorCode.FORBIDDEN)
+    }
+
     private fun prepareMutation(userId: Long, viewerId: Long, targetId: Long) {
         positive(viewerId, targetId)
         if (viewerId == targetId) fail(ErrorCode.INVALID_INPUT)
         members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
-        requireViewer(userId, viewerId)
+        access.viewer(userId, viewerId)
     }
 
     private fun lockPair(firstId: Long, secondId: Long): Map<Long, Bunch> =
         listOf(firstId, secondId).sorted().mapNotNull { id -> bunches.findLocked(id)?.let { id to it } }.toMap()
-
-    private fun requireViewer(userId: Long, viewerId: Long) {
-        if (memberships.findByMemberIdAndBunchIdAndStatus(userId, viewerId) == null) {
-            if (memberships.countByMemberIdAndStatus(userId) == 0L) fail(ErrorCode.CURRENT_BUNCH_REQUIRED)
-            fail(ErrorCode.FORBIDDEN)
-        }
-    }
 
     private fun completed(userId: Long) = members.findById(userId)
         .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }

@@ -5,6 +5,7 @@ import com.bunch.bunch.domain.BunchFollow
 import com.bunch.bunch.domain.BunchFollowStatus
 import com.bunch.bunch.domain.CharacterType
 import com.bunch.bunch.domain.Visibility
+import com.bunch.bunch.domain.BunchReportReason
 import java.time.Instant
 
 enum class FollowState {
@@ -73,6 +74,12 @@ data class BunchRelationItem(
 )
 
 data class BunchFollowRequestItem(val id: Long, val bunch: BunchSocialCard, val requestedAt: Instant)
+
+data class BunchBlockItem(val id: Long, val bunch: BunchSocialCard, val blockedAt: Instant)
+
+data class BunchReportRequest(val targetBunchId: Long, val reason: BunchReportReason, val detail: String? = null)
+
+data class BunchReportResult(val reportId: Long)
 
 data class BunchSocialPage<T>(
     val items: List<T>,

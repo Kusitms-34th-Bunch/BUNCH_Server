@@ -465,6 +465,59 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
         ).expectError(ErrorCode.SIGNUP_INCOMPLETE)
     }
 
+    @Test
+    fun `block and report HTTP flows enforce role IDs and response shape`() {
+        val owner = member()
+        val viewer = create(owner).id
+        val participant = member()
+        join(participant, issue(owner, viewer))
+        val target = create(member()).id
+        val ownerAccess = bearer(owner)
+        val participantAccess = bearer(participant)
+        val blockPath = "/api/v1/bunches/$viewer/blocks/$target"
+        mvc.perform(put(blockPath).header(HttpHeaders.AUTHORIZATION, participantAccess))
+            .expectError(ErrorCode.FORBIDDEN)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"OTHER","detail":" 확인 요청 "}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.reportId").isNumber)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"OTHER","detail":" "}""")
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(put(blockPath).header(HttpHeaders.AUTHORIZATION, ownerAccess))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isEmpty)
+        val list = mvc.perform(
+            get("/api/v1/bunches/$viewer/blocks").header(HttpHeaders.AUTHORIZATION, participantAccess)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.totalElements").value(1))
+            .andExpect(jsonPath("$.data.items[0].bunch.id").value(target))
+            .andExpect(jsonPath("$.data.items[0].bunch.introduction").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].blockedAt").exists())
+            .andReturn()
+        val blockId = list.data().path("items").get(0).path("id").asLong()
+        mvc.perform(put(followingPath(viewer, target)).header(HttpHeaders.AUTHORIZATION, ownerAccess))
+            .expectError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        mvc.perform(delete(blockPath).header(HttpHeaders.AUTHORIZATION, ownerAccess))
+            .expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            delete(blockPath).header(HttpHeaders.AUTHORIZATION, ownerAccess).param("blockId", blockId.toString())
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isEmpty)
+        mvc.perform(get("/api/v1/bunches/$viewer/blocks").header(HttpHeaders.AUTHORIZATION, ownerAccess))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items").isEmpty)
+    }
+
     private fun requestFollow(access: String, viewerBunch: Long, target: Long): ResultActions = mvc.perform(
         put(followingPath(viewerBunch, target))
             .header(HttpHeaders.AUTHORIZATION, access)

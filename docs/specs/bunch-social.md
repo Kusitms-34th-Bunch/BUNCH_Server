@@ -1,111 +1,136 @@
-# 번치 팔로우 요청·승인·목록 계약 (#51 작업 중)
+# 번치 팔로우·차단·신고·외부 조회 계약 (#51)
 
-2026-10-31 승인한 번치 계약의 팔로우 저장·상태 전이·목록만 구현한다.
-기준은 2026-11-01 고정 사본의 `bunch.md` 5.10.3·5.11,
-`bunch-api.md` 1·2·6절, `bunch-schema.md` 4·5절이다.
-고정 사본의 manifest 기준 dev는 `b2b8e71`이다. 이 문서는 실제 팔로우 API와 같은 변경으로 관리하며,
-별도 문서 PR을 선행 조건으로 삼거나 전체 번치·알림 Spec을 복제하지 않는다.
-기존 생성·초대·번들 서비스와 역할 파일을 변경하지 않는다.
+2026-10-31 승인한 번치 계약의 5.10·5.11과 API·스키마 6·4절을 실제 기능·테스트와 함께 반영한다.
+별도 문서 PR #56을 선행 조건으로 삼거나 전체 번치·알림 Spec을 복제하지 않는다.
+역할·Stage는 #55, 실제 알림 저장은 #57의 `39af8b0`과 읽음 정밀도 수정 `8fbf45a`를 병합해 재사용한다.
 
-**#51 전체 완료·출시 가능 상태가 아니다.** 차단·신고·외부 프로필/멤버/번들 DTO,
-공개 전환, 홈 집계, 17·18·19번 알림·전송 대기는 아직 구현하지 않았다.
-차단·신고 API나 가짜 집계/권한 필드를 등록하지 않는다.
-차단된 대상·행을 거르는 검사가 없는 현재 목록을 완성 기능으로 공개하지 않는다.
+## 공통 입력·권한
 
-## API와 저장
+기본 경로는 `/api/v1/bunches`다. 기존 인증·응답 envelope를 재사용하며 활성 계정·가입 완료·
+활성 Redis 세션을 요구한다. 성공은 200이고 데이터 없는 성공은 `data:null`이다.
+ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 
-기본 경로는 `/api/v1/bunches`다. 기존 인증·응답 envelope를 재사용하며
-활성 계정·가입 완료·활성 Redis 세션과 선택한 viewer의 활성 Membership을 확인한다.
-OWNER/MEMBER 모두 실행할 수 있고 CO_OWNER 통합 후에도 역할 제한 없이 동작한다.
-다른 소속 번치에 대한 행동도 viewer 명의이며 `viewerId == targetId` 행동은 400이다.
+외부 조회의 `viewerBunchId`는 선택한 현재 번치이고 본인의 활성 소속이어야 한다.
+활성 소속 0개 회원만 생략할 수 있다. 같은 개인이 대상에도 속해 있어도 대상 소속 권한을 합치지 않는다.
+현재 viewer와 다른 자신의 소속 번치에 대한 명의 행동은 허용하고 viewer=target의 행동은 400이다.
+팔로우·승인·거절·신고는 모든 활성 멤버, 차단·해제는 OWNER/CO_OWNER만 가능하다.
+차단 목록은 모든 활성 멤버가 볼 수 있다. 변경은 회원→번치 ID 오름차순 잠금 아래 소속·역할을 재확인한다.
+잠금 전 읽었던 Membership 역할을 기다린 뒤 그대로 신뢰하지 않는다.
+
+페이지는 `page=0,size=20`, size 1~50이다. 음수 page·잘못된 size·JPA offset 상한 초과는 400이다.
+형태는 `{items,page,size,totalElements,hasNext}`이며 목록·합계·Stage·viewer 상태는 동일 snapshot에서 읽는다.
+
+| HTTP/code | 의미 |
+| --- | --- |
+| 400 COMMON_001 | 형식·페이지·자기 명의 행동·신고 상세 길이 오류 |
+| 403 AUTH_015 | 가입 미완료 |
+| 403 AUTH_002 | 다른 viewer 명의·역할 거부·비공개 미승인 목록 |
+| 404 RESOURCE_001 | 다른 번치의 requestId·번들 또는 비공개/초안 번들 상세 |
+| 404 BUNCH_009 | 없는 외부 대상·양방향 차단. 차단 방향은 공개하지 않는다 |
+| 409 BUNCH_010 | 소속 0개의 명의 행동 또는 소속이 있는데 viewer 생략 |
+
+## 팔로우·차단·신고 API
 
 | 메서드·경로 | 입력 | data |
 | --- | --- | --- |
 | PUT /{viewerId}/following/{targetId} | 없음 | `{followState,followId}` |
 | DELETE /{viewerId}/following/{targetId} | 필수 query `followId` | `{followState,followId,cancelled}` |
-| GET /{viewerId}/follow-requests | `page=0,size=20` | `{items:[{id,bunch,requestedAt}],page,size,totalElements,hasNext}` |
+| GET /{viewerId}/follow-requests | `page,size` | `{id,bunch,requestedAt}` 페이지 |
 | POST /{viewerId}/follow-requests/{requestId}/decision | `{decision:APPROVE 또는 REJECT}` | `{requestId,applied,state}` |
 | GET /{targetId}/followers | `viewerBunchId?,page,size` | RelationItem 페이지 |
 | GET /{targetId}/following | `viewerBunchId?,page,size` | RelationItem 페이지 |
+| PUT /{viewerId}/blocks/{targetId} | 없음 | null |
+| DELETE /{viewerId}/blocks/{targetId} | 필수 query `blockId` | null |
+| GET /{viewerId}/blocks | `page,size` | `{id,bunch,blockedAt}` 페이지 |
+| POST /{viewerId}/reports | `{targetBunchId,reason,detail?}` | `{reportId}` |
 
-- `followState`는 NONE/REQUESTED/FOLLOWING이다. 목록 각 행은 조회 대상과의 관계가 아닌
-  **viewer→행 번치**의 상태·ID다. 자기 viewer 행에는 NONE/null이다.
-- `bunch`는 `id,name,imageUrl,characterType,visibility`만 포함한다.
-  RelationItem은 여기에 `followState,followId,followedAt`을 가진다.
-- 페이지 size는 1~50이다. 음수 page, 잘못된 size, JPA offset 상한 초과는 COMMON_001이다.
-  승인 목록은 `approved_at DESC,id DESC`, 요청은 `created_at DESC,id DESC`다.
-  목록·합계·카드·viewer 상태는 REPEATABLE_READ의 동일 snapshot에서 읽는다.
-- viewer 생략은 활성 소속 0개 회원만 가능하다. 선택한 viewer 외의 대상 소속을 합치지 않는다.
-  외부 비공개 목록은 viewer→target 승인 관계가 있어야 한다. 본인 viewer 목록은 열 수 있다.
-- 소속 0개의 명의 행동/소속이 있는데 viewer 생략은 BUNCH_010,
-  다른 viewer 명의는 AUTH_002, 없는 외부 조회 대상은 BUNCH_009다.
-  다른 번치에 속한 requestId는 RESOURCE_001이다.
+- `bunch`는 `id,name,imageUrl,characterType,visibility`다.
+  RelationItem은 `{bunch,followState,followId,followedAt}`이며 상태는 **viewer→행 번치** 기준이다.
+  자기 viewer 행은 NONE/null이다. 관계는 승인 시각 DESC,id DESC, 요청·차단은 생성 시각 DESC,id DESC다.
+- 공개 대상은 즉시 APPROVED/FOLLOWING, 비공개는 PENDING/REQUESTED다. 기존 PUT 재실행은 같은 ID다.
+  승인만 상태를 바꾸고 거절·취소는 삭제한다. 재요청은 새 ID다. 별도 과거 요청 원장은 없다.
+- 이미 승인된 requestId의 늦은 거절은 `applied:false,state:APPROVED`, 사라진 ID는
+  `applied:false,state:UNAVAILABLE`이다. 첫 성공은 APPROVED/REJECTED와 applied=true다.
+  잠금 전 좌표만 조회하고 잠금 후 행 상태를 읽어 오래된 JPA 상태가 새 요청을 변경하지 않게 한다.
+- DELETE는 현재 followId와 같을 때만 삭제한다. 대기 중 승인됐다면 cancelled=FOLLOWING이다.
+  다른 ID이거나 차단으로 삭제됐다면 현재 상태·ID와 cancelled=NONE을 반환한다.
+- 차단은 방향별 한 행이지만 접근 제한은 양방향이다. 양쪽 팔로우·요청 제거와 함께 커밋한다.
+  해제는 현재 자기 blockId만 삭제하고 과거 ID는 no-op이다. 상대 차단이 남으면 계속 비노출이다.
+  해제해도 관계를 복구하지 않는다. 차단·해제·신고 알림은 만들지 않는다.
+- 차단된 대상의 외부 조회·팔로우를 거부하며, 관계 목록의 각 행도 viewer와 양방향 차단을 검사한다.
+  이 필터를 DB 페이지 조회·count에 같은 조건으로 적용한다. 내부 번치 API의 소속 권한은 별개다.
+- reason은 SPAM/INAPPROPRIATE/HARASSMENT/PERSONAL_INFORMATION/OTHER다.
+  detail은 trim 후 200 grapheme 이하이며 OTHER는 공백 아닌 1자 이상 필수다.
+  그 외 빈 상세는 null이다. 번치 쌍의 재신고는 최초 ID·사유·상세를 유지하며 중복 접수하지 않는다.
+  이미 접수된 유효 요청은 이후 어느 쪽이 차단해도 최초 ID를 반환한다.
+  신고의 피드 제외는 신고 행 존재로 판정할 계약이며 실제 일반 피드 구현에서 연결한다.
+  신고만으로 자동 제재·차단하지 않는다.
 
-V13은 `bunch_follows`만 추가한다. 두 번치 FK는 CASCADE, 생성 회원은 RESTRICT,
-승인 회원은 nullable/SET NULL이다. 방향별 쌍 UNIQUE, 자기 관계 금지,
-PENDING의 approved_at 없음/APPROVED의 approved_at 필수 CHECK와 세 목록 인덱스를 둔다.
-V11(#47)·V12(#28) 예약 번호를 채우는 placeholder는 만들지 않는다.
+## 외부 프로필·발행본 API
 
-## 상태 전이와 경합
+| 메서드·경로 | 입력 | data |
+| --- | --- | --- |
+| GET /{targetId}/public-profile | `viewerBunchId?` | PublicProfile |
+| GET /{targetId}/public-members | `viewerBunchId?` | `{items:PublicMember[]}` |
+| GET /{targetId}/public-bundles | `viewerBunchId?,page,size` | PublicBundleCard 페이지 |
+| GET /{targetId}/public-bundles/{bundleId} | `viewerBunchId?` | PublicBundleDetail |
 
-- 공개 대상의 새 관계는 APPROVED, 비공개는 PENDING이다. PUT 재실행은 기존 ID·생성자를 유지한다.
-- 첫 승인만 APPROVED로 바꾸고 첫 거절·취소는 삭제한다. 재요청은 새 ID다.
-- 지난 requestId는 새 요청을 변경하지 않는다. 이미 승인된 ID는 늦은 거절에도
-  `applied:false,state:APPROVED`, 없어진 ID는 `applied:false,state:UNAVAILABLE`이다.
-- DELETE는 followId가 현재 행과 같을 때만 삭제한다. 그 사이 승인됐다면 cancelled=FOLLOWING이다.
-  다른 ID이면 현재 상태·ID와 cancelled=NONE을 반환한다.
-- 일반 변경은 회원 잠금→번치 ID 오름차순 잠금→활성 소속 재검증→관계 읽기/변경 순서다.
-  승인 전 좌표만 조회하고 잠금 후 관계를 읽어 영속성 컨텍스트의 이전 상태를 사용하지 않는다.
+PublicProfile은 `{bunch,stage,followerCount,followingCount,memberCount,followState,followId,
+canViewBundles,canViewMembers,canViewRelations,isCurrentBunch}`이며 bunch에 introduction을 포함한다.
+미승인 비공개에도 이 최소 정보만 반환하고 세 목록·명단 접근 flag는 false다.
+Stage는 기존 BundleStagePolicy의 실제 PUBLIC/PRIVATE 전체 PUBLISHED 개수 기준 0/2/6/10 경계다.
+팔로우 수는 APPROVED만 포함하며 관계 목록과 같은 viewer 차단 필터를 쓴다.
+멤버 수·목록은 현재 ACTIVE 소속·활성 계정만 반영한다.
 
-## 최소 구현 판단
+공개 대상 또는 viewer→target 승인 관계가 있으면 외부 멤버·관계·PUBLIC 발행본만 볼 수 있다.
+PublicMember는 `{memberId,nickname,imageUrl,role}`이며 OWNER→CO_OWNER→MEMBER 순이다.
+출생연도·성별·가입일·관리 action·세션·사진함·초안·PRIVATE 발행본·편집권은 반환하지 않는다.
 
-| 항목 | 판단·근거 |
-| --- | --- |
-| Controller→Service→JPA | 실제 HTTP 흐름과 업무 트랜잭션·영속성의 경계다. 중간 adapter·별도 relation service는 추가하지 않는다 |
-| PENDING/APPROVED 한 테이블 | 요청/승인의 중복 저장 없이 승인만 전이하고 거절·취소는 삭제한다. 과거 요청 원장은 없다 |
-| 생성·승인 회원/시각 | 승인 스키마의 실제 업무 기록이다. 새 관계에서만 생성자를 쓰고 수동 승인에서만 승인자를 바꾼다 |
-| 카드·페이지·관계 DTO | 실제 세 목록의 공통 출력과 개인정보 최소화에 필요하다. Stage·권한·집계의 가짜 값을 추가하지 않는다 |
-| 좌표 조회·잠금 후 상태 조회 | 기다리는 동안 취소·재요청·승인이 일어날 수 있어 필요하다. 이전 ID·새 행을 분리하는 검증을 유지한다 |
-| 잠금 전·후 소속 검증 | 권한 없는 상대 정보 조회를 막고, 대기 중 소속 종료도 재검사한다. 중복처럼 보여도 삭제하지 않는다 |
-| REPEATABLE_READ·목록 인덱스 | 실제 목록·합계·관계 상태의 같은 snapshot과 확정 정렬에 필요하다 |
-| 공개 전환 전용 진입점 | 운영 호출부가 없어 제거했다. #52의 실제 저장 호출부·같은 트랜잭션·경합 테스트와 함께 구현해야 한다 |
+PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`다.
+PUBLIC/PUBLISHED만 `publishedAt DESC,id DESC`로 조회한다.
+현재 내부 번들 모델에는 위치 저장이 없어 location은 null이며 EXIF 좌표를 추정해서 반환하지 않는다.
+nullable 객체 DTO는 `location:null`을 JSON에 보존하기 위해 유지한다. null 전용 Kotlin 타입은 이 필드를 생략한다.
+상세는 카드 필드에 photos `{id,imageUrl,position,caption}`, contributors `{memberId,nickname,imageUrl}`,
+comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
+외부 상세 요청마다 같은 viewer·차단·승인·공개 범위를 다시 확인한다.
+나간 회원은 「나간 멤버」로 표시하며 탈퇴 계정 코멘트 원문은 노출하지 않는다.
+같은 memberId로 재참여하면 현재 프로필 표시를 복구하고 기여·코멘트를 복제하지 않는다.
+운영 숨김/제재 기능·소셜 댓글/좋아요 쓰기는 이 구현 범위 밖이다.
 
-불필요한 필드·미사용 분기·미래 차단/신고 stub·범용 bus·outbox·새 의존성은 추가하지 않는다.
+## 저장·알림·통합 조건
 
-## 후속 통합 조건
+V14는 실제 `bunch_follows,bunch_blocks,bunch_profile_reports` 세 테이블만 추가한다.
+각 방향 번치 쌍 UNIQUE·자기 관계 금지, 번치 FK CASCADE·행동 회원 FK RESTRICT를 적용한다.
+팔로우는 PENDING의 approved_at 없음/APPROVED의 approved_at 필수이며 승인 회원 FK는 SET NULL이다.
+신고 상태 RECEIVED/REVIEWING/ACTIONED/DISMISSED·검토 시각은 승인 스키마 계약이다.
+운영 심사 API나 미래 알림 테이블을 추가하지 않는다.
 
-1. #47의 실제 역할·Stage·권한 기반과 통합한다. 필요한 계약은 실제 기능·테스트와 함께 반영한다.
-   #55의 `699f084`를 확인했지만 이 브랜치에 임의 병합하지 않았다. 닫히는 #56을 선행 조건으로 삼지 않는다.
-2. #28의 실제 NotificationWriter/저장 모델과 #48의 push job이 준비되면
-   `follow`의 **새 행 저장**, `decide(APPROVE)`의 **실제 전이**,
-   실제 공개 전환의 **이번 승인 행** 위치에서 같은 업무 트랜잭션에 연결한다.
-   17은 새 팔로우 성립 시 대상 번치, 18은 새 PENDING 시 대상 번치,
-   19는 수동/자동 승인 시 요청 번치의 유효 멤버가 대상이다.
-   직접 행동 회원을 제외하고 외부 알림에 개인 실행자 정보를 표시하지 않는다.
-   관계 ID·알림 종류·수신 회원으로 중복을 방지하며 no-op에는 생성하지 않는다.
-   알림/job 저장 실패 시 관계·프로필까지 롤백하는 테스트가 필요하다.
-   #57의 `5d3cc97` writer는 memberJoined/draftActivity만 있어 17~19를 연결하지 않았다.
-3. 차단/해제는 OWNER/CO_OWNER만 가능하게 구현한 뒤 두 방향 관계 제거와
-   조회 대상·각 행의 viewer 차단 필터를 목록/합계/외부 상세에 함께 적용한다.
-   신고·외부 공개 DTO·실제 전체 발행 수 Stage도 선행 기반에 연결한다.
-   차단/신고/프로필을 제공하는 것처럼 응답하는 임시 구현은 없다.
-4. #52의 실제 프로필 저장에서 회원→대상 번치 잠금·권한 검증 뒤 PUBLIC 전환과 대기 승인을
-   같은 트랜잭션으로 구현한다. 상대 번치를 뒤늦게 잠그지 않고 이번 승인에만 알림을 생성한다.
-   여러 대기 전환·기존 승인 기록 보존·실패 전체 롤백·상대 잠금 중 처리와
-   신규 요청/수동 승인/취소/차단 경합을 검증해야 한다. 미사용 진입점만으로 이를 완료 처리하지 않는다.
-   #50은 실제 번치 삭제와 관계 정리를 연결하고 삭제/팔로우 경합을 검증한다.
-5. 실제 V11→V12→V13을 통합 전 새 DB에서 적용·재실행·JPA validate한다.
-   V13을 먼저 적용한 이 1차 테스트 DB에 나중에 V11/V12를 덧붙여 운영 이력으로 삼지 않는다.
-   통합 시 최신 dev/열린 PR에서 번호 충돌을 다시 확인한다.
+기존 팔로우 V13은 이슈 전용 테스트 DB에만 적용됐고 dev/main·배포 실행·확인한 공용 로컬 DB에
+적용되지 않았음을 확인한 뒤 별도 일반 커밋 `97d3797`로 V14로 이동했다. #28의 V13은 수정하지 않았다.
+구 V13 전용 DB를 수정/repair하지 않고 새 `bunch_issue51_v14_test`에서 V11→V12→V13→V14를 검증한다.
+V15(#48)·V16(#49)·V17(#25) 예약을 침범하지 않는다.
 
-## 검증 범위
+실제 NotificationWriter를 새 관계·수동 승인 업무 트랜잭션에서 호출한다.
+공개 즉시 팔로우 성립은17, 새 PENDING은18, 수동 승인 성립은17과19다.
+17/18은 대상 번치,19는 요청 번치의 발생 시점 유효 멤버가 수신하고 직접 행동 회원은 제외한다.
+문구는 승인 알림 원문을 쓰고 개인 실행자 정보는 외부 알림에 넣지 않는다.
+관계 ID·종류·수신 회원으로 중복을 방지하며 재실행/no-op에는 저장하지 않는다.
+알림 저장 실패 시 관계 생성·승인도 롤백한다. open은 현재 소속·대상 존재·양방향 차단을 다시 확인하며
+사용할 수 없으면 읽음을 유지하고 `available:false`를 반환한다.
 
-- BunchSocialIntegrationTest: 상태 전이·이전 ID·일반 멤버·다른 소속 명의·목록 정렬·권한,
-  중복/반대 방향 요청·승인/거절/취소 경합, 이전 ID를 읽고 잠금에서 기다리는 동안 새 요청이 생기는 경합,
-  대기 목록 페이지/동일 시각 정렬, 생성·승인·취소 저장 실패와 호출자 트랜잭션 실패의 롤백.
-- BunchSocialHttpIntegrationTest: 실제 JWT/Redis 세션, 계약 경로·DTO·오류·페이지와 권한.
-- BunchSocialMigrationIntegrationTest: 임의 분리 schema에서 V10→V13 실제 적용,
-  재실행·제약·FK·인덱스. Spring 전체 컨텍스트는 JPA validate도 수행한다.
-- 테스트는 별도 PostgreSQL의 `bunch_issue51_test`와 별도 Redis 컨테이너에서 실행한다.
-  실행 명령·통과 결과는 작업 완료 보고에 기록한다. 별도 lint/정적 분석 설정은 없다.
-- 실제 iOS/WebView·푸시 수신, #47/#28/#48 및 차단/공개 전환/외부 프로필 통합 검증은 남아 있다.
+- #48은 현재 기기별 push job을 같은 업무/알림 트랜잭션에 저장하도록 연결해야 한다.
+  이 브랜치는 가짜 전송 큐·adapter를 만들지 않으며 실제 APNs 전달 완료를 주장하지 않는다.
+- #52가 실제 프로필 변경을 구현할 때 PUBLIC 전환·유효 대기 일괄 승인·17/19를 같은 트랜잭션으로 묶는다.
+  대상 번치만 잠그고 상대 번치를 뒤늦게 잠그지 않는다. 호출 없는 자동 승인 함수를 선구현하지 않는다.
+  그 실제 호출부와 함께 공개 전환/수동 승인/취소/차단 경합·전체 롤백을 검증해야 한다.
+- #50의 실제 삭제 흐름에서는 FK 정리와 알림/job 보존 정책을 함께 통합 검증한다.
+  이 브랜치의 CASCADE 테스트만으로 전체 삭제 흐름 완료로 보지 않는다.
+
+## 검증
+
+실제 PostgreSQL·Redis 전용 환경에서 API 인증·권한·이전 ID·정렬/페이지·비공개/차단 비노출,
+중복 요청/신고·반대 방향 요청·승인/취소/차단 경합, 역할 강등 대기 재검사, 알림 수신/중복/롤백,
+외부 전용 DTO·재참여 프로필·상세 재검사를 검증한다.
+마이그레이션은 V10 데이터를 보존하며 V11→V12→V13→V14 적용·재실행·제약·JPA validate를 확인한다.
+최종 명령과 결과는 PR·완료 보고에 남긴다. 별도 lint·정적 분석 도구는 미구성이다.
+실제 iOS/WebView·APNs와 #52/#48/#50의 남은 통합은 자동 테스트와 구분한다.

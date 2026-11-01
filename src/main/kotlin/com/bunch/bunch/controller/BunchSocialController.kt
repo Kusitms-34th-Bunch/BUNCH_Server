@@ -1,6 +1,7 @@
 package com.bunch.bunch.controller
 
 import com.bunch.bunch.dto.FollowDecisionRequest
+import com.bunch.bunch.dto.BunchReportRequest
 import com.bunch.bunch.service.BunchSocialService
 import com.bunch.global.common.ApiResponse
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -17,6 +18,42 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1/bunches")
 class BunchSocialController(private val social: BunchSocialService) {
+    @PutMapping("/{viewerId}/blocks/{targetId}")
+    fun block(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable viewerId: Long,
+        @PathVariable targetId: Long
+    ): ApiResponse<Unit> {
+        social.block(userId.toLong(), viewerId, targetId)
+        return ApiResponse.empty(Unit)
+    }
+
+    @DeleteMapping("/{viewerId}/blocks/{targetId}")
+    fun unblock(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable viewerId: Long,
+        @PathVariable targetId: Long,
+        @RequestParam blockId: Long
+    ): ApiResponse<Unit> {
+        social.unblock(userId.toLong(), viewerId, targetId, blockId)
+        return ApiResponse.empty(Unit)
+    }
+
+    @GetMapping("/{viewerId}/blocks")
+    fun blocks(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable viewerId: Long,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ) = ApiResponse.ok(social.blocks(userId.toLong(), viewerId, page, size))
+
+    @PostMapping("/{viewerId}/reports")
+    fun report(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable viewerId: Long,
+        @RequestBody request: BunchReportRequest
+    ) = ApiResponse.ok(social.report(userId.toLong(), viewerId, request))
+
     @PutMapping("/{viewerId}/following/{targetId}")
     fun follow(
         @AuthenticationPrincipal userId: String,

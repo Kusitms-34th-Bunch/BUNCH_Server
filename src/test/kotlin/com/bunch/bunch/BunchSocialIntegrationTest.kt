@@ -2,9 +2,11 @@ package com.bunch.bunch
 
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
+import com.bunch.bunch.domain.BunchReportReason
 import com.bunch.bunch.domain.CharacterType
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bunch.dto.CreateBunchRequest
+import com.bunch.bunch.dto.BunchReportRequest
 import com.bunch.bunch.dto.FollowDecision
 import com.bunch.bunch.dto.FollowDecisionState
 import com.bunch.bunch.dto.FollowDecisionResult
@@ -279,6 +281,21 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
         )).map { it.getOrThrow() }
         assertThat(results.map { it.followId }.distinct()).hasSize(1)
         assertThat(count("bunch_follows")).isEqualTo(1)
+    }
+
+    @Test
+    fun `concurrent reports by different active members preserve one original report`() {
+        val owner = member()
+        val viewer = create(owner).id
+        val participant = member()
+        join(participant, issue(owner, viewer))
+        val target = publicBunch(member())
+        val results = concurrently(listOf(
+            { social.report(owner, viewer, BunchReportRequest(target, BunchReportReason.SPAM, "first")) },
+            { social.report(participant, viewer, BunchReportRequest(target, BunchReportReason.OTHER, "second")) }
+        )).map { it.getOrThrow() }
+        assertThat(results.map { it.reportId }.distinct()).hasSize(1)
+        assertThat(count("bunch_profile_reports")).isEqualTo(1)
     }
 
     @Test
