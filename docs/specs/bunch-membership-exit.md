@@ -46,7 +46,7 @@ FK·만료 index·recipient/membership/reason unique를 둔다. 직접 나가기
 않고, 내보내기와 #50 삭제가 `REMOVED`/`DELETED`를 같은 모델로 저장한다.
 
 조회·삭제는 활성 계정과 가입 완료를 먼저 확인하고, 본인 notice만 허용한다. 유효한
-notice는 만료 조회에서 숨기고 hourly retention이 물리 삭제한다. 재참여는 새
+notice 중 만료된 항목은 조회에서 숨기고 hourly retention이 물리 삭제한다. 재참여는 새
 Membership 저장과 같은 transaction에서 해당 member/bunch의 과거 notice를 지운다.
 
 현재 활성 Membership이 없고 본인의 유효 notice가 있으면 내부 bundle/members 접근
