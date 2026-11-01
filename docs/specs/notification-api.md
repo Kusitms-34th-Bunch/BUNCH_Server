@@ -20,8 +20,8 @@ kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_
 
 ## 2. type 호환성
 
-wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응답·생산자는 1~7, 9, 10이고 #51은 17~19를 실제 관계 변경에 연결한다.
-8, 11~16, 20~21은 enum/storage compatibility만 유지한다. 미래 type의 producer나 fake routing은 이 API에서 만들지 않는다.
+wire enum의 번호와 이름은 저장 계약과 동일하다. 실제 inbox 생산자는 1~7, 9~13, 16~19다.
+14·15는 이탈·삭제의 detached push만 저장한다. 8·20·21은 별도 후보/피드 생산자가 없어 enum/storage 호환만 유지한다.
 
 전체 enum 표는 [저장 계약의 type 호환성](notification-schema.md#type과-target-호환성)을 따른다.
 
@@ -61,7 +61,8 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
 `OTHER_BUNCH_PROFILE`은 #51의 실제 프로필 접근 검사로 현재 수신 번치 소속·대상 존재·양방향 차단을 확인한다.
 비공개 미승인도 최소 프로필은 열 수 있지만 상세 목록 권한을 부여하지 않는다.
-`CANDIDATES`와 `ACCESS_NOTICE`는 실제 접근 구현이 연결될 때까지 `available:false`다.
+`CANDIDATES`는 후보 생산자가 연결되기 전까지 `available:false`다.
+14·15의 `ACCESS_NOTICE`는 inbox open 대상이 아니며 푸시 target의 notice ID로 [이탈 안내 API](bunch-membership-exit.md)를 조회한다. 본인 소유·만료·재참여 상태를 서버가 다시 확인한다.
 저장 payload를 접근 권한의 근거로 사용하지 않으며 차단·삭제 후 open도 읽음 시각을 유지한다.
 
 ## 4. producer·시간 경계
@@ -77,5 +78,5 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 앱 inbox는 기기 등록과 독립적으로 동작한다. iOS 권한·실제 APNs 수신·푸시 복귀는 앱/운영 설정을 갖춘 별도 수동 검증이다.
 기기·개인 설정·payload·retry와 job wire는 [푸시 계약](push.md)을 따른다.
 
-#48을 연결해 출시할 때는 실제 업무 변경·notification·현재 바인딩된 기기별 job을 같은 DB transaction에 저장해야 한다.
+현재 생산자는 실제 업무 변경·notification·현재 바인딩된 기기별 job을 같은 DB transaction에 저장한다.
 활동 합산 시 미전송 current-device job도 같은 transaction에서 갱신해야 하며, 기기가 없으면 job을 만들지 않고 나중에 등록한 기기로 과거 알림을 소급 전송하지 않는다.

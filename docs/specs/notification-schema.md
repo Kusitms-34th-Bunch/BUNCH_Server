@@ -38,8 +38,8 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 
 ### type과 target 호환성
 
-아래 21개 값은 wire/DB 호환성을 위해 유지한다. #28이 실제 행을 생성하는 값은 `1~7`, `9`, `10`뿐이다.
-`8`, `11~21`은 producer·fake routing 없이 enum/check/target 저장 호환성만 유지한다. `MEMBER_REMOVED`와 `BUNCH_DELETED`는 앱 inbox 행을 만들지 않는 push-only 호환 값이다.
+아래 21개 값은 wire/DB 호환성을 유지한다. 현재 실제 inbox 행을 생성하는 값은 `1~7`, `9~13`, `16~19`다.
+`8`, `20`, `21`은 별도 후보/피드 생산자가 없어 저장 호환성만 유지한다. `MEMBER_REMOVED`와 `BUNCH_DELETED`는 실제 이탈·삭제에서 inbox 없이 detached push job으로 저장한다.
 
 | 번호 | type | 번호 | type | 번호 | type |
 | --- | --- | --- | --- | --- | --- |
@@ -56,7 +56,8 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 17~19는 #51의 실제 관계 ID·type·수신 회원으로 중복을 구분하며 관계 변경과 함께 저장한다.
 `OTHER_BUNCH_PROFILE`의 `bunchId`는 수신/현재 번치, `targetBunchId`는 상대 번치다.
 open은 #51의 실제 접근 검사를 사용하고 저장된 target JSON을 접근 증거로 사용하지 않는다.
-접근 안내 producer는 해당 이탈/삭제 기능에서 연결한다.
+역할 변경·나가며 인계·공개 전환은 각 실제 저장 지점에서 notification과 기기 job을 같은 트랜잭션에 기록한다.
+이탈·삭제의 접근 안내는 본체 FK 없는 notice와 detached job으로 저장하며 재참여는 과거 removal job을 취소한다.
 
 ## 3. `DRAFT_ACTIVITY` 합산 저장
 
@@ -108,7 +109,7 @@ V13은 이미 내용이 있는 `bundle_comments` 참여자의 `reminders_cancell
 Retention은 `created_at <= clock.instant() - 30 days`인 행을 주기 삭제한다. 정리 전에도 같은 cutoff로 목록·unread·open을 제한한다.
 `read-all`은 해당 cutoff 안의 미확인 행을 한 UPDATE로 처리하고, 동시 활동 합산은 DB 행 잠금·갱신 순서를 따른다.
 
-기기별 job이 필요한 운영 연결은 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)에서 소유한다. #28 producer의 출시 조건은 다음과 같다.
+기기별 job의 저장·전송은 [푸시 계약](push.md)을 따르며 현재 생산자는 다음 원자 저장 규칙을 적용한다.
 
 - 실제 업무 변경·`notifications`·현재 바인딩된 모든 기기의 `push_jobs`를 한 DB 트랜잭션에서 원자적으로 저장한다.
 - 활동 합산 시 아직 전송되지 않은 현재 기기 job의 payload도 같은 트랜잭션에서 갱신한다. notification만 보고 job을 재생성하지 않는다.

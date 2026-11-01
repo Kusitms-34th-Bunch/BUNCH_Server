@@ -34,12 +34,12 @@
 | 역할·권한·Stage | [역할·Stage](bunch-role-stage.md), [번들](bundle.md), [번들 API](bundle-api.md) |
 | 생성·초대·참여 | [온보딩](onboarding.md), [가입·온보딩 API](login-onboarding-api.md) |
 | 알림 목록·읽음·독촉 | [알림](notification.md), [API](notification-api.md), [저장](notification-schema.md) |
-| 소셜·외부 프로필 | [이슈 #51](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/51) |
-| 기기·설정·APNs | [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48) |
-| 역할 관리·메인 인계 | [이슈 #49](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/49) |
-| 이탈·사진 정리·재참여 | [이슈 #25](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/25), [사진함 기반](photo-foundation.md) |
-| 번치 삭제 | [이슈 #50](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/50) |
-| 홈·전환·프로필 일괄 저장 | [이슈 #52](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/52) |
+| 소셜·외부 프로필 | [소셜·외부 프로필](bunch-social.md) |
+| 기기·설정·APNs | [푸시](push.md) |
+| 역할 관리·메인 인계 | [역할 관리](bunch-role-stage.md) |
+| 이탈·사진 정리·재참여 | [이탈·재참여](bunch-membership-exit.md), [사진함 기반](photo-foundation.md) |
+| 번치 삭제 | [삭제](bunch-deletion.md) |
+| 홈·전환·프로필 일괄 저장 | [홈·프로필](bunch-home-profile.md) |
 
 ## 원문 추적 — 47개
 
