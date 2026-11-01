@@ -1,15 +1,12 @@
 package com.bunch.bunch.service
 
 import com.bunch.bunch.domain.Bunch
-import com.bunch.bunch.domain.BunchAccessNotice
-import com.bunch.bunch.domain.BunchAccessNoticeReason
 import com.bunch.bunch.domain.BunchActionOperation
 import com.bunch.bunch.domain.BunchActionRequest
 import com.bunch.bunch.domain.BunchActionRequestRepository
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
-import com.bunch.bunch.domain.BunchAccessNoticeRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.dto.BunchDeletionRequest
@@ -17,6 +14,7 @@ import com.bunch.bunch.dto.BunchDepartureResponse
 import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.service.BundleLeaseService
+import com.bunch.bundle.service.BundleRealtimeSessionRegistry
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.image.service.ImageAssetService
@@ -42,13 +40,14 @@ class BunchDeletionService(
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
     private val actionRequests: BunchActionRequestRepository,
-    private val accessNotices: BunchAccessNoticeRepository,
+    private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
     private val bundlePhotos: BundlePhotoRepository,
     private val leases: BundleLeaseService,
     private val photoService: PhotoService,
     private val imageAssets: ImageAssetService,
     private val pushJobs: PushJobWriter,
+    private val realtimeSessions: BundleRealtimeSessionRegistry,
     private val entityManager: EntityManager,
     private val clock: Clock
 ) {
@@ -94,14 +93,16 @@ class BunchDeletionService(
         }
 
         val bunchName = bunch.name
-        val characterType = bunch.characterType
         val recipients = memberships
             .findAllByBunchIdAndStatus(bunchId, MembershipStatus.ACTIVE)
-            .filterNot { it.id == actor.id }
-            .map { Recipient(it.member.id, it.id) }
+            .filterNot { it.member.id == userId }
+            .map { Recipient(it.member.id, it.id, it) }
         val assets = collectAssetIds(bunch)
         val bundleIds = bundles.findAllByBunchIdOrderByIdAsc(bunchId).map { it.id }
         val photoUploaderMemberIds = uploaderMemberIds(bunchId)
+        val savedNotices = recipients.map { recipient ->
+            accessNotices.recordDeletion(bunch, recipient.membership, now)
+        }
 
         clearBundleLeases(bundleIds)
         bundleIds.forEach(pushJobs::cancelCommentRemindersForBundle)
@@ -119,21 +120,6 @@ class BunchDeletionService(
         bunches.deleteById(bunchId)
         bunches.flush()
         entityManager.clear()
-
-        val savedNotices = recipients.map { recipient ->
-            BunchAccessNotice(
-                recipientMemberId = recipient.memberId,
-                bunchId = bunchId,
-                membershipId = recipient.membershipId,
-                bunchName = bunchName,
-                characterType = characterType,
-                reason = BunchAccessNoticeReason.DELETED,
-                occurredAt = now,
-                expiresAt = now.plus(ACCESS_NOTICE_RETENTION)
-            )
-        }
-        accessNotices.saveAll(savedNotices)
-        accessNotices.flush()
 
         recipients.zip(savedNotices).forEach { (recipient, notice) ->
             pushJobs.enqueueDetached(
@@ -167,6 +153,7 @@ class BunchDeletionService(
             )
         )
         assets.forEach(imageAssets::releaseAfterCommit)
+        registerRealtimeCleanupAfterCommit(bunchId)
 
         return BunchDepartureResponse(
             bunchId = bunchId,
@@ -260,6 +247,16 @@ class BunchDeletionService(
     private fun defaultBunchId(userId: Long): Long? =
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)?.bunch?.id
 
+    private fun registerRealtimeCleanupAfterCommit(bunchId: Long) {
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+            object : org.springframework.transaction.support.TransactionSynchronization {
+                override fun afterCommit() {
+                    realtimeSessions.removeForBunch(bunchId)
+                }
+            }
+        )
+    }
+
     private fun validateInput(
         bunchId: Long,
         requestKey: UUID,
@@ -286,7 +283,11 @@ class BunchDeletionService(
     private fun fail(code: ErrorCode, detail: Any? = null): Nothing =
         throw BusinessException(code, detail)
 
-    private data class Recipient(val memberId: Long, val membershipId: Long)
+    private data class Recipient(
+        val memberId: Long,
+        val membershipId: Long,
+        val membership: BunchMembership
+    )
 
     private companion object {
         const val DELETED = "DELETED"

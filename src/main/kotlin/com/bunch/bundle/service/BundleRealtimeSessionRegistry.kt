@@ -44,4 +44,12 @@ class BundleRealtimeSessionRegistry {
         identities.remove(connectionId)
         subscriptions.remove(connectionId)
     }
+
+    /** Removes connections that currently subscribe to a bundle in the deleted bunch. */
+    fun removeForBunch(bunchId: Long) {
+        subscriptions.entries
+            .filter { (_, current) -> current.values.any { it.bunchId == bunchId } }
+            .map { it.key }
+            .forEach(::remove)
+    }
 }

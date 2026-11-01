@@ -28,6 +28,9 @@ import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.service.BundleAccessService
+import com.bunch.bundle.dto.BundleActor
+import com.bunch.bundle.service.BundleRealtimeSessionRegistry
+import com.bunch.bundle.service.BundleRealtimeSubscription
 import com.bunch.bunch.domain.Visibility
 import com.bunch.image.domain.ImageAsset
 import com.bunch.image.domain.ImageAssetRepository
@@ -125,8 +128,12 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var notifications: NotificationRepository
 
+    @Autowired
+    private lateinit var realtimeSessions: BundleRealtimeSessionRegistry
+
     @AfterEach
     fun cleanNoticeFailureTrigger() {
+        realtimeSessions.remove("issue-50-deleted-bunch")
         jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_notification ON bunch_access_notices")
         jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
     }
@@ -341,6 +348,19 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
         )
 
         val key = UUID.randomUUID()
+        val connectionId = "issue-50-deleted-bunch"
+        assertThat(realtimeSessions.bind(connectionId, BundleActor(owner, UUID.randomUUID().toString()))).isTrue()
+        assertThat(
+            realtimeSessions.addSubscription(
+                connectionId,
+                BundleRealtimeSubscription(
+                    id = "deleted-bunch-topic",
+                    destination = "/topic/bunches/${bunch.id}/bundles/${bundle.id}",
+                    bunchId = bunch.id,
+                    bundleId = bundle.id
+                )
+            )
+        ).isTrue()
         val result = deletions.delete(
             owner,
             bunch.id,
@@ -352,6 +372,7 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
         assertThat(result.departedMembershipId).isEqualTo(ownerMembership.id)
         assertThat(result.outcome).isEqualTo("DELETED")
         assertThat(result.defaultBunchId).isEqualTo(fallbackBunch.id)
+        assertThat(realtimeSessions.identity(connectionId)).isNull()
         assertThat(bunchRepository.findById(bunch.id)).isEmpty
         assertError(ErrorCode.FORBIDDEN) { bundleAccess.read(owner, bunch.id, bundle.id) }
         assertError(ErrorCode.BUNCH_ACCESS_UNAVAILABLE) { bundleAccess.read(recipient, bunch.id, bundle.id) }
