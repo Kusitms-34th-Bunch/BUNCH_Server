@@ -29,11 +29,26 @@ class BunchAccessNoticeService(
         bunch: Bunch,
         membership: BunchMembership,
         occurredAt: Instant
+    ): BunchAccessNotice = record(bunch, membership, BunchAccessNoticeReason.REMOVED, occurredAt)
+
+    /** Called by #50 before deleting a bunch and its memberships. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun recordDeletion(
+        bunch: Bunch,
+        membership: BunchMembership,
+        occurredAt: Instant
+    ): BunchAccessNotice = record(bunch, membership, BunchAccessNoticeReason.DELETED, occurredAt)
+
+    private fun record(
+        bunch: Bunch,
+        membership: BunchMembership,
+        reason: BunchAccessNoticeReason,
+        occurredAt: Instant
     ): BunchAccessNotice {
         return notices.findByRecipientMemberIdAndMembershipIdAndReason(
             membership.member.id,
             membership.id,
-            BunchAccessNoticeReason.REMOVED
+            reason
         ) ?: notices.save(
             BunchAccessNotice(
                 recipientMemberId = membership.member.id,
@@ -41,7 +56,7 @@ class BunchAccessNoticeService(
                 membershipId = membership.id,
                 bunchName = bunch.name,
                 characterType = bunch.characterType,
-                reason = BunchAccessNoticeReason.REMOVED,
+                reason = reason,
                 occurredAt = occurredAt,
                 expiresAt = occurredAt.plus(ACCESS_NOTICE_RETENTION)
             )
@@ -73,6 +88,7 @@ class BunchAccessNoticeService(
         requireCompleted(memberId)
         return notices
             .findActiveByRecipientMemberId(memberId, clock.instant())
+            .filterNot { hasActiveMembership(memberId, it.bunchId) }
             .map(BunchAccessNoticeResponse::from)
     }
 
