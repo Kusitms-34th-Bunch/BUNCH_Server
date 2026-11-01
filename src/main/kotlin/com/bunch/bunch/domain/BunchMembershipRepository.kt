@@ -16,6 +16,13 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         bunchId: Long
     ): BunchMembership?
 
+    @Query("""select membership.member.id from BunchMembership membership
+        where membership.id = :membershipId and membership.bunch.id = :bunchId""")
+    fun findMemberIdByIdAndBunchId(
+        membershipId: Long,
+        bunchId: Long
+    ): Long?
+
     fun countByMemberIdAndStatus(
         memberId: Long,
         status: MembershipStatus = MembershipStatus.ACTIVE

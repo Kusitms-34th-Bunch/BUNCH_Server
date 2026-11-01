@@ -7,6 +7,7 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.service.BunchAccessNoticeRetention
 import com.bunch.bunch.service.BunchAccessNoticeService
+import com.bunch.bundle.service.BundleAccessService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.exception.BusinessException
 import org.assertj.core.api.Assertions.catchThrowable
@@ -43,6 +44,9 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
+
+    @Autowired
+    private lateinit var bundleAccess: BundleAccessService
 
     @MockitoBean
     private lateinit var clock: Clock
@@ -101,6 +105,44 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `active notices hide a stale row when a new membership is already active`() {
+        val owner = member()
+        val visitor = member()
+        val bunchResponse = create(owner)
+        val invitation = issue(owner, bunchResponse.id)
+        join(visitor, invitation)
+        val noticeId = recordRemoval(bunchResponse.id, visitor)
+
+        assertThat(accessNotices.active(visitor)).isEmpty()
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { accessNotices.get(visitor, noticeId) }
+        assertThat(notices.findById(noticeId)).isPresent
+    }
+
+    @Test
+    fun `deletion notice uses the same independent record contract`() {
+        val owner = member()
+        val removed = member()
+        val bunchResponse = create(owner)
+        join(removed, issue(owner, bunchResponse.id))
+        val membershipId = memberships.findByMemberIdAndBunchIdAndStatus(removed, bunchResponse.id)!!.id
+        val noticeId = inTransaction {
+            val bunch = bunchRepository.findById(bunchResponse.id).orElseThrow()
+            val membership = memberships.findById(membershipId).orElseThrow()
+            val notice = accessNotices.recordDeletion(
+                bunch,
+                membership,
+                Instant.parse("2026-01-01T00:00:00Z")
+            )
+            membership.end(MembershipStatus.REMOVED, Instant.parse("2026-01-01T00:00:00Z"))
+            memberships.flush()
+            notice.id
+        }
+
+        assertThat(accessNotices.get(removed, noticeId).reason)
+            .isEqualTo(BunchAccessNoticeReason.DELETED)
+    }
+
+    @Test
     fun `expired notices are hidden and physically removed`() {
         val owner = member()
         val removed = member()
@@ -148,6 +190,33 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.FORBIDDEN) {
             accessNotices.requireMemberOrAccessNotice(outsider, bunchResponse.id)
         }
+    }
+
+    @Test
+    fun `deleted bunch still surfaces the recipient notice before lock not found`() {
+        val owner = member()
+        val removed = member()
+        val bunchResponse = create(owner)
+        join(removed, issue(owner, bunchResponse.id))
+        val membershipId = memberships.findByMemberIdAndBunchIdAndStatus(removed, bunchResponse.id)!!.id
+        endMembership(membershipId)
+        val noticeId = recordRemoval(bunchResponse.id, removed)
+        jdbc.update("DELETE FROM bunches WHERE id = ?", bunchResponse.id)
+
+        val thrown = catchThrowable { bundleAccess.lockBunch(removed, bunchResponse.id) }
+
+        assertThat(thrown).isInstanceOf(BusinessException::class.java)
+        assertThat((thrown as BusinessException).errorCode)
+            .isEqualTo(ErrorCode.BUNCH_ACCESS_UNAVAILABLE)
+        assertThat(thrown.detail).isEqualTo(
+            mapOf("noticeId" to noticeId, "reason" to BunchAccessNoticeReason.REMOVED.name)
+        )
+
+        val memberListThrown = catchThrowable { bunches.members(removed, bunchResponse.id) }
+        assertThat(memberListThrown).isInstanceOf(BusinessException::class.java)
+        assertThat((memberListThrown as BusinessException).errorCode)
+            .isEqualTo(ErrorCode.BUNCH_ACCESS_UNAVAILABLE)
+        assertThat(memberListThrown.detail).isEqualTo(thrown.detail)
     }
 
     private fun recordRemoval(
