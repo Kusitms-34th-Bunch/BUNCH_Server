@@ -70,7 +70,7 @@ class NotificationWriter(
         title: String,
         body: String
     ) {
-        notifications.saveAll(memberships.findActiveMembers(recipientBunchId).filter { it.member.id != actorId }.map {
+        saveNotifications(memberships.findActiveMembers(recipientBunchId).filter { it.member.id != actorId }.map {
             Notification(
                 recipientMemberId = it.member.id,
                 bunchId = recipientBunchId,
