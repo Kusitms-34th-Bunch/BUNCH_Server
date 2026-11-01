@@ -1,6 +1,7 @@
 package com.bunch.notification.service
 
 import com.bunch.bunch.domain.BunchMembershipRepository
+import com.bunch.bunch.service.BunchSocialAccessService
 import com.bunch.member.domain.MemberRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
@@ -31,7 +32,8 @@ class NotificationService(
     private val bundles: BundleRepository,
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
-    private val clock: Clock
+    private val clock: Clock,
+    private val socialAccess: BunchSocialAccessService
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun list(memberId: Long, bunchId: Long, page: Int, size: Int): NotificationPage {
@@ -95,10 +97,23 @@ class NotificationService(
                 val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
                 bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.PUBLISHED
             }
-            // External relationship and access-notice producers are not implemented in this pass.
-            // No stored payload is accepted as evidence of access to these destinations.
+            NotificationTargetKind.OTHER_BUNCH_PROFILE -> {
+                val targetId = target.targetBunchId ?: return false
+                try {
+                    socialAccess.target(memberId, targetId, target.bunchId)
+                    true
+                } catch (ex: BusinessException) {
+                    if (ex.errorCode !in setOf(
+                            ErrorCode.BUNCH_PROFILE_UNAVAILABLE,
+                            ErrorCode.CURRENT_BUNCH_REQUIRED,
+                            ErrorCode.FORBIDDEN
+                        )
+                    ) throw ex
+                    false
+                }
+            }
+            // These destinations still have no real producer/access implementation.
             NotificationTargetKind.CANDIDATES,
-            NotificationTargetKind.OTHER_BUNCH_PROFILE,
             NotificationTargetKind.ACCESS_NOTICE -> false
         }
     }
