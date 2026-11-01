@@ -127,7 +127,7 @@ class PushCoreTest {
             type = NotificationType.SOCIAL_COMMENT_CREATED,
             dedupeKey = "comment:1",
             title = "댓글이 달렸어요",
-            body = "가".repeat(2000),
+            body = "가\n" + "👨‍👩‍👧‍👦".repeat(60),
             target = NotificationTarget(NotificationTargetKind.BUNDLE_COMMENTS, 7, 9),
             createdAt = Instant.parse("2026-01-01T00:00:00Z")
         )
@@ -137,5 +137,8 @@ class PushCoreTest {
         assertThat(mapper.writeValueAsBytes(payload)).hasSizeLessThanOrEqualTo(4096)
         assertThat(payload.aps.alert.title).startsWith("[테스트 번치]")
         assertThat(payload.aps.alert.body).endsWith("…")
+        assertThat(payload.aps.alert.body).startsWith("가 ").doesNotContain("\n")
+        assertThat(java.util.regex.Pattern.compile("\\X").matcher(payload.aps.alert.body).results().count())
+            .isEqualTo(51)
     }
 }

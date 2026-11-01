@@ -12,6 +12,7 @@ import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.service.PhotoService
 import com.bunch.notification.service.NotificationWriter
+import com.bunch.notification.service.PushJobWriter
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
@@ -45,6 +46,7 @@ class BundleService(
     private val mapper: ObjectMapper,
     private val stagePolicy: BundleStagePolicy,
     private val notifications: NotificationWriter,
+    private val pushJobs: PushJobWriter,
     private val clock: Clock
 ) {
     @Transactional
@@ -191,6 +193,7 @@ class BundleService(
             if (bundle.status == BundleStatus.DRAFT && value.isNotBlank()) {
                 participants.findByBundleIdAndMemberId(id, actor.memberId)?.let {
                     if (it.remindersCancelledAt == null) it.remindersCancelledAt = clock.instant()
+                    pushJobs.cancelCommentReminderForMember(id, actor.memberId)
                 }
             }
             notifyReady(bundle, actor.memberId)
@@ -387,6 +390,7 @@ class BundleService(
         val beforeCount = bundles.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
         bundle.status = BundleStatus.PUBLISHED
         bundle.publishedAt = clock.instant()
+        pushJobs.cancelCommentRemindersForBundle(id)
         leases.clear(id)
         changed(bundle, key.toString(), BundleEventType.PUBLISHED, content(bundle))
         remember(actor.memberId, bundle, operation, key, fingerprint)
@@ -454,6 +458,7 @@ class BundleService(
 
     private fun removeParticipation(bundle: Bundle, memberId: Long, requestId: String, actorId: Long) {
         val row = participants.findByBundleIdAndMemberId(bundle.id, memberId) ?: return
+        pushJobs.cancelCommentReminderForMember(bundle.id, memberId)
         participants.delete(row)
         comments.findByBundleIdAndMemberId(bundle.id, memberId)?.let(comments::delete)
         participants.flush()
@@ -473,6 +478,7 @@ class BundleService(
     }
 
     private fun deleteInternal(bundle: Bundle, requestId: String) {
+        pushJobs.cancelCommentRemindersForBundle(bundle.id)
         val assets = photoRows(bundle.id).map { it.imageAsset.id }.distinct()
         leases.clear(bundle.id)
         bundle.revision++

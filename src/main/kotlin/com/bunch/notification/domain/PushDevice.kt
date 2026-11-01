@@ -49,6 +49,7 @@ class PushDevice(
     @Column(name = "token_ciphertext", nullable = false, columnDefinition = "bytea")
     var tokenCiphertext: ByteArray,
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "token_hash", nullable = false, columnDefinition = "char(64)")
     var tokenHash: String,
 
