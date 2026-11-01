@@ -32,7 +32,6 @@ enum class ErrorCode(
     BUNCH_PROFILE_UNAVAILABLE("BUNCH_009", "error.bunch_profile_unavailable", 404),
     CURRENT_BUNCH_REQUIRED("BUNCH_010", "error.current_bunch_required", 409),
     BUNCH_MEMBERSHIP_VERSION_CONFLICT("BUNCH_005", "error.bunch_membership_version_conflict", 409),
-    BUNCH_MEMBERSHIP_VERSION_CONFLICT("BUNCH_005", "error.bunch_membership_version_conflict", 409),
     BUNCH_OWNER_SUCCESSOR_REQUIRED("BUNCH_006", "error.bunch_owner_successor_required", 409),
     BUNCH_SOLE_MEMBER_CANNOT_LEAVE("BUNCH_007", "error.bunch_sole_member_cannot_leave", 409),
     BUNCH_ACCESS_UNAVAILABLE("BUNCH_008", "error.bunch_access_unavailable", 409),

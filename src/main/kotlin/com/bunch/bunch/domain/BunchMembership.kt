@@ -76,15 +76,7 @@ class BunchMembership(
         joinRequests = joinRequests + (key.toString() to JoinRequest(fingerprint, outcome))
     }
 
-    fun changeRole(
-        newRole: MembershipRole,
-        grantorMemberId: Long,
-        now: Instant
-    ) {
-        role = newRole
-        roleGrantedAt = now
-        roleGrantedBy = grantorMemberId
-    }
+
 
     fun end(newStatus: MembershipStatus, endedAt: Instant) {
         check(newStatus == MembershipStatus.LEFT || newStatus == MembershipStatus.REMOVED)
