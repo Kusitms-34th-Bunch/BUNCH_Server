@@ -1,9 +1,9 @@
 # 번치 삭제·접근 불가 안내 구현 기준 (#50)
 
 이 문서는 `BUNCH-09`, `BUNCH-04`, `NOTI-02`를 실제 서버 기능으로 연결하기 위한
-구현 기준과 검증 시나리오다. 제품 문구·API·DB의 원문 기준은 `bunch.md`,
-`bunch-api.md`, `bunch-schema.md`, `photo-foundation.md`, `notification*.md`를
-우선한다.
+구현 기준과 검증 시나리오다. 공통 정책은 [번치 색인](bunch.md),
+[사진 자산 계약](photo-foundation.md), [알림 계약](notification.md),
+[푸시 계약](push.md)을 따른다. 삭제 API·저장 관계는 이 문서에서 함께 관리한다.
 
 ## 1. 현재 기준과 선행 게이트
 
