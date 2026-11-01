@@ -1,6 +1,6 @@
 # 알림 inbox API 계약 — #28
 
-> #28의 공개 API는 앱 내 inbox 목록·읽음·open이다. APNs·기기 등록·개인 푸시 설정·전송 retry의 wire 계약은 이 문서에 포함하지 않는다.
+> 앱 내 inbox API와 [기기·개인 설정·APNs 계약](push.md)을 함께 관리한다.
 
 [알림 Spec](notification.md)과 [알림 inbox 저장 계약](notification-schema.md)을 API로 노출하는 계약이다.
 번치·번들 접근 판정은 [번들 API](bundle-api.md)와 [역할·Stage 계약](bunch-role-stage.md)의 실제 업무 규칙을 따른다.
@@ -75,7 +75,7 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 ## 5. 앱·iOS·#48 경계
 
 앱 inbox는 기기 등록과 독립적으로 동작한다. iOS 권한·실제 APNs 수신·푸시 복귀는 앱/운영 설정을 갖춘 별도 수동 검증이다.
-기기·개인 푸시 설정·payload·retry와 job wire는 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)의 계약으로 남긴다.
+기기·개인 설정·payload·retry와 job wire는 [푸시 계약](push.md)을 따른다.
 
 #48을 연결해 출시할 때는 실제 업무 변경·notification·현재 바인딩된 기기별 job을 같은 DB transaction에 저장해야 한다.
 활동 합산 시 미전송 current-device job도 같은 transaction에서 갱신해야 하며, 기기가 없으면 job을 만들지 않고 나중에 등록한 기기로 과거 알림을 소급 전송하지 않는다.
