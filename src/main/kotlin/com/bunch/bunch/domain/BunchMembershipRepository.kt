@@ -37,8 +37,11 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         join fetch m.member member
         left join fetch member.profileImageAsset
         where m.bunch.id = :bunchId and m.status = :status and member.accountStatus = :accountStatus
-        order by case when m.role = com.bunch.bunch.domain.MembershipRole.OWNER then 0 else 1 end,
-        member.nickname asc""")
+        order by case
+            when m.role = com.bunch.bunch.domain.MembershipRole.OWNER then 0
+            when m.role = com.bunch.bunch.domain.MembershipRole.CO_OWNER then 1
+            else 2 end,
+        member.nickname asc, m.id asc""")
     fun findActiveMembers(
         bunchId: Long,
         status: MembershipStatus = MembershipStatus.ACTIVE,

@@ -1,6 +1,7 @@
 package com.bunch.bundle
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundlePhotoRepository
@@ -1336,28 +1337,297 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `stage boundaries advance and fall after published bundle deletion`() {
+    fun `stage counts public and private publications at all four boundaries and falls on deletion`() {
         val owner = member()
         val guest = member()
         val bunchId = bunchWithMembers(owner, guest)
         assertThat(bundleService.summary(owner, bunchId).stage).isEqualTo(1)
 
         val publishedIds = mutableListOf<Long>()
-        (1..16).forEach { index ->
+        val expectedStages = listOf(1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4)
+        expectedStages.forEachIndexed { offset, expectedStage ->
             val source = photo(bunchId, listOf(owner))
-            val published = publishReadyBundle(owner, guest, bunchId, source, "stage-$index")
+            val published = publishReadyBundle(owner, guest, bunchId, source, "stage-$offset")
+            if (offset % 2 == 0) {
+                bundleService.visibility(
+                    actor(owner), bunchId, published.id,
+                    BundleVisibilityRequest(Visibility.PUBLIC, published.visibilityVersion, BundleStatus.PUBLISHED),
+                    "stage-public-$offset"
+                )
+            }
             publishedIds += published.id
-            when (index) {
-                3 -> assertSummary(bunchId, publishedCount = 3, stage = 1)
-                4 -> assertSummary(bunchId, publishedCount = 4, stage = 2)
-                15 -> assertSummary(bunchId, publishedCount = 15, stage = 4)
-                16 -> assertSummary(bunchId, publishedCount = 16, stage = 5)
+            assertSummary(bunchId, publishedCount = (offset + 1).toLong(), stage = expectedStage)
+        }
+
+        publishedIds.reversed().forEach { id ->
+            bundleService.delete(actor(owner), bunchId, id, "stage-delete-$id")
+            val remaining = bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
+            val expected = when {
+                remaining >= 10 -> 4
+                remaining >= 6 -> 3
+                remaining >= 2 -> 2
+                else -> 1
+            }
+            assertThat(bundleService.summary(owner, bunchId).stage).isEqualTo(expected)
+        }
+    }
+
+    @Test
+    fun `published common content belongs only to current owner while authors keep their own comments`() {
+        val owner = member()
+        val creator = member()
+        val coOwner = member()
+        val bunchId = bunchWithMembers(owner, creator, coOwner)
+        setRole(bunchId, coOwner, MembershipRole.CO_OWNER)
+        val source = photo(bunchId, listOf(creator))
+        val published = publishReadyBundle(creator, coOwner, bunchId, source, "member-creator")
+        val photoId = published.photos.single().id
+        jdbc.update("UPDATE bunch_memberships SET last_activity_at = NULL WHERE bunch_id = ?", bunchId)
+
+        listOf(creator, coOwner).forEach { memberId ->
+            val permissions = bundleService.get(memberId, bunchId, published.id).permissions
+            assertThat(permissions.administrator).isEqualTo(memberId == coOwner)
+            assertThat(permissions.creator).isEqualTo(memberId == creator)
+            assertThat(permissions.canEdit).isFalse()
+            assertThat(permissions.canPublish).isFalse()
+            assertThat(permissions.canDelete).isFalse()
+            val writes = listOf<() -> Any?>(
+                {
+                    bundleService.title(actor(memberId), bunchId, published.id,
+                        BundleTextRequest("forbidden", published.titleVersion, BundleStatus.PUBLISHED), "role-title")
+                },
+                {
+                    bundleService.visibility(actor(memberId), bunchId, published.id,
+                        BundleVisibilityRequest(Visibility.PUBLIC, published.visibilityVersion, BundleStatus.PUBLISHED),
+                        "role-visibility")
+                },
+                {
+                    bundleService.date(actor(memberId), bunchId, published.id,
+                        BundleDateRequest(LocalDate.of(2024, 2, 1), 0, BundleStatus.PUBLISHED), "role-date")
+                },
+                {
+                    bundleService.caption(actor(memberId), bunchId, published.id, photoId,
+                        BundleTextRequest("forbidden", 0, BundleStatus.PUBLISHED), "role-caption")
+                },
+                {
+                    bundleService.changePhotos(actor(memberId), bunchId, published.id, UUID.randomUUID(),
+                        BundlePhotoChangesRequest(mode = BundleStatus.PUBLISHED))
+                },
+                {
+                    bundleService.move(actor(memberId), bunchId, published.id, photoId,
+                        MoveBundlePhotoRequest(null, null, BundleStatus.PUBLISHED), "role-move")
+                },
+                { bundleService.delete(actor(memberId), bunchId, published.id, "role-delete") }
+            )
+            writes.forEach { assertBundleError(ErrorCode.FORBIDDEN, it) }
+            assertThat(lastActivity(bunchId, memberId)).isNull()
+            val comment = bundleService.get(memberId, bunchId, published.id).comments.single { it.memberId == memberId }
+            val updated = bundleService.comment(actor(memberId), bunchId, published.id,
+                BundleTextRequest("my published comment", comment.version, BundleStatus.PUBLISHED), "own-comment")
+            assertThat(updated.comments.single { it.memberId == memberId }.content).isEqualTo("my published comment")
+            assertThat(lastActivity(bunchId, memberId)).isNotNull()
+            assertBundleError(ErrorCode.INVALID_INPUT) {
+                bundleService.comment(actor(memberId), bunchId, published.id,
+                    BundleTextRequest("", comment.version + 1, BundleStatus.PUBLISHED), "empty-published-comment")
             }
         }
 
-        bundleService.delete(actor(owner), bunchId, publishedIds.last(), "stage-delete")
-        assertSummary(bunchId, publishedCount = 15, stage = 4)
+        val ownerPermissions = bundleService.get(owner, bunchId, published.id).permissions
+        assertThat(ownerPermissions.participant).isFalse()
+        assertThat(ownerPermissions.canEdit).isTrue()
+        assertThat(ownerPermissions.canDelete).isTrue()
+        bundleService.title(actor(owner), bunchId, published.id,
+            BundleTextRequest("main owner edit", published.titleVersion, BundleStatus.PUBLISHED), "owner-common")
+        assertThat(lastActivity(bunchId, owner)).isNull()
+        assertBundleError(ErrorCode.FORBIDDEN) {
+            bundleService.comment(actor(owner), bunchId, published.id,
+                BundleTextRequest("not my comment", 0, BundleStatus.PUBLISHED), "owner-comment")
+        }
+
+        inTransaction {
+            setRole(bunchId, owner, MembershipRole.MEMBER)
+            setRole(bunchId, coOwner, MembershipRole.OWNER)
+        }
+        assertThat(bundleService.get(owner, bunchId, published.id).permissions.canDelete).isFalse()
+        assertBundleError(ErrorCode.FORBIDDEN) {
+            bundleService.delete(actor(owner), bunchId, published.id, "former-owner-delete")
+        }
+        bundleService.delete(actor(coOwner), bunchId, published.id, "current-owner-delete")
+        assertThat(bundleRepository.existsById(published.id)).isFalse()
     }
+
+    @Test
+    fun `draft managers require current participation and creators retain draft deletion rights`() {
+        val owner = member()
+        val creator = member()
+        val coOwner = member()
+        val participant = member()
+        val bunchId = bunchWithMembers(owner, creator, coOwner, participant)
+        setRole(bunchId, coOwner, MembershipRole.CO_OWNER)
+        val source = photo(bunchId, listOf(creator))
+        val draft = createDraft(creator, bunchId, listOf(source.id))
+        listOf(owner, coOwner).forEach { administrator ->
+            val permissions = bundleService.get(administrator, bunchId, draft.id).permissions
+            assertThat(permissions.administrator).isTrue()
+            assertThat(permissions.canEdit).isFalse()
+            assertThat(permissions.canPublish).isFalse()
+            assertThat(permissions.canDelete).isFalse()
+            assertBundleError(ErrorCode.FORBIDDEN) {
+                bundleService.delete(actor(administrator), bunchId, draft.id, "nonparticipant-delete")
+            }
+            assertBundleError(ErrorCode.FORBIDDEN) {
+                bundleService.publish(actor(administrator), bunchId, draft.id, UUID.randomUUID(),
+                    PublishBundleRequest(draft.revision))
+            }
+            assertBundleError(ErrorCode.FORBIDDEN) {
+                bundleLeases.acquire(actor(administrator), bunchId, draft.id, "TITLE", "nonparticipant-lease")
+            }
+        }
+        bundleService.addParticipant(actor(creator), bunchId, draft.id, participant, "add-member")
+        assertThat(bundleService.get(participant, bunchId, draft.id).permissions.canDelete).isFalse()
+        assertBundleError(ErrorCode.FORBIDDEN) {
+            bundleService.delete(actor(participant), bunchId, draft.id, "ordinary-participant-delete")
+        }
+        bundleService.addParticipant(actor(creator), bunchId, draft.id, coOwner, "add-manager")
+        val managerPermissions = bundleService.get(coOwner, bunchId, draft.id).permissions
+        assertThat(managerPermissions.canEdit).isTrue()
+        assertThat(managerPermissions.canPublish).isTrue()
+        assertThat(managerPermissions.canDelete).isTrue()
+        setRole(bunchId, coOwner, MembershipRole.MEMBER)
+        assertThat(bundleService.get(coOwner, bunchId, draft.id).permissions.canDelete).isFalse()
+        assertBundleError(ErrorCode.FORBIDDEN) {
+            bundleService.delete(actor(coOwner), bunchId, draft.id, "demoted-manager-delete")
+        }
+        setRole(bunchId, coOwner, MembershipRole.CO_OWNER)
+        bundleService.delete(actor(coOwner), bunchId, draft.id, "participating-manager-delete")
+
+        val creatorDraft = createDraft(creator, bunchId, listOf(source.id))
+        assertThat(creatorDraft.permissions.canDelete).isTrue()
+        bundleService.delete(actor(creator), bunchId, creatorDraft.id, "creator-delete")
+        assertThat(bundleRepository.existsById(creatorDraft.id)).isFalse()
+
+        val ready = publishableDraft(creator, coOwner, bunchId, source, "co-owner-publish")
+        val published = bundleService.publish(actor(coOwner), bunchId, ready.id, UUID.randomUUID(),
+            PublishBundleRequest(ready.revision))
+        assertThat(published.status).isEqualTo(BundleStatus.PUBLISHED)
+        assertThat(published.permissions.canEdit).isFalse()
+        assertThat(published.permissions.canDelete).isFalse()
+        assertBundleError(ErrorCode.BUNDLE_STATE_CONFLICT) {
+            bundleLeases.acquire(actor(coOwner), bunchId, ready.id, "TITLE", "published-lease")
+        }
+    }
+
+    @Test
+    fun `draft list follows actual content update then id while lease heartbeat and reads preserve order`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val first = createDraft(owner, bunchId, listOf(source.id))
+        val second = createDraft(owner, bunchId, listOf(source.id))
+        val third = createDraft(owner, bunchId, listOf(source.id))
+        val baseline = Instant.parse("2026-01-01T00:00:00Z")
+        listOf(first, second, third).forEach {
+            jdbc.update(
+                "UPDATE bundles SET created_at = ?, updated_at = ? WHERE id = ?",
+                java.sql.Timestamp.from(baseline),
+                java.sql.Timestamp.from(baseline),
+                it.id
+            )
+        }
+        fun ordered() = bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 2)
+        assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
+        assertThat(ordered().total).isEqualTo(3)
+        val lease = bundleLeases.acquire(actor(owner), bunchId, first.id, "TITLE", "sort-title")
+        bundleLeases.heartbeat(actor(owner), bunchId, first.id, "TITLE", lease.token, "sort-title")
+        bundleService.get(owner, bunchId, first.id)
+        assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
+        bundleService.title(actor(owner), bunchId, first.id,
+            BundleTextRequest("recent edit", 0, BundleStatus.DRAFT, lease.token), "sort-edit")
+        assertThat(ordered().items.map { it.id }).containsExactly(first.id, third.id)
+        assertThat(bundleService.list(owner, bunchId, BundleStatus.DRAFT, 1, 2).items.map { it.id })
+            .containsExactly(second.id)
+    }
+
+    @Test
+    fun `activity records only committed content changes and comment saves`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val addition = photo(bunchId, listOf(owner))
+        val draft = createDraft(owner, bunchId, listOf(source.id))
+        assertThat(lastActivity(bunchId, owner)).isNull()
+        val baseline = Instant.parse("2026-01-01T00:00:00Z")
+        fun resetActivity() {
+            jdbc.update("UPDATE bunch_memberships SET last_activity_at = ? WHERE bunch_id = ? AND member_id = ?",
+                java.sql.Timestamp.from(baseline), bunchId, owner)
+        }
+        val titleLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "TITLE", "activity-title")
+        val dateLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "DATE", "activity-date")
+        val photoId = draft.photos.single().id
+        val captionLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "PHOTO:$photoId", "activity-photo")
+        val photoKey = UUID.randomUUID()
+        val photoRequest = BundlePhotoChangesRequest(listOf(addition.id), mode = BundleStatus.DRAFT)
+        val edits = listOf<() -> Any?>(
+            { bundleService.title(actor(owner), bunchId, draft.id,
+                BundleTextRequest("activity title", 0, BundleStatus.DRAFT, titleLease.token), "activity-title") },
+            { bundleService.visibility(actor(owner), bunchId, draft.id,
+                BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.DRAFT), "activity-visibility") },
+            { bundleService.date(actor(owner), bunchId, draft.id,
+                BundleDateRequest(LocalDate.of(2024, 1, 1), 0, BundleStatus.DRAFT, dateLease.token), "activity-date") },
+            { bundleService.caption(actor(owner), bunchId, draft.id, photoId,
+                BundleTextRequest("activity caption", 0, BundleStatus.DRAFT, captionLease.token), "activity-caption") },
+            { bundleService.changePhotos(actor(owner), bunchId, draft.id, photoKey, photoRequest) },
+            { bundleService.move(actor(owner), bunchId, draft.id, photoId,
+                MoveBundlePhotoRequest(bundleService.get(owner, bunchId, draft.id).photos.last().id,
+                    null, BundleStatus.DRAFT), "activity-move") },
+            { bundleService.comment(actor(owner), bunchId, draft.id,
+                BundleTextRequest("activity comment", 0, BundleStatus.DRAFT), "activity-comment") }
+        )
+        edits.forEach { edit ->
+            resetActivity()
+            edit()
+            assertThat(lastActivity(bunchId, owner)).isAfter(baseline)
+            assertThat(lastActivity(bunchId, guest)).isNull()
+        }
+        resetActivity()
+        val unchanged = bundleService.get(owner, bunchId, draft.id)
+        bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 20)
+        bundleService.summary(owner, bunchId)
+        bundleLeases.heartbeat(actor(owner), bunchId, draft.id, "TITLE", titleLease.token, "activity-title")
+        bundleService.title(actor(owner), bunchId, draft.id,
+            BundleTextRequest(unchanged.title, unchanged.titleVersion, BundleStatus.DRAFT, titleLease.token), "noop-title")
+        bundleService.visibility(actor(owner), bunchId, draft.id,
+            BundleVisibilityRequest(requireNotNull(unchanged.visibility), unchanged.visibilityVersion, BundleStatus.DRAFT), "noop-visibility")
+        bundleService.comment(actor(owner), bunchId, draft.id,
+            BundleTextRequest("activity comment", 1, BundleStatus.DRAFT), "noop-comment")
+        bundleService.changePhotos(actor(owner), bunchId, draft.id, photoKey, photoRequest)
+        assertBundleError(ErrorCode.BUNDLE_VERSION_CONFLICT) {
+            bundleService.title(actor(owner), bunchId, draft.id,
+                BundleTextRequest("stale save", 0, BundleStatus.DRAFT, titleLease.token), "stale-title")
+        }
+        assertThatThrownBy {
+            inTransaction {
+                bundleService.comment(actor(owner), bunchId, draft.id,
+                    BundleTextRequest("rolled back comment", 1, BundleStatus.DRAFT), "rolled-back-comment")
+                error("rollback after successful edit")
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
+        bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "activity-add-member")
+        assertThat(lastActivity(bunchId, owner)).isEqualTo(baseline)
+        assertThat(bundleService.get(owner, bunchId, draft.id).revision).isEqualTo(unchanged.revision + 1)
+    }
+
+    private fun setRole(bunchId: Long, memberId: Long, role: MembershipRole) {
+        jdbc.update("UPDATE bunch_memberships SET role = ? WHERE bunch_id = ? AND member_id = ? AND status = 'ACTIVE'",
+            role.name, bunchId, memberId)
+    }
+
+    private fun lastActivity(bunchId: Long, memberId: Long): Instant? = jdbc.queryForObject(
+        "SELECT last_activity_at FROM bunch_memberships WHERE bunch_id = ? AND member_id = ? AND status = 'ACTIVE'",
+        { row, _ -> row.getTimestamp(1)?.toInstant() }, bunchId, memberId
+    )
 
     private fun createDraft(owner: Long, bunchId: Long, photoIds: List<Long>): BundleSnapshot =
         bundleService.create(actor(owner), bunchId, UUID.randomUUID(), CreateBundleRequest(photoIds))
