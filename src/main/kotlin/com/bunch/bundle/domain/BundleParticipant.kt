@@ -38,5 +38,14 @@ class BundleParticipant(
     val memberId: Long,
 
     @Column(name = "joined_at", nullable = false)
-    val joinedAt: Instant = Instant.now()
+    val joinedAt: Instant = Instant.now(),
+
+    @Column(name = "reminder24_notified_at")
+    var reminder24SentAt: Instant? = null,
+
+    @Column(name = "reminder72_notified_at")
+    var reminder72SentAt: Instant? = null,
+
+    @Column(name = "reminders_cancelled_at")
+    var remindersCancelledAt: Instant? = null
 )

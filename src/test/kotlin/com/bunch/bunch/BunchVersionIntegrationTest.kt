@@ -57,7 +57,7 @@ class BunchVersionIntegrationTest : BunchIntegrationSupport() {
         val visitor = member()
         val bunch = create(owner)
         val invite = issue(owner, bunch.id)
-        rejectWrite("bunch_test_reject_notification", "bunch_join_notifications", "INSERT")
+        rejectWrite("bunch_test_reject_notification", "notifications", "INSERT")
         assertThatThrownBy { join(visitor, invite) }.isInstanceOf(DataAccessException::class.java)
         assertThat(version(bunch.id)).isEqualTo(1)
         assertThat(count("bunch_memberships")).isEqualTo(1)

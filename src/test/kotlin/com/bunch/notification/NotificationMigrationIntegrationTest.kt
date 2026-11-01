@@ -29,12 +29,13 @@ class NotificationMigrationIntegrationTest @Autowired constructor(
     private val jdbc = JdbcTemplate(dataSource)
 
     @Test
-    fun `V12 migrates retained join notifications and prunes expired rows without creating push tables`() {
+    fun `V11 then V12 migrates retained join notifications without creating push tables`() {
         withTarget10 { schema ->
             val ownerId = insertMember(schema, "번치 주인")
             val joinedMemberId = insertMember(schema, "참여한 멤버")
             val expiredRecipientId = insertMember(schema, "오래된 수신자")
             val bunchId = insertBunch(schema, ownerId)
+            insertMembership(schema, bunchId, ownerId, "OWNER")
             val joinedMembershipId = insertMembership(schema, bunchId, joinedMemberId)
             val retainedId = insertLegacyNotification(
                 schema,
@@ -54,6 +55,7 @@ class NotificationMigrationIntegrationTest @Autowired constructor(
                 "31 days"
             )
 
+            assertThat(configure(schema, "11").migrate().migrationsExecuted).isEqualTo(1)
             val current = configure(schema, "12")
             assertThat(current.migrate().migrationsExecuted).isEqualTo(1)
             current.validate()
@@ -124,9 +126,9 @@ class NotificationMigrationIntegrationTest @Autowired constructor(
             assertThat(tableCount(schema, "push_devices")).isZero()
             assertThat(tableCount(schema, "push_preferences")).isZero()
             assertThat(jdbc.queryForObject(
-                "SELECT count(*) FROM $schema.flyway_schema_history WHERE version = '11'",
+                "SELECT count(*) FROM $schema.flyway_schema_history WHERE version = '11' AND success",
                 Long::class.java
-            )).isZero()
+            )).isEqualTo(1)
 
             val nextId = insertNotification(
                 schema,
@@ -157,7 +159,9 @@ class NotificationMigrationIntegrationTest @Autowired constructor(
             val otherRecipientId = insertMember(schema, "다른 수신자")
             val joinedMemberId = insertMember(schema, "참여자")
             val bunchId = insertBunch(schema, ownerId)
+            insertMembership(schema, bunchId, ownerId, "OWNER")
             val joinedMembershipId = insertMembership(schema, bunchId, joinedMemberId)
+            configure(schema, "11").migrate()
             configure(schema, "12").migrate()
 
             val appTypes = listOf(
@@ -300,14 +304,15 @@ class NotificationMigrationIntegrationTest @Autowired constructor(
         "notification-fingerprint-${UUID.randomUUID()}"
     )!!
 
-    private fun insertMembership(schema: String, bunchId: Long, memberId: Long): Long = jdbc.queryForObject(
+    private fun insertMembership(schema: String, bunchId: Long, memberId: Long, role: String = "MEMBER"): Long = jdbc.queryForObject(
         """INSERT INTO $schema.bunch_memberships
             (bunch_id, member_id, role, status, joined_at, role_granted_at, last_used_at, join_requests)
-            VALUES (?, ?, 'MEMBER', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::jsonb)
+            VALUES (?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::jsonb)
             RETURNING id""",
         Long::class.java,
         bunchId,
-        memberId
+        memberId,
+        role
     )!!
 
     private fun insertLegacyNotification(

@@ -83,8 +83,7 @@ class NotificationService(
             NotificationTargetKind.BUNCH_HOME,
             NotificationTargetKind.MEMBERS,
             NotificationTargetKind.ROLE_PERMISSIONS,
-            NotificationTargetKind.DRAFT_LIST,
-            NotificationTargetKind.CANDIDATES -> true
+            NotificationTargetKind.DRAFT_LIST -> true
             NotificationTargetKind.DRAFT -> {
                 val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
                 bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.DRAFT &&
@@ -97,6 +96,7 @@ class NotificationService(
             }
             // External relationship and access-notice producers are not implemented in this pass.
             // No stored payload is accepted as evidence of access to these destinations.
+            NotificationTargetKind.CANDIDATES,
             NotificationTargetKind.OTHER_BUNCH_PROFILE,
             NotificationTargetKind.ACCESS_NOTICE -> false
         }

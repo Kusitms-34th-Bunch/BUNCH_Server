@@ -11,6 +11,7 @@ import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.service.PhotoService
+import com.bunch.notification.service.NotificationWriter
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -41,7 +43,9 @@ class BundleService(
     private val images: ImageAssetService,
     private val events: ApplicationEventPublisher,
     private val mapper: ObjectMapper,
-    private val stagePolicy: BundleStagePolicy
+    private val stagePolicy: BundleStagePolicy,
+    private val notifications: NotificationWriter,
+    private val clock: Clock
 ) {
     @Transactional
     fun create(actor: BundleActor, bunchId: Long, key: UUID, request: CreateBundleRequest): BundleSnapshot {
@@ -54,13 +58,20 @@ class BundleService(
         }
         if (request.photoIds.size !in 1..20) fail(ErrorCode.INVALID_INPUT)
         val selected = photoService.lockReadyPhotosForConnection(bunchId, request.photoIds)
-        val bundle = bundles.saveAndFlush(Bundle(bunchId = bunchId, createdBy = actor.memberId))
+        val bundle = bundles.saveAndFlush(
+            Bundle(bunchId = bunchId, createdBy = actor.memberId, createdAt = clock.instant())
+        )
         selected.forEachIndexed { index, photo -> addPhoto(bundle, photo, index, actor.memberId) }
         val currentMembers = memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.toSet()
         val initial = linkedSetOf(actor.memberId)
         uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(request.photoIds)
             .map { it.member.id }.filter { it in currentMembers }.forEach(initial::add)
-        initial.forEach { participants.save(BundleParticipant(bundleId = bundle.id, memberId = it)) }
+        initial.forEach {
+            val participant = participants.saveAndFlush(
+                BundleParticipant(bundleId = bundle.id, memberId = it, joinedAt = bundle.createdAt)
+            )
+            notifications.participantAdded(bundle, participant, actor.memberId)
+        }
         changed(bundle, key.toString(), BundleEventType.CREATED, content(bundle))
         remember(actor.memberId, bundle, "CREATE", key, fingerprint)
         return snapshot(bundle, actor.memberId)
@@ -104,6 +115,7 @@ class BundleService(
             bundle.titleVersion++
             changed(bundle, requestId, BundleEventType.TITLE, mapOf("value" to value, "version" to bundle.titleVersion))
             recordActivity(bundle, actor.memberId)
+            notifyReady(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -126,6 +138,7 @@ class BundleService(
                 "version" to bundle.visibilityVersion
             ))
             recordActivity(bundle, actor.memberId)
+            notifyReady(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -175,6 +188,12 @@ class BundleService(
             row.updatedAt = Instant.now()
             changed(bundle, requestId, BundleEventType.COMMENT, commentResponse(row))
             recordActivity(bundle, actor.memberId, comment = true)
+            if (bundle.status == BundleStatus.DRAFT && value.isNotBlank()) {
+                participants.findByBundleIdAndMemberId(id, actor.memberId)?.let {
+                    if (it.remindersCancelledAt == null) it.remindersCancelledAt = clock.instant()
+                }
+            }
+            notifyReady(bundle, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -215,11 +234,14 @@ class BundleService(
         access.requireParticipant(actor.memberId, bundle)
         access.requireMember(memberId, bunchId)
         if (!access.isParticipant(memberId, id)) {
-            participants.saveAndFlush(BundleParticipant(bundleId = id, memberId = memberId))
+            val participant = participants.saveAndFlush(
+                BundleParticipant(bundleId = id, memberId = memberId, joinedAt = clock.instant())
+            )
             // A newly added participation starts above every prior comment version. Removing
             // and re-adding a member must not let an old expectedVersion=0 save become valid.
             comments.saveAndFlush(BundleComment(bundleId = id, memberId = memberId, version = bundle.revision + 1))
             changed(bundle, requestId, BundleEventType.PARTICIPANTS, participantChanges(bundle))
+            notifications.participantAdded(bundle, participant, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -235,7 +257,7 @@ class BundleService(
         val bundle = access.lock(actor.memberId, bunchId, id)
         access.requireDraftManager(actor.memberId, bundle)
         if (memberId == bundle.createdBy) fail(ErrorCode.FORBIDDEN)
-        removeParticipation(bundle, memberId, requestId)
+        removeParticipation(bundle, memberId, requestId, actor.memberId)
         return snapshot(bundle, actor.memberId)
     }
 
@@ -247,7 +269,7 @@ class BundleService(
             deleteInternal(bundle, requestId)
             return null
         }
-        removeParticipation(bundle, actor.memberId, requestId)
+        removeParticipation(bundle, actor.memberId, requestId, actor.memberId)
         return snapshot(bundle, actor.memberId)
     }
 
@@ -294,6 +316,10 @@ class BundleService(
         final.forEachIndexed { index, photo -> photo.position = index }
         if (removed.isNotEmpty() || selected.isNotEmpty()) {
             changed(bundle, key.toString(), BundleEventType.PHOTOS, photoChanges(bundle))
+            if (bundle.status == BundleStatus.DRAFT && selected.isNotEmpty()) {
+                notifications.draftActivity(actor.memberId, bundle, key.toString(), selected.size)
+            }
+            notifyReady(bundle, actor.memberId)
             recordActivity(bundle, actor.memberId)
         }
         remember(actor.memberId, bundle, operation, key, fingerprint)
@@ -358,12 +384,16 @@ class BundleService(
         if (blockers.isNotEmpty()) fail(ErrorCode.BUNDLE_PUBLISH_BLOCKED, mapOf("reasons" to blockers))
         val originalIds = photoRows(id).map { it.photoId ?: fail(ErrorCode.BUNDLE_PUBLISH_BLOCKED) }
         photoService.lockReadyPhotosForConnection(bunchId, originalIds)
+        val beforeCount = bundles.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
         bundle.status = BundleStatus.PUBLISHED
-        bundle.publishedAt = Instant.now()
+        bundle.publishedAt = clock.instant()
         leases.clear(id)
         changed(bundle, key.toString(), BundleEventType.PUBLISHED, content(bundle))
         remember(actor.memberId, bundle, operation, key, fingerprint)
         bundles.flush()
+        notifications.published(
+            bundle, actor.memberId, stagePolicy.stage(beforeCount + 1) > stagePolicy.stage(beforeCount)
+        )
         return snapshot(bundle, actor.memberId)
     }
 
@@ -382,7 +412,7 @@ class BundleService(
         bundles.findAllByBunchIdOrderByIdAsc(bunchId).filter { it.status == BundleStatus.DRAFT }.forEach { candidate ->
             val bundle = bundles.findLocked(candidate.id) ?: return@forEach
             if (bundle.createdBy == memberId) deleteInternal(bundle, UUID.randomUUID().toString())
-            else removeParticipation(bundle, memberId, UUID.randomUUID().toString())
+            else removeParticipation(bundle, memberId, UUID.randomUUID().toString(), memberId)
         }
     }
 
@@ -422,7 +452,7 @@ class BundleService(
         if (bundle.status != expected) fail(ErrorCode.BUNDLE_STATE_CONFLICT, mapOf("status" to bundle.status))
     }
 
-    private fun removeParticipation(bundle: Bundle, memberId: Long, requestId: String) {
+    private fun removeParticipation(bundle: Bundle, memberId: Long, requestId: String, actorId: Long) {
         val row = participants.findByBundleIdAndMemberId(bundle.id, memberId) ?: return
         participants.delete(row)
         comments.findByBundleIdAndMemberId(bundle.id, memberId)?.let(comments::delete)
@@ -435,6 +465,11 @@ class BundleService(
             BundleEventType.PARTICIPANTS,
             participantChanges(bundle) + ("removedCommentMemberIds" to listOf(memberId))
         )
+        notifications.participantRemoved(bundle, memberId, actorId)
+        if (participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id).size == 1) {
+            notifications.participantsInsufficient(bundle, actorId)
+        }
+        notifyReady(bundle, actorId)
     }
 
     private fun deleteInternal(bundle: Bundle, requestId: String) {
@@ -476,7 +511,7 @@ class BundleService(
 
     private fun changed(bundle: Bundle, requestId: String, type: BundleEventType, changes: Any?) {
         bundle.revision++
-        bundle.updatedAt = Instant.now()
+        bundle.updatedAt = clock.instant()
         // All fields in changes are immutable DTO values, captured before the transaction completes.
         events.publishEvent(BundleChangedEvent(bundle.bunchId, bundle.id, bundle.revision, requestId, type, changes))
     }
@@ -520,6 +555,14 @@ class BundleService(
             .filterNot { it.isAfter(today) }.groupingBy { it }.eachCount().entries
             .sortedWith(compareByDescending<Map.Entry<LocalDate, Int>> { it.value }.thenBy { it.key })
             .take(3).map { it.key }
+    }
+
+    private fun notifyReady(bundle: Bundle, actorId: Long) {
+        if (bundle.status == BundleStatus.DRAFT && bundle.publishReadyNotifiedAt == null &&
+            publishBlockers(bundle).isEmpty()) {
+            bundle.publishReadyNotifiedAt = clock.instant()
+            notifications.readyToPublish(bundle, actorId)
+        }
     }
 
     private fun publishBlockers(bundle: Bundle): List<String> {

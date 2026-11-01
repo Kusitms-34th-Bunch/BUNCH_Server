@@ -1,109 +1,118 @@
-# 알림·푸시 DB·전송 계약
+# 알림 inbox 저장 계약 — #28
 
-> #28 1차 상태 (2026-11-01): notifications 이관·가입 생산자 전환·목록/읽음/open과 알림 행의 활동 합산을 구현한다.
-> 전체 21종 생산자·참여별 독촉 실행·기기/개인 설정/APNs 구현 완료를 뜻하지 않는다.
-> 현재 연결 범위와 통합·출시 조건은 [1차 구현 경계](notification-foundation.md)를 따른다.
-> 타 도메인의 `bunch*.md` 참조는 제공된 고정 승인 사본 기준이며 이 브랜치에 복제하지 않는다.
+> #28은 앱 내 `notifications`와 실제 업무 변경의 원자적 연결을 다룬다.
+> APNs protocol, device registration, push preference, retry wire/schema는 이 문서의 범위가 아니며 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)이 소유한다.
 
-[알림 Spec](notification.md)·[알림 API](notification-api.md)의 미구현 목표 설계다.
-2026-10-31 번치 스키마에서 알림 소유 구조를 옮겼으며 테이블·컬럼·제약·전송 정책은 유지한다.
+[알림 Spec](notification.md)과 [알림 inbox API](notification-api.md)의 저장 기준이다.
+번치·번들 업무의 실제 잠금과 멱등성은 [번들 기능 계약](bundle.md)·[번들 API](bundle-api.md) 및 [역할·Stage 계약](bunch-role-stage.md)을 따른다.
 
-## 1. 소유 범위와 연계
+## 1. 트랜잭션 경계
 
-- notification은 앱 내 알림·푸시 작업·기기·개인 설정을 소유한다. 기존 가입 알림을 이관해 재사용한다.
-- bunch의 소속·역할·접근 불가 안내·삭제 트랜잭션은 번치 스키마 (`bunch-schema.md`; 고정 승인 사본)가 소유한다.
-  번치 업무에서 이 계약의 저장을 같은 트랜잭션으로 호출하며 새 범용 이벤트 계층은 만들지 않는다.
-- bigint PK는 identity, 시각은 timestamptz(UTC), enum은 varchar+CHECK다. nullable 표기 없는 필드는 NOT NULL이다.
-  적용된 Flyway 파일은 수정하지 않고 구현 시 최신 dev의 다음 번호를 쓴다. 별도 의존성·브로커를 추가하지 않는다.
-- 기존 회원→번치→bundle/Photo 순서와 같은 종류 ID 오름차순 잠금을 지킨다. 공개 전환은 대상 번치만 잠그고
-  상대 번치를 뒤늦게 잡지 않는 번치 잠금 규칙 (`bunch-schema.md#5-원자성잠금파일-정리`; 고정 승인 사본)을 따른다.
+- 실제 업무 변경을 적용한 서비스가 같은 DB 트랜잭션에서 수신자별 `notifications`를 직접 저장한다.
+- 업무 서비스가 이미 성공한 요청을 재생하면 저장된 업무 결과만 반환한다. notification writer를 다시 호출하거나 별도 이벤트 원장을 조회하지 않는다.
+- 기존 번치·번들 잠금을 먼저 잡고, 활동 합산 때 해당 수신자의 열린 notification 행을 잠근다. 새 행·읽음·합산·취소의 실패는 업무 변경과 함께 롤백한다.
+- 이 PR은 `push_jobs`, `push_devices`, `push_preferences` 테이블이나 임시 큐를 추가하지 않는다. 기기가 없는 사건은 앱 inbox만 남기며, 나중에 등록한 기기로 소급 전송하지 않는다.
 
-## 2. 알림·푸시 — 4개 테이블
+## 2. `notifications`
 
-업무 서비스가 **같은 트랜잭션에서 수신자별 notifications와 기기별 push_jobs를 직접 저장**한다.
-대상은 번치당 최대 8명이며 저장 실패는 업무와 함께 롤백한다. 중간 이벤트·수신 확인·활동 그룹 원장은 만들지 않는다.
+V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장한다. 30일 보관 범위의 기존 ID·`created_at`·identity sequence를 유지하며,
+`NEW_MEMBER`를 `MEMBER_JOINED`로 변환하고 이관 당시의 닉네임으로 title/body snapshot을 채운다. 과거 push나 이중 가입 알림은 만들지 않는다.
 
-### notifications
-
-기존 V3 `bunch_join_notifications`를 이 테이블로 이름 변경·확장해 재사용한다.
-기존 ID·발생 시각을 유지하고 NEW_MEMBER를 MEMBER_JOINED로 매핑한다. 남은 30일 범위의 행에
-문구·target·dedupe_key를 채운 뒤 기존 가입 전용 컬럼/제약을 제거하고 일반 알림 제약을 적용한다.
-과거 이름 snapshot은 없으므로 이관 시 표시 가능한 이름으로 채우고 이후에는 고정한다. 과거 푸시는 만들지 않는다.
-같은 기능 PR에서 가입 알림 저장 경로를 전환해 이중 저장을 없앤다.
-
-`id bigint PK`, `recipient_member_id` → members CASCADE, `bunch_id` → bunches CASCADE,
-`type`, `dedupe_key varchar(200)`, `title text`, `body text`, `target jsonb`,
-`activity_data jsonb nullable`(행위자 snapshot·사진 수), `group_until timestamptz nullable`,
-`created_at`, `read_at timestamptz nullable`.
-UNIQUE `(recipient_member_id,dedupe_key)`, 목록 INDEX `(recipient_member_id,bunch_id,created_at DESC,id DESC)`.
-30일 지난 행은 조회/집계에서 제외하고 주기 삭제한다. 최신 100개까지만 표시한다.
-
-일반 dedupe_key는 종류·업무 대상 ID·변경 회차다. 이미 적용된 업무의 재시도는 생성 코드를 다시 실행하지 않는다.
-활동은 같은 수신자·초안의 열려 있는 알림 행에 최초 알림부터 10분간 합산한다.
-기존 번치/초안·알림 행 잠금으로 보호하고 ID·제목·created_at은 유지하며 본문 갱신과 read_at=null을 적용한다.
-같은 알림의 미전송 push_jobs를 갱신하고 group_until 뒤 발송한다. worker는 알림을 재생성·합산하지 않는다.
-모두 읽음은 본인·현재 번치의 보관 알림을 한 UPDATE로 처리한다. 동시 활동과는 행 갱신 순서를 따른다.
-UPDATE에 포함되지 않은 새 삽입과 모두 읽음 뒤 병합된 활동은 안 읽음으로 남는다.
-이탈자의 해당 번치 알림은 제거한다. 내보내짐·번치 삭제는 앱 내 행 없이 안내·push_jobs만 쓴다.
-
-### push_jobs
-
-`id UUID PK`(apns-id), `device_id bigint nullable` → push_devices SET NULL,
-`recipient_member_id` → members CASCADE, `session_id UUID`, `bunch_id bigint`(FK 없음),
-`notification_id bigint nullable` → notifications SET NULL, `dedupe_key varchar(200)`, `type`, `payload jsonb`,
-`status` PENDING / SENT / FAILED / CANCELLED, `attempts integer DEFAULT 0 CHECK 0~5`,
-`available_at`, `expires_at`(발생+24시간), `sent_at timestamptz nullable`, `last_error_code varchar(80) nullable`, `created_at`.
-UNIQUE `(recipient_member_id,device_id,dedupe_key)`, 조회 INDEX `(status,available_at,id)`.
-
-삭제/내보내기 전 기기별 payload와 안내 target을 저장해 본체 삭제 뒤에도 전송한다.
-기기가 없으면 만들지 않으며 이후 등록으로 소급 발송하지 않는다. worker는 현재 자격·기기 귀속을 확인한다.
-14/15번은 당시 수신자에게 소속 없이도 허용한다. 재참여해 사라진 내보내짐 안내의 미전송 job은 같은 트랜잭션에서 취소한다.
-
-### push_devices
-
-`id bigint PK`, `installation_id UUID UNIQUE`, `member_id` → members CASCADE, `session_id UUID`,
-`environment` SANDBOX / PRODUCTION, `topic`, `token_ciphertext bytea`, `token_hash char(64)`,
-`authorization_status`, `registered_at`.
-UNIQUE `(environment,topic,token_hash)`, INDEX `(member_id,session_id)`.
-JDK 기능과 서버 비밀 키로 토큰을 암호화하고 원문을 응답·로그에 남기지 않는다.
-별도 키 버전·회전 프로토콜을 이 기능에 추가하지 않는다.
-같은 설치/토큰의 새 로그인은 귀속을 바꾸고 이전 세션의 미전송 job을 취소한다.
-로그아웃·탈퇴·해제는 기기 행과 토큰을 지운다. 별도 기기 버전 없이 member·session·hash·등록 시각으로 검사한다.
-오래된 APNs 응답으로 새 등록을 지우지 않도록 **시도 당시 hash·등록 시각과 같은 행만** 무효화한다.
-
-### push_preferences
-
-`member_id bigint PK` → members CASCADE, `enabled boolean DEFAULT true`, `types jsonb`, `updated_at`.
-types는 종류별 boolean override이며 행/키가 없으면 true다. PATCH로 받은 종류만 바꾸고 나머지는 유지한다.
-동시 PATCH도 받은 키만 DB에서 합쳐 저장해 다른 종류의 설정을 덮어쓰지 않는다.
-설정 버전·재시도 원장 없이 마지막 저장을 적용한다. OS 권한과 개인 설정은 별개이며 앱 내 알림은 유지한다.
-
-### 예약·최초 알림은 도메인 상태에 기록
-
-- bundles의 `ready_notified_at nullable`로 최초 발행 가능 알림 1회를 기록한다.
-- bundle_participants에 nullable `reminder24_notified_at`, `reminder72_notified_at`, `reminders_cancelled_at`을 둔다.
-  주기 작업이 참여+24/72시간·미작성·DRAFT를 조회하고 번들 잠금 아래 재검증한다.
-  알림/job과 완료 시각을 함께 커밋한다. 코멘트 작성은 남은 독촉을 취소하고 제외/삭제는 참여 행이 사라진다.
-  초안 참여에서 제외된 뒤 다시 추가되는 경우는 새 참여 행이다. 번치 재참여와 구분하며 별도 예약 테이블을 만들지 않는다.
-- 좋아요 최초 알림 여부는 해당 관계에 보관하고 취소는 비활성화로 처리해 최초 여부를 유지한다.
-  피드 기능 구현 때 추가하며 미구현 좋아요를 위한 공통 guard 테이블을 만들지 않는다.
-
-### 단일 주기 worker
-
-현재 단일 서버의 겹치지 않는 주기 실행 하나를 사용한다. 별도 분산 claim·lease를 만들지 않는다.
-DB 트랜잭션 밖에서 전송하며 직전에 세션·설정·OS 권한·소속/차단·기기 귀속을 검사한다.
-attempts를 먼저 증가시키고 성공은 SENT, 일시 실패는 15분 뒤 재시도(최대 5회·24시간),
-영구 실패·횟수 초과·만료는 FAILED, 자격 상실은 CANCELLED다. 종료 job은 30일 뒤 정리한다.
-프로세스 중단·응답 유실로 다시 전송될 수 있으며 최종 기기 표시 exactly-once는 보장하지 않는다.
-다중 서버 전환 때만 worker 중복 실행 방식을 검토한다.
-
-## 3. 검증
-
-| 검증 | 기준 |
+| 컬럼 | 계약 |
 | --- | --- |
-| migration/JPA | 기존 가입 알림 ID/시각·30일 데이터 이관, 소급 푸시 없음, 생산자 전환·이중 저장 없음, 적용/재실행/validate |
-| 알림 | 업무 재시도 중복 없음, 활동 병합·모두 읽음 두 순서, 30일/100개, 최초/독촉 완료 사실 보존 |
-| 푸시 | 단일 worker 재시작·횟수/만료, 이전 기기 귀속/토큰 응답 격리, 삭제 후 전송 대기 보존 |
-| 업무 연계 | 알림/전송 대기 저장 실패 시 업무와 전체 롤백, 삭제 후 독립 job 보존, 재참여 시 안내 job 취소 |
+| `id bigint` | identity PK |
+| `recipient_member_id bigint` | `members` FK, CASCADE; 현재 수신 회원 |
+| `bunch_id bigint` | `bunches` FK, CASCADE |
+| `type varchar(40)` | 아래 21개 enum; DB CHECK 유지 |
+| `dedupe_key varchar(200)` | 수신자별 업무 회차 식별자 |
+| `title text`, `body text` | 발생 당시 문구 snapshot |
+| `target jsonb` | `kind,bunchId,bundleId?,noticeId?,targetBunchId?` |
+| `activity_data jsonb` | nullable; 행위자 snapshot·사진 수·첫 행위자 ID |
+| `group_until timestamptz` | nullable; `DRAFT_ACTIVITY`의 고정 10분 종료 시각 |
+| `created_at timestamptz` | 발생 시각, UTC |
+| `read_at timestamptz` | nullable; 회원별 읽음 시각 |
 
-실제 PostgreSQL·Redis·모의 APNs와 전체 build를 검증한다. 실제 iOS 권한·다중 기기·수신/복귀는 별도 수동 증거다.
+`UNIQUE (recipient_member_id, dedupe_key)`를 둔다. 목록 인덱스는
+`(recipient_member_id, bunch_id, created_at DESC, id DESC)`이며 SQL에서 최신 100개를 제한한 뒤 page를 적용한다.
+30일 cutoff는 조회·미확인 집계·open·정리에서 동일하게 사용한다.
+
+### type과 target 호환성
+
+아래 21개 값은 wire/DB 호환성을 위해 유지한다. #28이 실제 행을 생성하는 값은 `1~7`, `9`, `10`뿐이다.
+`8`, `11~21`은 producer·fake routing 없이 enum/check/target 저장 호환성만 유지한다. `MEMBER_REMOVED`와 `BUNCH_DELETED`는 앱 inbox 행을 만들지 않는 push-only 호환 값이다.
+
+| 번호 | type | 번호 | type | 번호 | type |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `DRAFT_PARTICIPANT_ADDED` | 8 | `CANDIDATE_CREATED` | 15 | `BUNCH_DELETED` |
+| 2 | `DRAFT_ACTIVITY` | 9 | `CHARACTER_GROWN` | 16 | `BUNCH_VISIBILITY_CHANGED` |
+| 3 | `COMMENT_REMINDER` | 10 | `MEMBER_JOINED` | 17 | `BUNCH_FOLLOWED` |
+| 4 | `DRAFT_PARTICIPANT_REMOVED` | 11 | `CO_OWNER_GRANTED` | 18 | `FOLLOW_REQUESTED` |
+| 5 | `DRAFT_READY_TO_PUBLISH` | 12 | `CO_OWNER_REVOKED` | 19 | `FOLLOW_REQUEST_APPROVED` |
+| 6 | `DRAFT_PARTICIPANTS_INSUFFICIENT` | 13 | `OWNER_TRANSFERRED` | 20 | `SOCIAL_COMMENT_CREATED` |
+| 7 | `BUNDLE_PUBLISHED` | 14 | `MEMBER_REMOVED` | 21 | `BUNDLE_LIKED` |
+
+저장 호환성을 유지하는 target kind는 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_LIST`,
+`BUNDLE`, `BUNDLE_COMMENTS`, `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다.
+외부 번치 관계와 접근 안내의 producer는 이 PR에서 만들지 않으며, 저장된 target JSON을 접근 증거로 사용하지 않는다.
+
+## 3. `DRAFT_ACTIVITY` 합산 저장
+
+실제 사진 추가 성공 뒤 `BundleService`가 한 트랜잭션에서 한 번 호출한다. `mutationKey`는 기존 BundleService 성공 기록의 실제 요청 식별자이며,
+`DRAFT_ACTIVITY:{bundleId}:{mutationKey}`가 dedupe key가 된다. 원래 요청의 replay는 BundleService가 반환하고 activity를 새로 만들지 않는다.
+
+같은 수신자·초안의 열린 행을 잠근 뒤 다음 규칙을 적용한다.
+
+- 첫 행은 `group_until = created_at + 10 minutes`로 저장한다. 창은 연장하지 않는다.
+- `now < group_until`인 경우에만 기존 행의 `body`, `activity_data`, `read_at = null`을 갱신한다. `id`, `title`, `created_at`은 유지한다.
+- `activity_data`에는 행위자별 닉네임 snapshot, 누적 `photoCount`, `firstActorId`를 저장한다. JSONB object key 순서에 의존하지 않는다.
+- 창 종료 후 활동은 새 행이다. worker가 notification을 재생성·재합산하지 않으며 별도 합산 원장을 두지 않는다.
+
+## 4. V13 bundle/participant 상태
+
+#55의 역할 기반은 V11 역할·버전 migration을 제공한다. 기존 V12 `notifications` migration은 수정하지 않고,
+이 PR의 새 V13 migration만 아래 상태를 추가한다. V11→V12→V13 순서를 지키며 이미 적용된 V11/V12 파일을 고치지 않는다.
+
+| 테이블 | 컬럼 | 의미 |
+| --- | --- | --- |
+| `bundles` | `ready_notified_at timestamptz nullable` | 해당 초안의 최초 발행 가능 알림을 기록하는 사실. 한 번만 설정한다. |
+| `bundle_participants` | `reminder24_notified_at timestamptz nullable` | 참여 후 24시간 리마인드 저장 사실 |
+| `bundle_participants` | `reminder72_notified_at timestamptz nullable` | 참여 후 72시간 리마인드 저장 사실 |
+| `bundle_participants` | `reminders_cancelled_at timestamptz nullable` | 명시적으로 취소한 리마인드 상태. 현재는 코멘트 작성 시 기록하며, 참여 행 삭제·발행/삭제 상태·번치 이탈은 worker eligibility로 막는다. |
+
+V13은 이미 내용이 있는 `bundle_comments` 참여자의 `reminders_cancelled_at`을 채워 기존 완료 상태를 보존하고,
+빈 코멘트나 코멘트가 없는 참여자에는 cancellation timestamp를 쓰지 않는다. 취소되지 않은 참여 행을 위한 due 조회 인덱스를 추가하며,
+별도 예약 테이블·큐·알림 행의 reminder 상태는 만들지 않는다. DB column은 `reminder24_notified_at`/`reminder72_notified_at`,
+도메인 property는 `reminder24SentAt`/`reminder72SentAt`이다.
+
+### reminder worker 원자성
+
+- worker는 `bundle_participants.joined_at` 기준으로 24/72시간 후보를 조회하고, 현재 `DRAFT`, 활성 계정·활성 번치 Membership, 미작성 코멘트, 취소되지 않은 상태를 확인한다.
+- 전송 시각이 늦어도 기존 번치→bundle 순서로 잠근 뒤 참여 행을 다시 읽어 **실행 직전에** 같은 조건을 다시 검사한다. 조건을 잃었으면 `COMMENT_REMINDER`를 저장하지 않는다.
+- 유효한 24/72 시점에는 해당 `*_notified_at`과 notification 행을 같은 트랜잭션에서 기록한다. 각 시점은 참여 회차별 최대 한 번이다.
+- 코멘트 작성은 `reminders_cancelled_at`을 같은 업무 트랜잭션에서 기록한다. 참여 행 삭제는 상태를 함께 제거하고,
+  발행·초안 삭제·번치 이탈은 현재 worker eligibility에서 제외한다. 모든 참여 행에 cancellation timestamp를 물리적으로 기록하는 계약은 아니다.
+
+### 최초 ready와 Stage
+
+`publishBlockers`가 비어지는 실제 전이에서 bundle lock 아래 `ready_notified_at`이 null인지 확인하고 type 5와 함께 설정한다.
+조건이 깨졌다가 다시 충족되어도 두 번째 type 5를 만들지 않는다.
+
+발행은 type 7을 저장한다. 발행 전후 `BundleStagePolicy`의 실제 Stage가 상승한 경우에만 type 9를 저장하며,
+삭제에 따른 하락·기준 설정 변경·기존 데이터 이관은 type 9를 만들지 않는다.
+
+## 5. 보관·읽음·#48 출시 게이트
+
+Retention은 `created_at <= clock.instant() - 30 days`인 행을 주기 삭제한다. 정리 전에도 같은 cutoff로 목록·unread·open을 제한한다.
+`read-all`은 해당 cutoff 안의 미확인 행을 한 UPDATE로 처리하고, 동시 활동 합산은 DB 행 잠금·갱신 순서를 따른다.
+
+기기별 job이 필요한 운영 연결은 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)에서 소유한다. #28 producer의 출시 조건은 다음과 같다.
+
+- 실제 업무 변경·`notifications`·현재 바인딩된 모든 기기의 `push_jobs`를 한 DB 트랜잭션에서 원자적으로 저장한다.
+- 활동 합산 시 아직 전송되지 않은 현재 기기 job의 payload도 같은 트랜잭션에서 갱신한다. notification만 보고 job을 재생성하지 않는다.
+- 당시 기기가 없으면 job을 만들지 않으며, 나중에 등록한 기기로 과거 notification을 소급 전송하지 않는다.
+
+기기 등록·개인 설정·APNs payload/인증·retry 횟수와 오류별 wire 계약은 #48 범위로 남긴다. 앱 inbox의 동작과 실제 iOS 수신·표시는 별도 검증이다.
+
+주기 실행은 기존 `SchedulingConfig`를 사용한다. 기본 운영 설정은 활성화되어 있고,
+`async-job.worker.enabled=false`로 전역 스케줄링을 끄면 독촉·보관 정리도 중지된다.
+자동 테스트는 이 설정으로 주기를 끄고 `runOnce`/정리 메서드를 직접 실행한다.

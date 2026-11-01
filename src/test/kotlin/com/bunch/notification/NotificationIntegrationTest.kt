@@ -2,6 +2,7 @@ package com.bunch.notification
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bundle.domain.Bundle
+import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
@@ -39,6 +40,9 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
     private lateinit var service: NotificationService
     @Autowired
     private lateinit var writer: NotificationWriter
+
+    @Autowired
+    private lateinit var access: BundleAccessService
     @Autowired
     private lateinit var retention: NotificationRetention
     @Autowired
@@ -207,14 +211,14 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
         // Start unread so PostgreSQL's UPDATE predicate includes the locked row.
         activity(owner, bunch, bundle, 1)
         inDatabaseOrder(
-            first = { writer.draftActivity(owner, bunch, bundle, UUID.randomUUID().toString(), 1) },
+            first = { writer.draftActivity(owner, access.lock(owner, bunch, bundle), UUID.randomUUID().toString(), 1) },
             waiting = { service.readAll(other, bunch) }
         )
         assertThat(service.list(other, bunch, 0, 20).unreadCount).isZero()
         activity(owner, bunch, bundle, 1)
         inDatabaseOrder(
             first = { service.readAll(other, bunch) },
-            waiting = { writer.draftActivity(owner, bunch, bundle, UUID.randomUUID().toString(), 1) }
+            waiting = { writer.draftActivity(owner, access.lock(owner, bunch, bundle), UUID.randomUUID().toString(), 1) }
         )
         assertThat(service.list(other, bunch, 0, 20).unreadCount).isEqualTo(1)
     }
@@ -223,13 +227,13 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
     fun `business rollback discards activity insert and merge`() {
         val (owner, other, bunch, bundle) = draftFixture()
         transaction.executeWithoutResult { status ->
-            writer.draftActivity(owner, bunch, bundle, "first", 2)
+            writer.draftActivity(owner, access.lock(owner, bunch, bundle), "first", 2)
             status.setRollbackOnly()
         }
         assertThat(activities(other, bunch)).isEmpty()
         activity(owner, bunch, bundle, 1)
         transaction.executeWithoutResult { status ->
-            writer.draftActivity(owner, bunch, bundle, "second", 3)
+            writer.draftActivity(owner, access.lock(owner, bunch, bundle), "second", 3)
             status.setRollbackOnly()
         }
         assertThat(activities(other, bunch).single().activityData!!.photoCount).isEqualTo(1)
@@ -295,7 +299,7 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
 
     private fun activity(actor: Long, bunch: Long, bundle: Long, count: Int) {
         transaction.executeWithoutResult {
-            writer.draftActivity(actor, bunch, bundle, UUID.randomUUID().toString(), count)
+            writer.draftActivity(actor, access.lock(actor, bunch, bundle), UUID.randomUUID().toString(), count)
         }
     }
 
