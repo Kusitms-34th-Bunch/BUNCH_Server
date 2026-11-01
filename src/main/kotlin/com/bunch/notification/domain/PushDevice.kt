@@ -49,7 +49,7 @@ class PushDevice(
     @Column(name = "token_ciphertext", nullable = false, columnDefinition = "bytea")
     var tokenCiphertext: ByteArray,
 
-    @Column(name = "token_hash", nullable = false, length = 64)
+    @Column(name = "token_hash", nullable = false, columnDefinition = "char(64)")
     var tokenHash: String,
 
     @Enumerated(EnumType.STRING)

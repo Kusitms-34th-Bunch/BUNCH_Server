@@ -32,7 +32,6 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
             SET status = 'CANCELLED', last_error_code = :reason
             WHERE status = 'PENDING'
               AND recipient_member_id = :memberId
-              AND bunch_id = :bunchId
               AND type = 'COMMENT_REMINDER'
               AND payload -> 'target' ->> 'bundleId' = CAST(:bundleId AS text)
         """,
