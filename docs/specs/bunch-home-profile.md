@@ -1,8 +1,8 @@
 # 홈·전환·프로필 일괄 저장 계약 — #52
 
 이 문서는 #52가 실제로 제공하는 경계를 짧게 기록한다. 제품 정책의 원문과 전체 기능 색인은
-[번치 제품 Spec](bunch.md), 공개 API의 공통 규칙은 [번치 API](bunch-api.md), 잠금·스키마는
-[번치 DB·트랜잭션 계약](bunch-schema.md)을 기준으로 한다. 알림 문구·대상·중복 기준은
+[번치 색인](bunch.md), 인증·공통 응답은 [가입·온보딩 API](login-onboarding-api.md),
+역할·버전은 [역할 계약](bunch-role-stage.md)을 따른다. 홈·프로필 API와 잠금·저장 계약은 이 문서에서 함께 관리한다. 알림 문구·대상·중복 기준은
 [알림 Spec](notification.md)과 [알림 API](notification-api.md)를 따른다.
 
 ## 제공 API
