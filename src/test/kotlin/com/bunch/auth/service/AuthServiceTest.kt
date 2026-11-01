@@ -10,6 +10,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.*
 import com.bunch.member.service.SocialMemberRegistry
+import com.bunch.notification.service.PushDeviceService
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
@@ -30,7 +31,8 @@ class AuthServiceTest {
     private val replay = object : IdTokenReplayRepository {
         override fun reserve(provider: AuthProvider, idToken: String, acceptedUntil: Instant) = consumed.add("$provider:$idToken")
     }
-    private val service = AuthService(tokens, refresh, replay, registry, members, verifierList)
+    private val pushDevices = mock(PushDeviceService::class.java)
+    private val service = AuthService(tokens, refresh, replay, registry, members, verifierList, pushDevices)
 
     @Test fun `all providers create independent sessions and preserve OIDC replay protection`() {
         AuthProvider.entries.forEachIndexed { index, provider ->
@@ -69,6 +71,7 @@ class AuthServiceTest {
     }
 
     @Test fun `logout removes only current session and repeated logout is unauthorized`() {
+        `when`(members.findLockedById(1)).thenReturn(Member(id = 1))
         val first = tokens.generateToken(1, "ROLE_USER")
         val second = tokens.generateToken(1, "ROLE_USER")
         val sid = tokens.getSessionId(first.accessToken)
@@ -76,6 +79,7 @@ class AuthServiceTest {
         refresh.save(sid, 1, first.refreshToken, 100)
         refresh.save(otherSid, 1, second.refreshToken, 100)
         service.logout("1", sid)
+        verify(pushDevices).logoutSession(1, java.util.UUID.fromString(sid))
         assertFalse(refresh.isActive(sid, 1))
         assertTrue(refresh.isActive(otherSid, 1))
         assertUnauthorized { service.logout("1", sid) }
@@ -85,6 +89,7 @@ class AuthServiceTest {
     }
 
     @Test fun `logout racing with refresh cannot restore a deleted session`() {
+        `when`(members.findLockedById(1)).thenReturn(Member(id = 1))
         val pair = tokens.generateToken(1, "ROLE_USER")
         val sid = tokens.getSessionId(pair.refreshToken)
         refresh.save(sid, 1, pair.refreshToken, 100)

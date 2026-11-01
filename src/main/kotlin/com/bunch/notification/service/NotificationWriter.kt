@@ -5,6 +5,9 @@ import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.bunch.domain.Bunch
+import com.bunch.bunch.domain.BunchFollow
+import com.bunch.bunch.domain.BunchFollowStatus
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.notification.domain.Notification
@@ -23,15 +26,73 @@ import java.time.Instant
 @Service
 class NotificationWriter(
     private val notifications: NotificationRepository,
+    private val pushJobs: PushJobWriter,
     private val memberships: BunchMembershipRepository,
     private val participants: BundleParticipantRepository,
     private val clock: Clock
 ) {
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun followCreated(follower: Bunch, target: Bunch, follow: BunchFollow, actorId: Long) {
+        val approved = follow.status == BunchFollowStatus.APPROVED
+        socialNotification(
+            recipientBunchId = target.id,
+            otherBunch = follower,
+            follow = follow,
+            actorId = actorId,
+            type = if (approved) NotificationType.BUNCH_FOLLOWED else NotificationType.FOLLOW_REQUESTED,
+            title = if (approved) "${follower.name} 번치가 우리 번치를 팔로우했어요"
+                else "${follower.name} 번치가 팔로우를 요청했어요",
+            body = if (approved) "'${follower.name}' 번치의 기록도 구경해 보세요."
+                else "요청을 확인하고 승인해 보세요."
+        )
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun followApproved(follower: Bunch, target: Bunch, follow: BunchFollow, actorId: Long) {
+        followCreated(follower, target, follow, actorId)
+        socialNotification(
+            recipientBunchId = follower.id,
+            otherBunch = target,
+            follow = follow,
+            actorId = actorId,
+            type = NotificationType.FOLLOW_REQUEST_APPROVED,
+            title = "${target.name} 번치가 팔로우 요청을 승인했어요",
+            body = "이제 '${target.name}' 번치의 새로운 기록을 만나볼 수 있어요."
+        )
+    }
+
+    private fun socialNotification(
+        recipientBunchId: Long,
+        otherBunch: Bunch,
+        follow: BunchFollow,
+        actorId: Long,
+        type: NotificationType,
+        title: String,
+        body: String
+    ) {
+        saveNotifications(memberships.findActiveMembers(recipientBunchId).filter { it.member.id != actorId }.map {
+            Notification(
+                recipientMemberId = it.member.id,
+                bunchId = recipientBunchId,
+                type = type,
+                dedupeKey = "$type:${follow.id}",
+                title = title,
+                body = body,
+                target = NotificationTarget(
+                    NotificationTargetKind.OTHER_BUNCH_PROFILE,
+                    recipientBunchId,
+                    targetBunchId = otherBunch.id
+                ),
+                createdAt = clock.instant()
+            )
+        })
+    }
+
     // Call only after a real membership insertion, under the producer's member/bunch locks.
     @Transactional(propagation = Propagation.MANDATORY)
     fun memberJoined(bunchId: Long, membershipId: Long, actorId: Long, nickname: String, now: Instant) {
         val recipients = memberships.findActiveMembers(bunchId).filter { it.member.id != actorId }
-        notifications.saveAll(recipients.map { recipient ->
+        saveNotifications(recipients.map { recipient ->
             Notification(
                 recipientMemberId = recipient.member.id,
                 bunchId = bunchId,
@@ -65,7 +126,7 @@ class NotificationWriter(
             val current = notifications.openActivity(recipient.member.id, bunchId, bundleId, now)
             if (current == null) {
                 val activity = NotificationActivity(mapOf(actorId to actor.nickname!!), photoCount)
-                notifications.save(
+                saveNotifications(listOf(
                     Notification(
                         recipientMemberId = recipient.member.id,
                         bunchId = bunchId,
@@ -78,12 +139,13 @@ class NotificationWriter(
                         groupUntil = now.plus(Duration.ofMinutes(10)),
                         createdAt = now
                     )
-                )
+                ))
             } else {
                 val activity = requireNotNull(current.activityData).added(actorId, actor.nickname!!, photoCount)
                 current.activityData = activity
                 current.body = activity.body()
                 current.readAt = null
+                pushJobs.refreshMergedActivity(current)
             }
         }
     }
@@ -135,7 +197,7 @@ class NotificationWriter(
             " 번들이 완성됐어요", "함께한 순간들이 하나의 소중한 기록으로 남았어요.", NotificationTargetKind.BUNDLE
         )
         if (grew) {
-            notifications.saveAll(recipients.filter { it != actorId }.map {
+            saveNotifications(recipients.filter { it != actorId }.map {
                 Notification(
                     recipientMemberId = it,
                     bunchId = bundle.bunchId,
@@ -159,6 +221,11 @@ class NotificationWriter(
         )
     }
 
+    private fun saveNotifications(rows: List<Notification>) {
+        val saved = notifications.saveAll(rows)
+        pushJobs.enqueue(saved, clock.instant())
+    }
+
     private fun bundleNotification(
         bundle: Bundle,
         type: NotificationType,
@@ -171,7 +238,7 @@ class NotificationWriter(
         now: Instant = clock.instant()
     ) {
         val current = memberships.findActiveMembers(bundle.bunchId).map { it.member.id }.toSet()
-        notifications.saveAll(recipients.distinct().filter { it != actorId && it in current }.sorted().map {
+        saveNotifications(recipients.distinct().filter { it != actorId && it in current }.sorted().map {
             Notification(
                 recipientMemberId = it,
                 bunchId = bundle.bunchId,
