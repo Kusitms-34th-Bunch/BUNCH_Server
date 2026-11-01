@@ -31,6 +31,7 @@ enum class ErrorCode(
     MEMBERSHIP_LIMIT_EXCEEDED("BUNCH_003", "error.membership_limit_exceeded", 409),
     BUNCH_PROFILE_UNAVAILABLE("BUNCH_009", "error.bunch_profile_unavailable", 404),
     CURRENT_BUNCH_REQUIRED("BUNCH_010", "error.current_bunch_required", 409),
+    BUNCH_MEMBERSHIP_VERSION_CONFLICT("BUNCH_005", "error.bunch_membership_version_conflict", 409),
     INVALID_INVITATION("INVITE_001", "error.invalid_invitation", 404),
     IDEMPOTENCY_CONFLICT("REQUEST_001", "error.idempotency_conflict", 409),
     BUNDLE_LIMIT_EXCEEDED("BUNDLE_001", "error.bundle_limit_exceeded", 409),
