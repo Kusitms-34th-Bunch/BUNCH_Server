@@ -111,6 +111,24 @@ class BunchAccessNoticeService(
         fail(ErrorCode.FORBIDDEN)
     }
 
+    /** Preserves a missing-bunch 404 while still surfacing the caller's own notice. */
+    @Transactional(readOnly = true)
+    fun requireNoticeIfPresent(memberId: Long, bunchId: Long) {
+        requireCompleted(memberId)
+        if (hasActiveMembership(memberId, bunchId)) return
+        val notice = notices.findActiveByRecipientMemberId(memberId, clock.instant())
+            .firstOrNull { it.bunchId == bunchId }
+        if (notice != null) {
+            fail(
+                ErrorCode.BUNCH_ACCESS_UNAVAILABLE,
+                mapOf(
+                    "noticeId" to notice.id,
+                    "reason" to notice.reason.name
+                )
+            )
+        }
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     fun removeForRejoin(memberId: Long, bunchId: Long): List<Long> {
         val existing = notices.findAllByRecipientMemberIdAndBunchId(memberId, bunchId)

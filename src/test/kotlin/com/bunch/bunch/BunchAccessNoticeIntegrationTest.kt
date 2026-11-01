@@ -211,6 +211,12 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
         assertThat(thrown.detail).isEqualTo(
             mapOf("noticeId" to noticeId, "reason" to BunchAccessNoticeReason.REMOVED.name)
         )
+
+        val memberListThrown = catchThrowable { bunches.members(removed, bunchResponse.id) }
+        assertThat(memberListThrown).isInstanceOf(BusinessException::class.java)
+        assertThat((memberListThrown as BusinessException).errorCode)
+            .isEqualTo(ErrorCode.BUNCH_ACCESS_UNAVAILABLE)
+        assertThat(memberListThrown.detail).isEqualTo(thrown.detail)
     }
 
     private fun recordRemoval(

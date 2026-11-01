@@ -102,7 +102,10 @@ class BunchService(
     // A read-only check: the write paths below lock the bunch, but listing members changes nothing.
     @Transactional(readOnly = true)
     fun members(userId: Long, bunchId: Long): List<BunchMemberResponse> {
-        if (!bunches.existsById(bunchId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (!bunches.existsById(bunchId)) {
+            accessNotices.requireNoticeIfPresent(userId, bunchId)
+            fail(ErrorCode.RESOURCE_NOT_FOUND)
+        }
         accessNotices.requireMemberOrAccessNotice(userId, bunchId)
         return memberships.findActiveMembers(bunchId).map(BunchMemberResponse::from)
     }
