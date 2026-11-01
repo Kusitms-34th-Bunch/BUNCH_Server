@@ -24,6 +24,7 @@ import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.notification.service.PushJobWriter
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
@@ -40,6 +41,7 @@ class BunchMembershipManagementService(
     private val actionRequests: BunchActionRequestRepository,
     private val members: MemberRepository,
     private val notifications: NotificationRepository,
+    private val pushJobs: PushJobWriter,
     private val clock: Clock
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -309,7 +311,7 @@ class BunchMembershipManagementService(
             )
             else -> fail(ErrorCode.INTERNAL_ERROR)
         }
-        notifications.saveAndFlush(
+        val saved = notifications.saveAndFlush(
             Notification(
                 recipientMemberId = recipient.member.id,
                 bunchId = bunch.id,
@@ -321,6 +323,7 @@ class BunchMembershipManagementService(
                 createdAt = now
             )
         )
+        pushJobs.enqueue(listOf(saved), now)
     }
 
     private fun mutationResult(bunch: Bunch, changedMembershipIds: List<Long>) = MembershipMutationResult(
