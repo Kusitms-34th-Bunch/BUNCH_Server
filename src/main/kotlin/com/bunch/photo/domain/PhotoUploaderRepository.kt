@@ -40,4 +40,12 @@ interface PhotoUploaderRepository : JpaRepository<PhotoUploader, Long> {
     fun findAllByPhotoIdInOrderByPhotoIdAndIdAsc(
         @Param("photoIds") photoIds: Collection<Long>
     ): List<PhotoUploader>
+
+    // IDs only, in the order they uploaded: the list shows the uploader badges without loading any member.
+    @Query(
+        "select uploader.photo.id as photoId, uploader.member.id as memberId from PhotoUploader uploader " +
+            "where uploader.photo.id in :photoIds " +
+            "order by uploader.photo.id asc, uploader.id asc"
+    )
+    fun findUploaderIdsByPhotoIdIn(@Param("photoIds") photoIds: Collection<Long>): List<PhotoUploaderIds>
 }
