@@ -159,7 +159,7 @@ class BunchMembershipExitService(
             type = NotificationType.MEMBER_REMOVED,
             dedupeKey = "MEMBER_REMOVED:${target.id}",
             title = "${bunch.name} 번치에서 내보내졌어요",
-            body = "접근 안내를 확인해 주세요.",
+            body = "번치 멤버 목록에서 제외되어 더 이상 번치에 참여할 수 없어요.",
             target = NotificationTarget(
                 kind = NotificationTargetKind.ACCESS_NOTICE,
                 bunchId = bunch.id,

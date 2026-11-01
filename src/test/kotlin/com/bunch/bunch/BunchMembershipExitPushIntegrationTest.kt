@@ -116,6 +116,8 @@ class BunchMembershipExitPushIntegrationTest : BunchIntegrationSupport() {
         assertThat(removalJob.notificationId).isNull()
         assertThat(removalJob.payload.target["kind"]).isEqualTo("ACCESS_NOTICE")
         assertThat((removalJob.payload.target["noticeId"] as Number).toLong()).isEqualTo(notice.id)
+        assertThat(removalJob.payload.aps.alert.body)
+            .isEqualTo("번치 멤버 목록에서 제외되어 더 이상 번치에 참여할 수 없어요.")
         assertThat(notifications.findAll()).noneMatch { it.type == NotificationType.MEMBER_REMOVED }
         assertThat(jobs.findById(reminder.id).orElseThrow().status).isEqualTo(PushJobStatus.CANCELLED)
         assertThat(jobs.findById(reminder.id).orElseThrow().lastErrorCode)

@@ -63,7 +63,8 @@ transaction에서 수신 기기별 type 13 job을 만든다. 실행자에게는 
 내보내기는 app `Notification` row를 만들지 않고 `AccessNotice`를 먼저 기록한 뒤
 `PushJobWriter.enqueueDetached`로 대상 회원의 현재 허용 기기에만 type 14 detached job을
 만든다. job의 `notification_id`는 null이고 payload target은 `ACCESS_NOTICE`와 현재
-notice ID를 담으며, 번치 본체 FK를 요구하지 않는다.
+notice ID를 담으며, body는 승인 원문인 `번치 멤버 목록에서 제외되어 더 이상 번치에
+참여할 수 없어요.`를 그대로 사용한다. 번치 본체 FK를 요구하지 않는다.
 
 나가기·내보내기는 `cancelCommentRemindersForBunchLeave`를 같은 transaction에서 호출한다.
 재참여는 새 Membership 저장 후 `cancelPendingRemovalNoticeForRejoin`과
