@@ -3,13 +3,13 @@ package com.bunch.bundle.service
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.bunch.member.domain.MemberRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -17,14 +17,13 @@ import org.springframework.transaction.annotation.Transactional
 class BundleAccessService(
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
-    private val members: MemberRepository,
+    private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
     private val participants: BundleParticipantRepository
 ) {
     @Transactional(readOnly = true)
     fun requireMember(userId: Long, bunchId: Long) {
-        members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
-        if (memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) == null) fail(ErrorCode.FORBIDDEN)
+        accessNotices.requireMemberOrAccessNotice(userId, bunchId)
     }
 
     @Transactional(readOnly = true)
@@ -45,8 +44,8 @@ class BundleAccessService(
 
     @Transactional
     fun lockBunch(userId: Long, bunchId: Long) {
-        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         requireMember(userId, bunchId)
+        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
     }
 
     fun isOwner(userId: Long, bunchId: Long): Boolean =

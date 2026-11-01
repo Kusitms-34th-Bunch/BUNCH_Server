@@ -2,6 +2,7 @@ package com.bunch.bunch
 
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.BunchMembershipRepository
+import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
@@ -36,6 +37,7 @@ import javax.imageio.ImageIO
 class BunchImageIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var bunchRepository: BunchRepository
     @Autowired private lateinit var membershipRepository: BunchMembershipRepository
+    @Autowired private lateinit var accessNotices: BunchAccessNoticeService
     @Autowired private lateinit var assetRepository: ImageAssetRepository
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
     private lateinit var server: HttpServer
@@ -75,6 +77,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
             bunchRepository,
             membershipRepository,
             members,
+            accessNotices,
             storage,
             ImageAssetService(assetRepository, storage, transactionManager),
             transactionManager
