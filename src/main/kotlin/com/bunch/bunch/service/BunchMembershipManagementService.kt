@@ -24,6 +24,7 @@ import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.notification.service.PushJobWriter
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
@@ -40,10 +41,12 @@ class BunchMembershipManagementService(
     private val actionRequests: BunchActionRequestRepository,
     private val members: MemberRepository,
     private val notifications: NotificationRepository,
+    private val pushJobs: PushJobWriter,
     private val clock: Clock
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun memberships(userId: Long, bunchId: Long): MembershipsResponse {
+        validatePositiveId(bunchId)
         requireCompleted(userId)
         val bunch = bunches.findById(bunchId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
         val current = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)
@@ -76,6 +79,9 @@ class BunchMembershipManagementService(
         targetMembershipId: Long,
         request: ChangeMembershipRoleRequest
     ): MembershipMutationResult {
+        validatePositiveId(bunchId)
+        validatePositiveId(targetMembershipId)
+        validatePositiveId(request.actorMembershipId)
         val bunch = lockContext(userId, bunchId)
         validateVersionInput(request.expectedMembershipVersion)
         val actor = requireActor(bunch, userId, request.actorMembershipId)
@@ -127,26 +133,40 @@ class BunchMembershipManagementService(
         requestKey: UUID,
         request: OwnerTransferRequest
     ): MembershipMutationResult {
-        val bunch = lockContext(userId, bunchId)
+        validatePositiveId(bunchId)
+        validatePositiveId(request.actorMembershipId)
+        validatePositiveId(request.targetMembershipId)
         validateVersionInput(request.expectedMembershipVersion)
+        requireCompleted(userId)
         val now = clock.instant()
+        actionRequests.deleteExpiredByBunchId(bunchId, now)
+        actionRequests.flush()
         val fingerprint = fingerprint(
             request.actorMembershipId,
             request.expectedMembershipVersion,
             request.targetMembershipId
         )
-        actionRequests.findByMemberIdAndBunchIdAndOperationAndRequestKey(
+        actionRequests.findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(
             memberId = userId,
             bunchId = bunchId,
             operation = BunchActionOperation.OWNER_TRANSFER,
-            requestKey = requestKey
+            requestKey = requestKey,
+            now = now
         )?.let { previous ->
-            if (now.isBefore(previous.expiresAt)) {
-                if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-                return mutationResultFrom(previous.result)
-            }
-            actionRequests.delete(previous)
-            actionRequests.flush()
+            if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+            return mutationResultFrom(previous.result)
+        }
+
+        val bunch = lockContext(userId, bunchId)
+        actionRequests.findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(
+            memberId = userId,
+            bunchId = bunchId,
+            operation = BunchActionOperation.OWNER_TRANSFER,
+            requestKey = requestKey,
+            now = now
+        )?.let { previous ->
+            if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+            return mutationResultFrom(previous.result)
         }
 
         val actor = requireActor(bunch, userId, request.actorMembershipId)
@@ -260,6 +280,10 @@ class BunchMembershipManagementService(
         if (expectedVersion < 0) fail(ErrorCode.INVALID_INPUT)
     }
 
+    private fun validatePositiveId(id: Long) {
+        if (id <= 0) fail(ErrorCode.INVALID_INPUT)
+    }
+
     private fun writeRoleNotification(
         bunch: Bunch,
         recipient: BunchMembership,
@@ -287,7 +311,7 @@ class BunchMembershipManagementService(
             )
             else -> fail(ErrorCode.INTERNAL_ERROR)
         }
-        notifications.saveAndFlush(
+        val saved = notifications.saveAndFlush(
             Notification(
                 recipientMemberId = recipient.member.id,
                 bunchId = bunch.id,
@@ -299,6 +323,7 @@ class BunchMembershipManagementService(
                 createdAt = now
             )
         )
+        pushJobs.enqueue(listOf(saved), now)
     }
 
     private fun mutationResult(bunch: Bunch, changedMembershipIds: List<Long>) = MembershipMutationResult(

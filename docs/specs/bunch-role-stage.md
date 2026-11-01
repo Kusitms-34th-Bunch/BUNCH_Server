@@ -64,13 +64,22 @@ V11의 기존 종료 소속 시각 백필·nullable 권한 부여자 FK 계약�
 `bunch_action_requests`와 `BunchActionRequest`/`BunchActionRequestRepository`는 이
 기능이 실제 사용하는 성공 재생 기록의 소유자다. `PROFILE`, `OWNER_TRANSFER`, `LEAVE`,
 `DELETE` 작업만 허용하며, #52 프로필 저장·#25 이탈·후속 #50 삭제는 같은 단순 테이블과
-Repository를 재사용한다. 범용 명령·권한·재시도 프레임워크는 만들지 않는다.
+Repository를 재사용한다. 성공 재생 조회는 `expiresAt > now`만 허용하고 정확히 30일이
+지난 `expiresAt <= now` 행은 인계 잠금 전에 정리한다. 인계는 먼저 가입 완료와 입력 형식을
+확인한 뒤 성공 재생을 번치 존재·현재 역할 검사보다 먼저 조회하고, 재생이 없을 때만 번치
+잠금 아래 같은 key를 다시 조회해 동시 중복 적용을 막는다. 그래서 번치 본체가 삭제된 뒤에도
+현재 세션의 같은 성공 인계 요청은 최소 결과를 재생하지만, 새 key는 삭제된 번치의 권한을
+우회하지 않는다. `deleteExpiredByBunchId`는 이 실제 인계 사용과 후속 공유 작업이 재사용할
+최소 만료 청소 함수다. 기존 부모 구현 호환용 단순 조회
+`findByMemberIdAndBunchIdAndOperationAndRequestKey`는 유지하고, #49 인계는
+`findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(..., now)`를 사용한다.
+범용 명령·권한·재시도 프레임워크는 만들지 않는다.
 
 역할이 실제 변경되면 11/12/13번 `Notification`을 같은 DB 트랜잭션에 일반 저장한다.
 수신자는 변경된 대상이며 실행자는 제외하고, `target.kind`는 `ROLE_PERMISSIONS`다.
-`#49` 관리 서비스 본문은 이 브랜치에서 수정하지 않는다. #25의 OWNER 직접 나가기는
-기존 `NotificationWriter` 저장 지점과 #48/#65 기기별 push job을 같은 transaction에
-연결한다. 알림 저장 실패는 역할 변경·버전·재생 기록과 함께 롤백된다.
+실제 notification 저장 행을 #48의 `PushJobWriter.enqueue`에 전달해 현재 기기의 전송 대기도
+같은 트랜잭션에서 기록한다. 알림 또는 job 저장 실패는 역할 변경·버전·재생 기록과 함께
+롤백된다. 기기 없는 과거 알림의 소급 전송은 없으며 요청 replay는 알림·job을 만들지 않는다.
 
 ## 실제 활동
 
