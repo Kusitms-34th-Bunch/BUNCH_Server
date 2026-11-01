@@ -8,6 +8,7 @@ import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.security.SecureRandom
 import java.time.Duration
@@ -22,6 +23,7 @@ class InvitationService(
     private val invitations: InvitationRepository,
     private val members: MemberRepository,
     private val notifications: NotificationWriter,
+    private val accessNotices: BunchAccessNoticeService,
     private val input: InvitationInput,
     private val rateLimiter: InvitationRateLimiter,
     private val entityManager: EntityManager
@@ -40,27 +42,18 @@ class InvitationService(
             it.revokedAt = now
         }
 
-        repeat(10) {
-            val token = Base64.getUrlEncoder()
-                .withoutPadding()
-                .encodeToString(ByteArray(32).also(random::nextBytes))
-            val code = (1..8)
-                .map { CODE_ALPHABET[random.nextInt(CODE_ALPHABET.length)] }
-                .joinToString("")
-            if (
-                invitations.insertIfAvailable(
-                    bunchId,
-                    userId,
-                    token,
-                    code,
-                    now,
-                    now.plus(Duration.ofDays(7))
-                ) == 1
-            ) {
-                return response(invitations.findByToken(token)!!)
-            }
-        }
-        fail(ErrorCode.INTERNAL_ERROR)
+        return response(createInvitation(bunchId, userId, now))
+    }
+
+    /** Called by the exit transaction after the bunch row has been locked. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun rotateAfterRemoval(
+        bunchId: Long,
+        issuerMemberId: Long,
+        now: Instant = Instant.now()
+    ): InvitationResponse {
+        invitations.findByBunchIdAndRevokedAtIsNull(bunchId)?.revokedAt = now
+        return response(createInvitation(bunchId, issuerMemberId, now))
     }
 
     @Transactional(readOnly = true)
@@ -98,6 +91,7 @@ class InvitationService(
                     replay.fingerprint != fingerprint(resolved)
             )
                 fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+            if (previous.status != MembershipStatus.ACTIVE) fail(ErrorCode.FORBIDDEN)
             val bunch = bunches.findLocked(previous.bunch.id) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
             memberships.findByMemberIdAndBunchIdAndStatus(userId, bunch.id)?.let {
                 // Replay was loaded before the bunch lock; retain activity committed while waiting.
@@ -134,6 +128,7 @@ class InvitationService(
             )
         )
         membership.rememberJoin(key, fingerprint(current), JoinOutcome.JOINED)
+        accessNotices.removeForRejoin(userId, bunch.id)
         bunch.membershipVersion++
         notifications.memberJoined(bunch.id, membership.id, userId, member.nickname!!, now)
         return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch))
@@ -162,6 +157,34 @@ class InvitationService(
         .requireCompleted()
 
     private fun fingerprint(invitation: Invitation): String = "invitation:${invitation.id}"
+
+    private fun createInvitation(
+        bunchId: Long,
+        issuerMemberId: Long,
+        now: Instant
+    ): Invitation {
+        repeat(10) {
+            val token = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(ByteArray(32).also(random::nextBytes))
+            val code = (1..8)
+                .map { CODE_ALPHABET[random.nextInt(CODE_ALPHABET.length)] }
+                .joinToString("")
+            if (
+                invitations.insertIfAvailable(
+                    bunchId,
+                    issuerMemberId,
+                    token,
+                    code,
+                    now,
+                    now.plus(Duration.ofDays(7))
+                ) == 1
+            ) {
+                return invitations.findByToken(token)!!
+            }
+        }
+        fail(ErrorCode.INTERNAL_ERROR)
+    }
 
     private fun response(invitation: Invitation) = InvitationResponse(
         input.url(invitation.token),

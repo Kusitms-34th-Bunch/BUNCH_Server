@@ -9,6 +9,7 @@ import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
 import org.springframework.beans.factory.ObjectProvider
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -19,7 +20,8 @@ class PhotoService(
     private val photos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
     private val imageAssets: ImageAssetService,
-    private val deletionCallbacks: ObjectProvider<PhotoFinalDeletionCallback>
+    private val deletionCallbacks: ObjectProvider<PhotoFinalDeletionCallback>,
+    private val events: ApplicationEventPublisher
 ) {
     /**
      * Reads a complete, READY photo selection in the caller's requested order.
@@ -85,13 +87,38 @@ class PhotoService(
 
         if (photo.bunch.id != bunchId) fail(ErrorCode.FORBIDDEN)
 
-        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photoId)
+        return removeLockedUploader(photo, memberId, finalDeletionCallback)
+    }
+
+    /**
+     * Removes every uploader row for one member while keeping the bunch and all photo locks
+     * in the contract's order. The caller owns the surrounding membership transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllUploaders(
+        bunchId: Long,
+        memberId: Long
+    ): List<PhotoUploaderRemovalResult> {
+        lockBunch(bunchId)
+        return photos
+            .findAllLockedByBunchIdAndUploaderMemberIdOrderByIdAsc(bunchId, memberId)
+            .map { removeLockedUploader(it, memberId, PhotoFinalDeletionCallback.NONE) }
+    }
+
+    private fun removeLockedUploader(
+        photo: Photo,
+        memberId: Long,
+        finalDeletionCallback: PhotoFinalDeletionCallback
+    ): PhotoUploaderRemovalResult {
+
+        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photo.id)
         val target = rows.firstOrNull { it.member.id == memberId }
-            ?: return PhotoUploaderRemovalResult(photoId, uploaderRemoved = false, photoDeleted = false)
+            ?: return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = false, photoDeleted = false)
 
         uploaders.delete(target)
         if (rows.size > 1) {
-            return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
+            events.publishEvent(PhotoChangedEvent(photo.bunch.id, photo.capturedDate, photoAdded = false))
+            return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = false)
         }
 
         deletionCallbacks.orderedStream().forEach { it.beforePhotoDelete(photo.id) }
@@ -100,7 +127,8 @@ class PhotoService(
         photos.delete(photo)
         photos.flush()
         imageAssets.releaseAfterCommit(assetId)
-        return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = true)
+        events.publishEvent(PhotoChangedEvent(photo.bunch.id, photo.capturedDate, photoAdded = false))
+        return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = true)
     }
 
     private fun lockBunch(bunchId: Long) =
