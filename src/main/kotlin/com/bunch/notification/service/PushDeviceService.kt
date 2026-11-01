@@ -35,14 +35,14 @@ class PushDeviceService(
         installationId: UUID,
         request: PushDeviceRegistrationRequest
     ): PushDeviceResponse {
-        members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
-            .requireCompleted()
+        members.findLockedById(memberId)?.requireCompleted() ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
         requireActiveSession(memberId, sessionId)
         val token = normalizeToken(request.deviceToken)
         val topic = settings.topic(request.environment)
         val tokenHash = cipher.hash(token)
         lockRegistration(installationId, request.environment.name, topic, tokenHash)
-        val current = devices.findByInstallationIdLocked(installationId)
+        val registrations = devices.findForRegistrationLocked(installationId, request.environment, topic, tokenHash)
+        val current = registrations.find { it.installationId == installationId }
         if (
             current != null && current.memberId == memberId && current.sessionId == sessionId &&
             current.environment == request.environment && current.topic == topic &&
@@ -57,7 +57,7 @@ class PushDeviceService(
         }
         val registrationAt = nextRegistrationAt(clock.instant(), current?.registeredAt)
 
-        devices.findByTokenLocked(request.environment, topic, tokenHash)
+        registrations
             .filter { it.id != current?.id }
             .forEach { previous ->
                 jobs.cancelPendingForDevice(previous.memberId, previous.id)
@@ -98,8 +98,7 @@ class PushDeviceService(
 
     @Transactional
     fun unregister(memberId: Long, sessionId: UUID, installationId: UUID) {
-        members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
-            .requireCompleted()
+        members.findLockedById(memberId)?.requireCompleted() ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
         requireActiveSession(memberId, sessionId)
         val device = devices.findByInstallationIdLocked(installationId) ?: return
         if (device.memberId != memberId || device.sessionId != sessionId) {
@@ -112,6 +111,7 @@ class PushDeviceService(
 
     @Transactional
     fun logoutSession(memberId: Long, sessionId: UUID) {
+        devices.findBySessionLocked(memberId, sessionId)
         jobs.cancelPendingForSession(memberId, sessionId)
         devices.deleteByMemberIdAndSessionId(memberId, sessionId)
     }

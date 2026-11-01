@@ -50,7 +50,7 @@ class PushDevice(
     var tokenCiphertext: ByteArray,
 
     @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "token_hash", nullable = false, length = 64, columnDefinition = "char(64)")
+    @Column(name = "token_hash", nullable = false, columnDefinition = "char(64)")
     var tokenHash: String,
 
     @Enumerated(EnumType.STRING)

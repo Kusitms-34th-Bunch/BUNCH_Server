@@ -78,3 +78,12 @@ async-job:
   retry:
     max-attempts: 5
     base-seconds: 10
+notification:
+  push:
+    device-encryption-key: ${PUSH_DEVICE_ENCRYPTION_KEY:}
+    apns:
+      team-id: ${APNS_TEAM_ID:}
+      key-id: ${APNS_KEY_ID:}
+      private-key: ${APNS_PRIVATE_KEY:}
+      sandbox-topic: ${APNS_SANDBOX_TOPIC:}
+      production-topic: ${APNS_PRODUCTION_TOPIC:}

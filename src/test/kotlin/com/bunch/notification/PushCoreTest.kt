@@ -20,6 +20,7 @@ import com.bunch.notification.service.PushJobWriter
 import com.bunch.notification.service.PushPayloadFactory
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
@@ -39,7 +40,12 @@ class PushCoreTest {
         val encrypted = cipher.encrypt(token)
 
         assertThat(cipher.decrypt(encrypted)).isEqualTo(token)
-        assertThat(encrypted).doesNotContain(*token.toByteArray())
+        assertThat(encrypted).isNotEqualTo(token.toByteArray())
+        assertThat(cipher.encrypt(token)).isNotEqualTo(encrypted)
+        val tampered = encrypted.copyOf()
+        tampered[tampered.lastIndex] = (tampered.last().toInt() xor 1).toByte()
+        assertThatThrownBy { cipher.decrypt(tampered) }
+            .isInstanceOf(javax.crypto.AEADBadTagException::class.java)
         assertThat(cipher.hash(token)).hasSize(64)
     }
 
@@ -127,7 +133,7 @@ class PushCoreTest {
             type = NotificationType.SOCIAL_COMMENT_CREATED,
             dedupeKey = "comment:1",
             title = "댓글이 달렸어요",
-            body = "가".repeat(2000),
+            body = "가\n" + "👨‍👩‍👧‍👦".repeat(60),
             target = NotificationTarget(NotificationTargetKind.BUNDLE_COMMENTS, 7, 9),
             createdAt = Instant.parse("2026-01-01T00:00:00Z")
         )
@@ -137,5 +143,8 @@ class PushCoreTest {
         assertThat(mapper.writeValueAsBytes(payload)).hasSizeLessThanOrEqualTo(4096)
         assertThat(payload.aps.alert.title).startsWith("[테스트 번치]")
         assertThat(payload.aps.alert.body).endsWith("…")
+        assertThat(payload.aps.alert.body).startsWith("가 ").doesNotContain("\n")
+        assertThat(java.util.regex.Pattern.compile("\\X").matcher(payload.aps.alert.body).results().count())
+            .isEqualTo(51)
     }
 }
