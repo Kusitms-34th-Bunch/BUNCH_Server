@@ -44,6 +44,7 @@ class BunchMembershipManagementService(
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun memberships(userId: Long, bunchId: Long): MembershipsResponse {
+        validatePositiveId(bunchId)
         requireCompleted(userId)
         val bunch = bunches.findById(bunchId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
         val current = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)
@@ -76,6 +77,9 @@ class BunchMembershipManagementService(
         targetMembershipId: Long,
         request: ChangeMembershipRoleRequest
     ): MembershipMutationResult {
+        validatePositiveId(bunchId)
+        validatePositiveId(targetMembershipId)
+        validatePositiveId(request.actorMembershipId)
         val bunch = lockContext(userId, bunchId)
         validateVersionInput(request.expectedMembershipVersion)
         val actor = requireActor(bunch, userId, request.actorMembershipId)
@@ -127,26 +131,40 @@ class BunchMembershipManagementService(
         requestKey: UUID,
         request: OwnerTransferRequest
     ): MembershipMutationResult {
-        val bunch = lockContext(userId, bunchId)
+        validatePositiveId(bunchId)
+        validatePositiveId(request.actorMembershipId)
+        validatePositiveId(request.targetMembershipId)
         validateVersionInput(request.expectedMembershipVersion)
+        requireCompleted(userId)
         val now = clock.instant()
+        actionRequests.deleteExpiredByBunchId(bunchId, now)
+        actionRequests.flush()
         val fingerprint = fingerprint(
             request.actorMembershipId,
             request.expectedMembershipVersion,
             request.targetMembershipId
         )
-        actionRequests.findByMemberIdAndBunchIdAndOperationAndRequestKey(
+        actionRequests.findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(
             memberId = userId,
             bunchId = bunchId,
             operation = BunchActionOperation.OWNER_TRANSFER,
-            requestKey = requestKey
+            requestKey = requestKey,
+            now = now
         )?.let { previous ->
-            if (now.isBefore(previous.expiresAt)) {
-                if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-                return mutationResultFrom(previous.result)
-            }
-            actionRequests.delete(previous)
-            actionRequests.flush()
+            if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+            return mutationResultFrom(previous.result)
+        }
+
+        val bunch = lockContext(userId, bunchId)
+        actionRequests.findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(
+            memberId = userId,
+            bunchId = bunchId,
+            operation = BunchActionOperation.OWNER_TRANSFER,
+            requestKey = requestKey,
+            now = now
+        )?.let { previous ->
+            if (previous.fingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
+            return mutationResultFrom(previous.result)
         }
 
         val actor = requireActor(bunch, userId, request.actorMembershipId)
@@ -258,6 +276,10 @@ class BunchMembershipManagementService(
 
     private fun validateVersionInput(expectedVersion: Long) {
         if (expectedVersion < 0) fail(ErrorCode.INVALID_INPUT)
+    }
+
+    private fun validatePositiveId(id: Long) {
+        if (id <= 0) fail(ErrorCode.INVALID_INPUT)
     }
 
     private fun writeRoleNotification(
