@@ -111,8 +111,8 @@ class BunchAccessNoticeService(
         fail(ErrorCode.FORBIDDEN)
     }
 
-    /** Preserves a missing-bunch 404 while still surfacing the caller's own notice. */
-    @Transactional(readOnly = true)
+    /** Read guards may be caught by notification open, which must still commit its read timestamp. */
+    @Transactional(readOnly = true, noRollbackFor = [BusinessException::class])
     fun requireNoticeIfPresent(memberId: Long, bunchId: Long) {
         requireCompleted(memberId)
         if (hasActiveMembership(memberId, bunchId)) return

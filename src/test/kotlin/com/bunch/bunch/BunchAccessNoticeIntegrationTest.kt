@@ -7,6 +7,7 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.service.BunchAccessNoticeRetention
 import com.bunch.bunch.service.BunchAccessNoticeService
+import com.bunch.bunch.service.BunchPublicService
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.exception.BusinessException
@@ -44,6 +45,9 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
+
+    @Autowired
+    private lateinit var content: BunchPublicService
 
     @Autowired
     private lateinit var bundleAccess: BundleAccessService
@@ -212,7 +216,7 @@ class BunchAccessNoticeIntegrationTest : BunchIntegrationSupport() {
             mapOf("noticeId" to noticeId, "reason" to BunchAccessNoticeReason.REMOVED.name)
         )
 
-        val memberListThrown = catchThrowable { bunches.members(removed, bunchResponse.id) }
+        val memberListThrown = catchThrowable { content.members(removed, bunchResponse.id) }
         assertThat(memberListThrown).isInstanceOf(BusinessException::class.java)
         assertThat((memberListThrown as BusinessException).errorCode)
             .isEqualTo(ErrorCode.BUNCH_ACCESS_UNAVAILABLE)

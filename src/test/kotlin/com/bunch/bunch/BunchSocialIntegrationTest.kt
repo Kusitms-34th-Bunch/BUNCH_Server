@@ -111,23 +111,24 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `same personal member may follow another own bunch while the selected viewer controls access`() {
+    fun `same personal member may follow another own bunch while server current controls access`() {
         val actor = member()
         val viewer = create(actor).id
         val target = create(actor).id
-        assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, viewer, false, 0, 20) }
+        bunches.updateLastUsed(actor, viewer)
+        assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, false, 0, 20) }
         val request = social.follow(actor, viewer, target)
         listOf(false, true).forEach { following ->
-            assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, viewer, following, 0, 20) }
+            assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, following, 0, 20) }
         }
         social.decide(actor, target, request.followId!!, FollowDecision.APPROVE)
-        val followers = social.relations(actor, target, viewer, false, 0, 20)
+        val followers = social.relations(actor, target, false, 0, 20)
         assertThat(followers.items.single().bunch.id).isEqualTo(viewer)
         assertThat(followers.items.single().followState).isEqualTo(FollowState.NONE)
-        assertThat(social.relations(actor, target, viewer, true, 0, 20).items).isEmpty()
+        assertThat(social.relations(actor, target, true, 0, 20).items).isEmpty()
         social.cancel(actor, viewer, target, request.followId!!)
         listOf(false, true).forEach { following ->
-            assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, viewer, following, 0, 20) }
+            assertError(ErrorCode.FORBIDDEN) { social.relations(actor, target, following, 0, 20) }
         }
         assertError(ErrorCode.INVALID_INPUT) { social.follow(actor, viewer, viewer) }
     }
@@ -146,19 +147,19 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
         val requestId = social.follow(actor, viewer, second).followId!!
         jdbc.update("UPDATE bunch_follows SET approved_at = '2026-01-01T00:00:00Z' WHERE id IN (?, ?)", firstId, secondId)
 
-        val page = social.relations(actor, target, viewer, false, 0, 1)
+        val page = social.relations(actor, target, false, 0, 1)
         assertThat(page.totalElements).isEqualTo(2)
         assertThat(page.hasNext).isTrue()
         assertThat(page.items.single().bunch.id).isEqualTo(second)
         assertThat(page.items.single().followState).isEqualTo(FollowState.REQUESTED)
         assertThat(page.items.single().followId).isEqualTo(requestId)
-        val last = social.relations(actor, target, viewer, false, 1, 1)
+        val last = social.relations(actor, target, false, 1, 1)
         assertThat(last.items.single().bunch.id).isEqualTo(first)
         assertThat(last.items.single().followState).isEqualTo(FollowState.NONE)
         assertThat(last.hasNext).isFalse()
-        assertThat(social.relations(firstActor, first, first, true, 0, 20).items.single().bunch.id).isEqualTo(target)
+        assertThat(social.relations(firstActor, first, true, 0, 20).items.single().bunch.id).isEqualTo(target)
         val zeroMembershipActor = member()
-        assertThat(social.relations(zeroMembershipActor, target, null, false, 0, 20).totalElements).isEqualTo(2)
+        assertThat(social.relations(zeroMembershipActor, target, false, 0, 20).totalElements).isEqualTo(2)
     }
 
     @Test
@@ -183,7 +184,7 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
         assertThat(last.items.map { it.id }).containsExactly(requestIds[0])
         assertThat(last.totalElements).isEqualTo(3)
         assertThat(last.hasNext).isFalse()
-        assertThat(social.relations(targetActor, target, target, false, 0, 20).totalElements).isEqualTo(1)
+        assertThat(social.relations(targetActor, target, false, 0, 20).totalElements).isEqualTo(1)
     }
 
     @Test

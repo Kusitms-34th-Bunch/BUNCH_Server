@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.multipart.MultipartFile
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Service
@@ -23,7 +24,6 @@ class BunchService(
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
-    private val accessNotices: BunchAccessNoticeService,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
     transactionManager: PlatformTransactionManager
@@ -99,22 +99,13 @@ class BunchService(
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
             ?.let { BunchResponse.from(it.bunch) }
 
-    // A read-only check: the write paths below lock the bunch, but listing members changes nothing.
-    @Transactional(readOnly = true)
-    fun members(userId: Long, bunchId: Long): List<BunchMemberResponse> {
-        if (!bunches.existsById(bunchId)) {
-            accessNotices.requireNoticeIfPresent(userId, bunchId)
-            fail(ErrorCode.RESOURCE_NOT_FOUND)
-        }
-        accessNotices.requireMemberOrAccessNotice(userId, bunchId)
-        return memberships.findActiveMembers(bunchId).map(BunchMemberResponse::from)
-    }
-
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
         lockOwnerOrMember(userId, bunchId, ownerOnly = false)
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        membership.lastUsedAt = Instant.now()
+        val latest = memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)?.lastUsedAt
+        val now = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        membership.lastUsedAt = if (latest == null || now > latest) now else latest.plusNanos(1_000)
     }
 
     // Preflight avoids uploading for unauthorized callers. The second check protects against

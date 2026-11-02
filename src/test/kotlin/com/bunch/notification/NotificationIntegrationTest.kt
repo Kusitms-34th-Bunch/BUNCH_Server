@@ -1,6 +1,9 @@
 package com.bunch.notification
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.BunchAccessNotice
+import com.bunch.bunch.domain.BunchAccessNoticeReason
+import com.bunch.bunch.domain.BunchAccessNoticeRepository
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.domain.BundleParticipant
@@ -49,6 +52,8 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
     private lateinit var bundles: BundleRepository
     @Autowired
     private lateinit var participants: BundleParticipantRepository
+    @Autowired
+    private lateinit var accessNotices: BunchAccessNoticeRepository
     @Autowired
     private lateinit var transaction: TransactionTemplate
 
@@ -131,6 +136,119 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
         assertThat(notifications.findById(published.id).orElseThrow().readAt).isEqualTo(unavailable.readAt)
         jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE member_id = ?", owner)
         assertThat(service.open(owner, bunch, published.id).available).isFalse()
+    }
+
+    @Test
+    fun `other bunch profile open uses the server current after its inbox membership ends`() {
+        val owner = member()
+        val inboxBunch = create(owner).id
+        val fallbackBunch = create(owner).id
+        val targetOwner = member()
+        val targetBunch = create(targetOwner).id
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", targetBunch)
+        val fallbackLastUsed = lastUsedAt(owner, fallbackBunch)
+        val notification = save(
+            owner,
+            inboxBunch,
+            now,
+            NotificationTarget(
+                NotificationTargetKind.OTHER_BUNCH_PROFILE,
+                inboxBunch,
+                targetBunchId = targetBunch
+            )
+        )
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT', ended_at = CURRENT_TIMESTAMP " +
+                "WHERE member_id = ? AND bunch_id = ?",
+            owner,
+            inboxBunch
+        )
+
+        val opened = service.open(owner, inboxBunch, notification.id)
+
+        assertThat(opened.available).isTrue()
+        assertThat(opened.target?.targetBunchId).isEqualTo(targetBunch)
+        assertThat(lastUsedAt(owner, fallbackBunch)).isEqualTo(fallbackLastUsed)
+    }
+
+    @Test
+    fun `other bunch profile open allows a public target for a completed zero membership user`() {
+        val recipient = member()
+        val sourceOwner = member()
+        val sourceBunch = create(sourceOwner).id
+        val targetOwner = member()
+        val targetBunch = create(targetOwner).id
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", targetBunch)
+        val notification = save(
+            recipient,
+            sourceBunch,
+            now,
+            NotificationTarget(
+                NotificationTargetKind.OTHER_BUNCH_PROFILE,
+                sourceBunch,
+                targetBunchId = targetBunch
+            )
+        )
+
+        val opened = service.open(recipient, sourceBunch, notification.id)
+
+        assertThat(opened.available).isTrue()
+        assertThat(opened.target?.targetBunchId).isEqualTo(targetBunch)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bunch_memberships WHERE member_id = ? AND status = 'ACTIVE'",
+            Long::class.java,
+            recipient
+        )).isZero()
+    }
+
+    @Test
+    fun `other bunch profile access notice makes open unavailable without losing the read`() {
+        val owner = member()
+        val sourceBunch = create(owner).id
+        val targetOwner = member()
+        val targetBunch = create(targetOwner).id
+        join(owner, issue(targetOwner, targetBunch))
+        val membershipId = jdbc.queryForObject(
+            "SELECT id FROM bunch_memberships WHERE member_id = ? AND bunch_id = ? AND status = 'ACTIVE'",
+            Long::class.java,
+            owner,
+            targetBunch
+        )!!
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT', ended_at = CURRENT_TIMESTAMP WHERE id = ?",
+            membershipId
+        )
+        val occurredAt = now.minusSeconds(1)
+        accessNotices.saveAndFlush(
+            BunchAccessNotice(
+                recipientMemberId = owner,
+                bunchId = targetBunch,
+                membershipId = membershipId,
+                bunchName = "target",
+                characterType = com.bunch.bunch.domain.CharacterType.TYPE_2,
+                reason = BunchAccessNoticeReason.REMOVED,
+                occurredAt = occurredAt,
+                expiresAt = now.plus(Duration.ofDays(1))
+            )
+        )
+        val notification = save(
+            owner,
+            sourceBunch,
+            now,
+            NotificationTarget(
+                NotificationTargetKind.OTHER_BUNCH_PROFILE,
+                sourceBunch,
+                targetBunchId = targetBunch
+            )
+        )
+
+        val opened = service.open(owner, sourceBunch, notification.id)
+
+        assertThat(opened.available).isFalse()
+        assertThat(opened.target).isNull()
+        assertThat(opened.readAt).isNotNull()
+        assertThat(notifications.findById(notification.id).orElseThrow().readAt)
+            .isEqualTo(opened.readAt)
     }
 
     @Test
@@ -305,4 +423,12 @@ class NotificationIntegrationTest : BunchIntegrationSupport() {
 
     private fun activities(member: Long, bunch: Long) = notifications.latest(member, bunch, now.minusSeconds(1))
         .filter { it.type == NotificationType.DRAFT_ACTIVITY }
+
+    private fun lastUsedAt(memberId: Long, bunchId: Long): Instant =
+        jdbc.queryForObject(
+            "SELECT last_used_at FROM bunch_memberships WHERE member_id = ? AND bunch_id = ?",
+            java.sql.Timestamp::class.java,
+            memberId,
+            bunchId
+        )!!.toInstant()
 }

@@ -24,16 +24,11 @@ class BunchListService(
     private val clock: Clock
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    fun list(memberId: Long, currentBunchId: Long?): MyBunchesResponse {
+    fun list(memberId: Long): MyBunchesResponse {
         members.findById(memberId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
             .requireCompleted()
 
         val active = memberships.findActiveByMemberId(memberId)
-        val currentFirst = active.sortedWith(
-            compareByDescending<com.bunch.bunch.domain.BunchMembership> {
-                currentBunchId != null && it.bunch.id == currentBunchId
-            }.thenByDescending { it.lastUsedAt }.thenByDescending { it.id }
-        )
         val cutoff = clock.instant().minus(RETENTION)
         val activeIds = active.map { it.bunch.id }.toSet()
         val unavailable = notices.active(memberId)
@@ -43,7 +38,7 @@ class BunchListService(
             activeCount = active.size.toLong(),
             maxActiveCount = MAX_ACTIVE_BUNCHES,
             defaultBunchId = active.firstOrNull()?.bunch?.id,
-            activeBunches = currentFirst.map { membership ->
+            activeBunches = active.map { membership ->
                 MyBunchItem(
                     bunch = BunchCardResponse.from(membership.bunch),
                     myMembership = membership.toHomeMembershipResponse(),

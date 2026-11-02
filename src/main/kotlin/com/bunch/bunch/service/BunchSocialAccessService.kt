@@ -19,20 +19,24 @@ class BunchSocialAccessService(
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
     private val follows: BunchFollowRepository,
-    private val blocks: BunchBlockRepository
+    private val blocks: BunchBlockRepository,
+    private val notices: BunchAccessNoticeService
 ) {
-    // Called inside each read/mutation transaction; the selected viewer alone determines external access.
-    fun target(userId: Long, targetId: Long, viewerBunchId: Long?, requireContent: Boolean = false): Bunch {
+    fun current(userId: Long): BunchMembership? {
+        members.findById(userId)
+            .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
+            .requireCompleted()
+        return memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
+    }
+
+    // Called inside each read transaction; the server-selected current alone determines external access.
+    fun target(userId: Long, targetId: Long, requireContent: Boolean = false): Bunch {
         positive(targetId)
-        members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
-        if (viewerBunchId == null) {
-            if (memberships.countByMemberIdAndStatus(userId) != 0L) fail(ErrorCode.CURRENT_BUNCH_REQUIRED)
-        } else {
-            viewer(userId, viewerBunchId)
-            visible(viewerBunchId, targetId)
-        }
+        val currentId = current(userId)?.bunch?.id
+        notices.requireNoticeIfPresent(userId, targetId)
+        if (currentId != null) visible(currentId, targetId)
         val target = bunches.findById(targetId).orElseThrow { BusinessException(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) }
-        if (requireContent && !canView(target, viewerBunchId)) fail(ErrorCode.FORBIDDEN)
+        if (requireContent && !canView(target, currentId)) fail(ErrorCode.FORBIDDEN)
         return target
     }
 

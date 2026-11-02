@@ -196,7 +196,7 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
         members(outsiderId, bunchId).expectError(ErrorCode.FORBIDDEN)
         members(leftId, bunchId).expectError(ErrorCode.FORBIDDEN)
         members(unfinishedId, bunchId).expectError(ErrorCode.SIGNUP_INCOMPLETE)
-        members(ownerId, Long.MAX_VALUE).expectError(ErrorCode.RESOURCE_NOT_FOUND)
+        members(ownerId, Long.MAX_VALUE).expectError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
     }
 
     @Test

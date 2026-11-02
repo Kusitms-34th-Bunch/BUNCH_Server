@@ -1,6 +1,7 @@
 package com.bunch.bunch.dto
 
 import com.bunch.bunch.domain.Bunch
+import com.bunch.bunch.domain.BunchAccessScope
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.CharacterType
 import com.bunch.bunch.domain.ProfileImageAction
@@ -72,17 +73,25 @@ data class MyBunchesResponse(
 
 data class BunchHomeResponse(
     val bunch: BunchHomeProfileResponse,
-    val myMembership: MyMembershipResponse,
+    val myMembership: MyMembershipResponse?,
     val permissions: BunchPermissions,
-    val profileVersion: Long,
-    val membershipVersion: Long,
+    val profileVersion: Long?,
+    val membershipVersion: Long?,
     val memberCount: Long,
     val followerCount: Long,
     val followingCount: Long,
-    val draftCount: Long,
-    val publishedCount: Long,
+    val draftCount: Long?,
+    val publishedCount: Long?,
     val stage: Int,
-    val unreadCount: Long
+    val unreadCount: Long?,
+    val currentBunchId: Long?,
+    val accessScope: BunchAccessScope,
+    val followState: FollowState,
+    val followId: Long?,
+    val canViewBundles: Boolean,
+    val canViewMembers: Boolean,
+    val canViewRelations: Boolean,
+    val isCurrentBunch: Boolean
 )
 
 data class BunchProfileRequest(

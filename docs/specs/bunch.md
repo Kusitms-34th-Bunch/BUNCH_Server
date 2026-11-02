@@ -14,6 +14,11 @@
   초안 삭제는 생성자 또는 참여 중인 관리자만 가능하며 생성자 이탈 시 초안은 삭제한다.
 - 뭉치는 현재 전체 PUBLIC/PRIVATE 발행 수로 계산하며 0/2/6/10개에서 1~4단계다.
   외부에도 같은 실제 단계를 표시하되 비공개 번들 수·내용은 노출하지 않는다.
+- 현재 번치는 ACTIVE Membership의 `lastUsedAt DESC, membership.id DESC`로 서버가 계산한다.
+  홈·프로필·멤버·발행본 읽기는 [홈·프로필 계약](bunch-home-profile.md)의 동일한
+  `BunchHomeResponse`/`INTERNAL`·`EXTERNAL` 판정을 사용하며 query의 viewer/current 선택은
+  적용하지 않는다. 사용자 전환은 명시적 `PUT /last-used`로 수행하고, 생성·새 참여 성공과
+  이탈 fallback의 기존 최근 사용 갱신만 lifecycle 예외로 유지한다.
 - 메인 관리자의 직접 나가기는 후임 선택이 필수다. 계정 탈퇴의 자동 승계는 #29 범위다.
 - LEFT·REMOVED 모두 유효한 초대와 새 요청 키로 새 MEMBER 소속에 참여할 수 있다.
   남은 발행본의 동일 계정 이름·프로필·코멘트 표시만 복구한다. 삭제된 사진함·업로더·
