@@ -15,6 +15,8 @@ import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploader
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
+import com.bunch.photo.service.PhotoChangedEvent
+import com.bunch.photo.service.PhotoService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -28,6 +30,8 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.event.ApplicationEvents
+import org.springframework.test.context.event.RecordApplicationEvents
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -43,7 +47,14 @@ import java.util.concurrent.TimeUnit
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@RecordApplicationEvents
 class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
+    @Autowired
+    private lateinit var events: ApplicationEvents
+
+    @Autowired
+    private lateinit var photoService: PhotoService
+
     @Autowired
     private lateinit var bunchRepository: BunchRepository
 
@@ -380,6 +391,97 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
         verify(storage, times(1)).delete(joint.imageAsset.publicId)
     }
 
+    // ---- Telling the recommended bundles (4.2.9) ----
+
+    @Test
+    fun `deleting a photo that only the caller uploaded announces its date`() {
+        val fixture = fixture()
+        val mine = photo(fixture.bunchId, listOf(fixture.guest))
+
+        delete(fixture.guest, fixture.bunchId, listOf(mine.id)).andExpect(status().isOk)
+
+        assertThat(announcedDates()).containsExactly(LocalDate.of(2026, 10, 19))
+        assertThat(changedEvents()).allMatch { it.bunchId == fixture.bunchId && !it.photoAdded }
+    }
+
+    @Test
+    fun `taking only the caller's name off a photo uploaded together is announced as well`() {
+        val fixture = fixture()
+        val together = photo(fixture.bunchId, listOf(fixture.guest, fixture.third))
+
+        delete(fixture.guest, fixture.bunchId, listOf(together.id)).andExpect(status().isOk)
+
+        // The photo stays, but the number of uploaders changes what a recommendation is made of.
+        assertThat(photos.existsById(together.id)).isTrue()
+        assertThat(announcedDates()).containsExactly(LocalDate.of(2026, 10, 19))
+        assertThat(changedEvents()).allMatch { it.bunchId == fixture.bunchId && !it.photoAdded }
+    }
+
+    @Test
+    fun `an administrator deleting the photo of another member announces its date`() {
+        val fixture = fixture()
+        val theirs = photo(fixture.bunchId, listOf(fixture.guest))
+
+        delete(fixture.owner, fixture.bunchId, listOf(theirs.id)).andExpect(status().isOk)
+
+        assertThat(photos.existsById(theirs.id)).isFalse()
+        assertThat(announcedDates()).containsExactly(LocalDate.of(2026, 10, 19))
+    }
+
+    @Test
+    fun `deleting several photos announces the date of every photo that left`() {
+        val fixture = fixture()
+        val first = photo(fixture.bunchId, listOf(fixture.guest))
+        val second = photo(fixture.bunchId, listOf(fixture.guest, fixture.third))
+
+        delete(fixture.guest, fixture.bunchId, listOf(first.id, second.id)).andExpect(status().isOk)
+
+        assertThat(announcedDates()).containsExactly(LocalDate.of(2026, 10, 19))
+        assertThat(changedEvents()).hasSizeGreaterThanOrEqualTo(1).allMatch { !it.photoAdded }
+    }
+
+    @Test
+    fun `a photo without a date is not announced because no recommendation contains it`() {
+        val fixture = fixture()
+        val undated = photo(fixture.bunchId, listOf(fixture.guest), dated = false)
+
+        delete(fixture.guest, fixture.bunchId, listOf(undated.id)).andExpect(status().isOk)
+
+        assertThat(photos.existsById(undated.id)).isFalse()
+        assertThat(changedEvents()).isEmpty()
+    }
+
+    @Test
+    fun `a request that is rejected announces nothing`() {
+        val fixture = fixture()
+        val theirs = photo(fixture.bunchId, listOf(fixture.third))
+        val gone = photo(fixture.bunchId, listOf(fixture.guest))
+        removeBehindTheScenes(gone)
+
+        delete(fixture.guest, fixture.bunchId, listOf(theirs.id)).andExpect(status().isForbidden)
+        delete(fixture.guest, fixture.bunchId, listOf(gone.id)).andExpect(status().isConflict)
+
+        assertThat(changedEvents()).isEmpty()
+    }
+
+    // The deletion itself announces, so every way to delete a photo does, including the cleanup of a member who left.
+    @Test
+    fun `removing an uploader or a whole photo directly announces the date too`() {
+        val fixture = fixture()
+        val together = photo(fixture.bunchId, listOf(fixture.guest, fixture.third))
+        val alone = photo(fixture.bunchId, listOf(fixture.guest))
+
+        photoService.removeUploader(fixture.bunchId, together.id, fixture.guest)
+        photoService.deletePhoto(fixture.bunchId, alone.id)
+
+        assertThat(changedEvents()).hasSize(2)
+        assertThat(announcedDates()).containsExactly(LocalDate.of(2026, 10, 19))
+    }
+
+    private fun changedEvents(): List<PhotoChangedEvent> = events.stream(PhotoChangedEvent::class.java).toList()
+
+    private fun announcedDates(): List<LocalDate?> = changedEvents().map { it.capturedDate }.distinct()
+
     private fun delete(memberId: Long, bunchId: Long, photoIds: List<Long>): ResultActions =
         mvc.perform(
             post("/api/v1/bunches/$bunchId/photos/delete")
@@ -417,7 +519,8 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     private fun photo(
         bunchId: Long,
         uploadedBy: List<Long>,
-        status: ProcessingStatus = ProcessingStatus.READY
+        status: ProcessingStatus = ProcessingStatus.READY,
+        dated: Boolean = true
     ): Photo {
         val asset = assets.saveAndFlush(
             ImageAsset(
@@ -432,9 +535,9 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
                 imageAsset = asset,
                 fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2),
                 processingStatus = status,
-                capturedDate = LocalDate.of(2026, 10, 19),
-                capturedTime = LocalTime.NOON,
-                dateSource = DateSource.EXIF
+                capturedDate = if (dated) LocalDate.of(2026, 10, 19) else null,
+                capturedTime = if (dated) LocalTime.NOON else null,
+                dateSource = if (dated) DateSource.EXIF else DateSource.UNKNOWN
             )
         )
         val batch = UUID.randomUUID()

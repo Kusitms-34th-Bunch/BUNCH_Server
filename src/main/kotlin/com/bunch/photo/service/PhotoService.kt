@@ -43,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDate
 import java.util.HexFormat
 
 /**
@@ -397,6 +398,7 @@ class PhotoService(
             ?: return PhotoUploaderRemovalResult(photoId, uploaderRemoved = false, photoDeleted = false)
 
         uploaders.delete(target)
+        announceChange(bunchId, photo.capturedDate)
         if (rows.size > 1) {
             return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
         }
@@ -418,6 +420,7 @@ class PhotoService(
 
         uploaders.deleteAll(uploaders.findAllLockedByPhotoIdOrderByIdAsc(photoId))
         uploaders.flush()
+        announceChange(bunchId, photo.capturedDate)
         deleteLocked(photo, PhotoFinalDeletionCallback.NONE)
         return true
     }
@@ -455,10 +458,7 @@ class PhotoService(
         // Read before the update: the dates the photos leave are the dates whose recommendations must be recalculated.
         val leftDates = selection.photos.mapNotNull { it.capturedDate }.toSet()
         if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate)
-        // No photo was added, so the "last photo added" time of a recommendation must not move (4.2.9).
-        (leftDates + listOfNotNull(newDate)).forEach {
-            events.publishEvent(PhotoChangedEvent(bunchId, it, photoAdded = false))
-        }
+        (leftDates + listOfNotNull(newDate)).forEach { announceChange(bunchId, it) }
         return PhotoDateChangeResponse(ids.size)
     }
 
@@ -520,6 +520,16 @@ class PhotoService(
             .toSet()
         if (!selection.administrator && uploadedByCaller.size != selection.photos.size) fail(ErrorCode.FORBIDDEN)
         return uploadedByCaller
+    }
+
+    /**
+     * Tells the recommended bundles that what a date is made of changed: a photo or an uploader left, or a photo moved
+     * to or from the date (4.2.9). No photo was added, so the "last photo added" time of a recommendation must not
+     * move. A photo without a date is part of no recommendation (4.2.7), so it is not announced.
+     * Every way to remove a photo or an uploader goes through here, so a new way to delete cannot forget it.
+     */
+    private fun announceChange(bunchId: Long, date: LocalDate?) {
+        if (date != null) events.publishEvent(PhotoChangedEvent(bunchId, date, photoAdded = false))
     }
 
     // A co-administrator has the same photo rights (5.6.2). Add that role here when it exists.
