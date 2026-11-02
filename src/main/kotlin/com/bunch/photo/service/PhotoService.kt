@@ -22,6 +22,8 @@ import com.bunch.photo.domain.PhotoUndatedCursor
 import com.bunch.photo.domain.PhotoUploader
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
+import com.bunch.photo.dto.PhotoDateChangeRequest
+import com.bunch.photo.dto.PhotoDateChangeResponse
 import com.bunch.photo.dto.PhotoDeleteResponse
 import com.bunch.photo.dto.PhotoDetailResponse
 import com.bunch.photo.dto.PhotoDetailUploader
@@ -349,34 +351,12 @@ class PhotoService(
      */
     @Transactional
     fun deletePhotos(userId: Long, bunchId: Long, photoIds: List<Long>): PhotoDeleteResponse {
-        if (photoIds.isEmpty() || photoIds.size > MAX_PHOTOS_PER_REQUEST) fail(ErrorCode.INVALID_INPUT)
-        if (photoIds.any { it <= 0L } || photoIds.distinct().size != photoIds.size) fail(ErrorCode.INVALID_INPUT)
-
-        members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
-        // Bunch first, then photos in ascending ID order: the same order every other photo write uses.
-        lockBunch(bunchId)
-        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        val administrator = membership.role == MembershipRole.OWNER
-
-        val found = photos.findAllLockedByIdInOrderByIdAsc(photoIds)
-        if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
-            fail(ErrorCode.INVALID_INPUT)
-        }
-        // A picked photo that is already gone runs nothing (3.3.1). The app drops the named photos from its selection.
-        val foundIds = found.map { it.id }.toSet()
-        val gone = photoIds.filter { it !in foundIds }
-        if (gone.isNotEmpty()) {
-            throw BusinessException(ErrorCode.PHOTO_SELECTION_CHANGED, mapOf("missingPhotoIds" to gone))
-        }
-
-        val uploaderIds = uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(found.map { it.id })
-            .groupBy({ it.photo.id }, { it.member.id })
-        val ownPhotoIds = found.filter { userId in uploaderIds[it.id].orEmpty() }.map { it.id }.toSet()
-        if (!administrator && ownPhotoIds.size != found.size) fail(ErrorCode.FORBIDDEN)
+        val selection = lockSelection(userId, bunchId, photoIds)
+        val ownPhotoIds = requireManageable(selection, userId)
 
         var deleted = 0
         var uploaderRemoved = 0
-        found.forEach { photo ->
+        selection.photos.forEach { photo ->
             if (photo.id !in ownPhotoIds) {
                 if (deletePhoto(bunchId, photo.id)) deleted++
                 return@forEach
@@ -451,6 +431,37 @@ class PhotoService(
         imageAssets.releaseAfterCommit(assetId)
     }
 
+    // ---- Change the date ----
+
+    /**
+     * Sets the capture date of the photos a member picked, or clears it (3.4.1, 3.4.2). The whole selection succeeds
+     * or fails together. The time of a photo stays: only the date changes, and the source becomes the user.
+     */
+    @Transactional
+    fun changeDate(userId: Long, bunchId: Long, request: PhotoDateChangeRequest): PhotoDateChangeResponse {
+        val newDate = request.capturedDate
+        // Exactly one of the two, so a request that leaves both out cannot clear a date by accident.
+        if ((newDate != null) == request.clearDate) fail(ErrorCode.INVALID_INPUT)
+        if (newDate != null && newDate.isAfter(PhotoUploadLimits.today(Instant.now()))) fail(ErrorCode.INVALID_INPUT)
+
+        val selection = lockSelection(userId, bunchId, request.photoIds)
+        requireManageable(selection, userId)
+        // Only a date the user set can be taken back. A shooting date or a time is never cleared by a request.
+        if (newDate == null && selection.photos.any { it.dateSource != DateSource.USER || it.capturedTime != null }) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+
+        val ids = selection.photos.map { it.id }
+        // Read before the update: the dates the photos leave are the dates whose recommendations must be recalculated.
+        val leftDates = selection.photos.mapNotNull { it.capturedDate }.toSet()
+        if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate)
+        // No photo was added, so the "last photo added" time of a recommendation must not move (4.2.9).
+        (leftDates + listOfNotNull(newDate)).forEach {
+            events.publishEvent(PhotoChangedEvent(bunchId, it, photoAdded = false))
+        }
+        return PhotoDateChangeResponse(ids.size)
+    }
+
     // ---- Processing status ----
 
     /** Returns true only when this call moved the photo from PENDING to READY. */
@@ -469,6 +480,50 @@ class PhotoService(
 
     private fun lockBunch(bunchId: Long) =
         bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+
+    private class LockedSelection(val photos: List<Photo>, val administrator: Boolean)
+
+    /**
+     * What a write on picked photos starts with: the caller and the bunch, then the photos locked in ID order.
+     * A selection with a photo that is already gone runs nothing (3.3.1): the app drops the named photos from its
+     * selection and asks again.
+     */
+    private fun lockSelection(userId: Long, bunchId: Long, photoIds: List<Long>): LockedSelection {
+        if (photoIds.isEmpty() || photoIds.size > MAX_PHOTOS_PER_REQUEST) fail(ErrorCode.INVALID_INPUT)
+        if (photoIds.any { it <= 0L } || photoIds.distinct().size != photoIds.size) fail(ErrorCode.INVALID_INPUT)
+
+        members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
+        // Bunch first, then photos in ascending ID order: the same order every other photo write uses.
+        lockBunch(bunchId)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
+
+        val found = photos.findAllLockedByIdInOrderByIdAsc(photoIds)
+        if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        val foundIds = found.map { it.id }.toSet()
+        val gone = photoIds.filter { it !in foundIds }
+        if (gone.isNotEmpty()) {
+            throw BusinessException(ErrorCode.PHOTO_SELECTION_CHANGED, mapOf("missingPhotoIds" to gone))
+        }
+        return LockedSelection(found, isAdministrator(membership.role))
+    }
+
+    /**
+     * An uploader may change what they uploaded and an administrator anything. One photo the caller may not touch
+     * rejects the request. Returns the IDs of the photos the caller uploaded.
+     */
+    private fun requireManageable(selection: LockedSelection, userId: Long): Set<Long> {
+        val uploadedByCaller = photos.findUploaderIdsByPhotoIds(selection.photos.map { it.id })
+            .filter { it.memberId == userId }
+            .map { it.photoId }
+            .toSet()
+        if (!selection.administrator && uploadedByCaller.size != selection.photos.size) fail(ErrorCode.FORBIDDEN)
+        return uploadedByCaller
+    }
+
+    // A co-administrator has the same photo rights (5.6.2). Add that role here when it exists.
+    private fun isAdministrator(role: MembershipRole) = role == MembershipRole.OWNER
 
     private fun validateReadySelection(
         bunchId: Long,

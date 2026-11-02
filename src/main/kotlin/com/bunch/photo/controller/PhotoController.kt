@@ -2,6 +2,7 @@ package com.bunch.photo.controller
 
 import com.bunch.global.common.ApiResponse
 import com.bunch.global.image.PhotoImageStorage
+import com.bunch.photo.dto.PhotoDateChangeRequest
 import com.bunch.photo.dto.PhotoDeleteRequest
 import com.bunch.photo.dto.PhotoUploadRequest
 import com.bunch.photo.dto.PhotoUploadResponse
@@ -60,6 +61,13 @@ class PhotoController(
         @PathVariable bunchId: Long,
         @PathVariable photoId: Long
     ) = ApiResponse.ok(photoService.getDetail(userId.toLong(), bunchId, photoId))
+
+    @PostMapping("/date")
+    fun changeDate(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable bunchId: Long,
+        @RequestBody request: PhotoDateChangeRequest
+    ) = ApiResponse.ok(photoService.changeDate(userId.toLong(), bunchId, request))
 
     @PostMapping("/delete")
     fun delete(

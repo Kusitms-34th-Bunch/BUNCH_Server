@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.time.LocalDate
 
 // The photo box list: READY photos with a date, newest date first, then the later time, then the lower ID.
 // A photo without a time comes last in its day, so a cursor with a time also reaches the photos without one.
@@ -104,6 +105,21 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllLockedByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
+
+    // The caller holds the photo locks, so an update by ID is enough. The time is not touched: only the date changes.
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update Photo p set p.capturedDate = :date, p.dateSource = com.bunch.photo.domain.DateSource.USER " +
+            "where p.id in :ids"
+    )
+    fun setCapturedDate(@Param("ids") ids: Collection<Long>, @Param("date") date: LocalDate): Int
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update Photo p set p.capturedDate = null, p.capturedTime = null, " +
+            "p.dateSource = com.bunch.photo.domain.DateSource.UNKNOWN where p.id in :ids"
+    )
+    fun clearCapturedDate(@Param("ids") ids: Collection<Long>): Int
 
     // The status guard makes the change atomic and repeatable without loading the photo.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
