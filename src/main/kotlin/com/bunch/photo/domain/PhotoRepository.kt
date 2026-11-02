@@ -25,6 +25,17 @@ private const val AFTER_CURSOR =
         "(:#{#after.hasTime} = false and p.capturedTime is null and p.id > :#{#after.id}))))"
 private const val LIST_ORDER = " order by p.capturedDate desc, p.capturedTime desc nulls last, p.id asc"
 
+// Photos without a capture date, newest upload first. A photo the user dated has a date, so it is not here.
+private const val READY_IN_BUNCH =
+    " where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY"
+private const val UNDATED_PHOTOS =
+    "select p.id as id, a.url as imageUrl from Photo p join p.imageAsset a" + READY_IN_BUNCH +
+        " and p.capturedDate is null"
+private const val UNDATED_COUNT =
+    "select count(p) from Photo p" + READY_IN_BUNCH + " and p.capturedDate is null"
+private const val UNDATED_AFTER = " and p.id < :#{#after.id}"
+private const val UNDATED_ORDER = " order by p.id desc"
+
 interface PhotoRepository : JpaRepository<Photo, Long> {
     fun findByBunchIdAndFileHash(bunchId: Long, fileHash: String): Photo?
 
@@ -51,6 +62,41 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
             "where u.photo.id in :photoIds order by u.photo.id asc, u.id asc"
     )
     fun findUploaderIdsByPhotoIds(@Param("photoIds") photoIds: Collection<Long>): List<PhotoUploaderIds>
+
+    @Query(UNDATED_PHOTOS + UNDATED_AFTER + UNDATED_ORDER)
+    fun findUndatedPage(
+        @Param("bunchId") bunchId: Long,
+        @Param("after") after: PhotoUndatedCursor,
+        limit: Limit
+    ): List<PhotoUndatedRow>
+
+    @Query(UNDATED_PHOTOS + UPLOADED_BY + UNDATED_AFTER + UNDATED_ORDER)
+    fun findUndatedPageByUploader(
+        @Param("bunchId") bunchId: Long,
+        @Param("uploaderId") uploaderId: Long,
+        @Param("after") after: PhotoUndatedCursor,
+        limit: Limit
+    ): List<PhotoUndatedRow>
+
+    @Query(UNDATED_COUNT)
+    fun countUndated(@Param("bunchId") bunchId: Long): Long
+
+    @Query(UNDATED_COUNT + UPLOADED_BY)
+    fun countUndatedByUploader(@Param("bunchId") bunchId: Long, @Param("uploaderId") uploaderId: Long): Long
+
+    // A photo of another bunch or one that is not ready is the same as no photo.
+    @Query(
+        "select p.id as id, p.capturedDate as capturedDate, a.url as imageUrl " +
+            "from Photo p join p.imageAsset a" + READY_IN_BUNCH + " and p.id = :photoId"
+    )
+    fun findDetail(@Param("bunchId") bunchId: Long, @Param("photoId") photoId: Long): PhotoDetailRow?
+
+    // The badge shows the member as they are now, so the nickname and profile image are read from the member.
+    @Query(
+        "select m.id as memberId, m.nickname as nickname, a.url as imageUrl from PhotoUploader u " +
+            "join u.member m left join m.profileImageAsset a where u.photo.id = :photoId order by u.id asc"
+    )
+    fun findUploaderProfiles(@Param("photoId") photoId: Long): List<PhotoUploaderProfile>
 
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>

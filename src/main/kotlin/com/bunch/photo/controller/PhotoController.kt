@@ -45,6 +45,22 @@ class PhotoController(
         @RequestParam(defaultValue = "${PhotoService.DEFAULT_SIZE}") size: Int
     ) = ApiResponse.ok(photoService.list(userId.toLong(), bunchId, memberId, cursor, size))
 
+    @GetMapping("/undated")
+    fun listUndated(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable bunchId: Long,
+        @RequestParam(required = false) memberId: Long?,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "${PhotoService.DEFAULT_SIZE}") size: Int
+    ) = ApiResponse.ok(photoService.listUndated(userId.toLong(), bunchId, memberId, cursor, size))
+
+    @GetMapping("/{photoId}")
+    fun detail(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable bunchId: Long,
+        @PathVariable photoId: Long
+    ) = ApiResponse.ok(photoService.getDetail(userId.toLong(), bunchId, photoId))
+
     @PostMapping("/delete")
     fun delete(
         @AuthenticationPrincipal userId: String,

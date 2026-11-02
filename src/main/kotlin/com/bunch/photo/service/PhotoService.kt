@@ -18,12 +18,17 @@ import com.bunch.photo.domain.DateSource
 import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoListCursor
 import com.bunch.photo.domain.PhotoRepository
+import com.bunch.photo.domain.PhotoUndatedCursor
 import com.bunch.photo.domain.PhotoUploader
 import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
 import com.bunch.photo.dto.PhotoDeleteResponse
+import com.bunch.photo.dto.PhotoDetailResponse
+import com.bunch.photo.dto.PhotoDetailUploader
 import com.bunch.photo.dto.PhotoListItem
 import com.bunch.photo.dto.PhotoListResponse
+import com.bunch.photo.dto.PhotoUndatedItem
+import com.bunch.photo.dto.PhotoUndatedResponse
 import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
@@ -224,11 +229,8 @@ class PhotoService(
     // Reads only. The list is not kept in step with other members' uploads; the app asks again (3.1.1).
     @Transactional(readOnly = true)
     fun list(userId: Long, bunchId: Long, uploaderId: Long?, cursor: String?, size: Int): PhotoListResponse {
-        requireMember(userId, bunchId)
-        if (size !in 1..MAX_SIZE) fail(ErrorCode.INVALID_INPUT)
+        requireListQuery(userId, bunchId, uploaderId, size)
         val after = cursor?.let(PhotoListCursor::decode)
-        // A filter on someone who is not a member could never be picked from the chips.
-        if (uploaderId != null && !isMember(uploaderId, bunchId)) fail(ErrorCode.INVALID_INPUT)
 
         // One extra row tells whether another page follows.
         val position = after ?: PhotoListCursor.FIRST
@@ -239,11 +241,7 @@ class PhotoService(
             photos.findListPageByUploader(bunchId, uploaderId, position, limit)
         }
         val page = rows.take(size)
-        val uploaderIds = if (page.isEmpty()) {
-            emptyMap()
-        } else {
-            photos.findUploaderIdsByPhotoIds(page.map { it.id }).groupBy({ it.photoId }, { it.memberId })
-        }
+        val uploaderIds = uploaderIdsOf(page.map { it.id })
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) {
             PhotoListCursor(last.capturedDate, last.capturedTime, last.id).encode()
@@ -265,6 +263,74 @@ class PhotoService(
             nextCursor = nextCursor
         )
     }
+
+    // ---- Undated list and detail ----
+
+    // The "photos to date" area of the photo box and of bundle creation. Same paging as the list (3.1.5, 4.1.1).
+    @Transactional(readOnly = true)
+    fun listUndated(userId: Long, bunchId: Long, uploaderId: Long?, cursor: String?, size: Int): PhotoUndatedResponse {
+        requireListQuery(userId, bunchId, uploaderId, size)
+        val after = cursor?.let(PhotoUndatedCursor::decode)
+
+        val position = after ?: PhotoUndatedCursor.FIRST
+        val limit = Limit.of(size + 1)
+        val rows = if (uploaderId == null) {
+            photos.findUndatedPage(bunchId, position, limit)
+        } else {
+            photos.findUndatedPageByUploader(bunchId, uploaderId, position, limit)
+        }
+        val page = rows.take(size)
+        val uploaderIds = uploaderIdsOf(page.map { it.id })
+        val last = page.lastOrNull()
+        val nextCursor = if (rows.size > size && last != null) PhotoUndatedCursor(last.id).encode() else null
+        // The "N" of the area follows the member filter (3.1.2) and not the page.
+        val totalCount = if (uploaderId == null) {
+            photos.countUndated(bunchId)
+        } else {
+            photos.countUndatedByUploader(bunchId, uploaderId)
+        }
+        return PhotoUndatedResponse(
+            totalCount = totalCount,
+            photos = page.map {
+                PhotoUndatedItem(
+                    photoId = it.id,
+                    thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
+                    uploaderIds = uploaderIds[it.id].orEmpty()
+                )
+            },
+            nextCursor = nextCursor
+        )
+    }
+
+    // A photo that is gone, of another bunch or not ready is not found (3.1.3 and 3.5.1 exceptions).
+    @Transactional(readOnly = true)
+    fun getDetail(userId: Long, bunchId: Long, photoId: Long): PhotoDetailResponse {
+        requireMember(userId, bunchId)
+        val photo = photos.findDetail(bunchId, photoId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        return PhotoDetailResponse(
+            photoId = photo.id,
+            imageUrl = photo.imageUrl,
+            capturedDate = photo.capturedDate,
+            uploaders = photos.findUploaderProfiles(photoId)
+                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) }
+        )
+    }
+
+    // The checks both lists start with: the caller, the page size and the member filter.
+    private fun requireListQuery(userId: Long, bunchId: Long, uploaderId: Long?, size: Int) {
+        requireMember(userId, bunchId)
+        if (size !in 1..MAX_SIZE) fail(ErrorCode.INVALID_INPUT)
+        // A filter on someone who is not a member could never be picked from the chips.
+        if (uploaderId != null && !isMember(uploaderId, bunchId)) fail(ErrorCode.INVALID_INPUT)
+    }
+
+    // The uploaders of each photo in the order they uploaded, from one query for the whole page.
+    private fun uploaderIdsOf(photoIds: List<Long>): Map<Long, List<Long>> =
+        if (photoIds.isEmpty()) {
+            emptyMap()
+        } else {
+            photos.findUploaderIdsByPhotoIds(photoIds).groupBy({ it.photoId }, { it.memberId })
+        }
 
     private fun requireMember(userId: Long, bunchId: Long) {
         members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
