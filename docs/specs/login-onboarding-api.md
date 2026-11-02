@@ -131,7 +131,6 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
 | GET /api/v1/bunches/{id}/members | 없음 | canonical `[{memberId,nickname,imageUrl,role}]`; INTERNAL/허용된 EXTERNAL의 ACTIVE 멤버([상세](#bunch-members)) |
-| GET /api/v1/bunches/{id}/public-members | 없음 | `/members`와 같은 필드의 `{items:[...]}` legacy wrapper |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
 | GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
@@ -188,7 +187,7 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 멤버 목록이다. 사진함·번들 만들기의 멤버별 필터 칩(사진함 3.1.2, 번들 만들기 4.1.1),
 번들 참여 멤버 추가(4.3.2), 멤버 관리(5.6.1)가 내부 범위에서 함께 쓴다. 대상이 서버 current의
 ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책을 적용하며, 허용된 경우에만
-대상의 ACTIVE 멤버를 반환한다. `/public-members`는 같은 목록을 `items`로 감싼 legacy wrapper다.
+대상의 ACTIVE 멤버 배열을 직접 반환한다. 별도 외부 멤버 조회 경로나 wrapper는 없다.
 
 | data 항목 | 타입·null 계약 |
 | --- | --- |

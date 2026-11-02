@@ -3,8 +3,6 @@ package com.bunch.bunch.dto
 import java.time.Instant
 import java.time.LocalDate
 
-data class BunchPublicMembersResponse(val items: List<BunchMemberResponse>)
-
 // The wire contract allows an object here. Bundle has no stored location yet, so values remain null.
 data class BunchPublicLocation(val name: String, val latitude: Double, val longitude: Double)
 

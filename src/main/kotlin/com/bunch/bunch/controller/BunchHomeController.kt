@@ -1,6 +1,5 @@
 package com.bunch.bunch.controller
 
-import com.bunch.bunch.dto.BunchPublicMembersResponse
 import com.bunch.bunch.service.BunchHomeService
 import com.bunch.bunch.service.BunchPublicService
 import com.bunch.global.common.ApiResponse
@@ -17,7 +16,7 @@ class BunchHomeController(
     private val home: BunchHomeService,
     private val content: BunchPublicService
 ) {
-    @GetMapping("/{bunchId}/home", "/{bunchId}/public-profile")
+    @GetMapping("/{bunchId}/home")
     fun home(
         @AuthenticationPrincipal memberId: String,
         @PathVariable bunchId: Long
@@ -29,13 +28,7 @@ class BunchHomeController(
         @PathVariable bunchId: Long
     ) = ApiResponse.ok(content.members(memberId.toLong(), bunchId))
 
-    @GetMapping("/{bunchId}/public-members")
-    fun publicMembers(
-        @AuthenticationPrincipal memberId: String,
-        @PathVariable bunchId: Long
-    ) = ApiResponse.ok(BunchPublicMembersResponse(content.members(memberId.toLong(), bunchId)))
-
-    @GetMapping("/{bunchId}/published-bundles", "/{bunchId}/public-bundles")
+    @GetMapping("/{bunchId}/published-bundles")
     fun bundles(
         @AuthenticationPrincipal memberId: String,
         @PathVariable bunchId: Long,
@@ -43,7 +36,7 @@ class BunchHomeController(
         @RequestParam(defaultValue = "20") size: Int
     ) = ApiResponse.ok(content.bundles(memberId.toLong(), bunchId, page, size))
 
-    @GetMapping("/{bunchId}/published-bundles/{bundleId}", "/{bunchId}/public-bundles/{bundleId}")
+    @GetMapping("/{bunchId}/published-bundles/{bundleId}")
     fun bundle(
         @AuthenticationPrincipal memberId: String,
         @PathVariable bunchId: Long,

@@ -71,27 +71,22 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 
 | 메서드·경로 | 입력 | data |
 | --- | --- | --- |
-| GET /{targetId}/home | 없음 | `BunchHomeResponse` (canonical) |
-| GET /{targetId}/public-profile | 없음 | `/home`와 같은 `BunchHomeResponse` (legacy alias) |
-| GET /{targetId}/members | 없음 | `List<BunchMemberResponse>` (canonical) |
-| GET /{targetId}/public-members | 없음 | `{items:BunchMemberResponse[]}` (legacy wrapper) |
-| GET /{targetId}/published-bundles | `page,size` | `BunchSocialPage<BunchPublicBundleCard>` (canonical) |
-| GET /{targetId}/published-bundles/{bundleId} | 없음 | `BunchPublicBundleDetail` (canonical) |
-| GET /{targetId}/public-bundles | `page,size` | canonical published-bundles page (legacy alias) |
-| GET /{targetId}/public-bundles/{bundleId} | 없음 | canonical published-bundles detail (legacy alias) |
+| GET /{targetId}/home | 없음 | `BunchHomeResponse` |
+| GET /{targetId}/members | 없음 | `List<BunchMemberResponse>` |
+| GET /{targetId}/published-bundles | `page,size` | `BunchSocialPage<BunchPublicBundleCard>` |
+| GET /{targetId}/published-bundles/{bundleId} | 없음 | `BunchPublicBundleDetail` |
 
-`/home`과 `/public-profile`은 [홈·프로필 계약](bunch-home-profile.md)의 동일한
-`BunchHomeResponse`를 반환한다. `accessScope`는 서버 current가 target의 ACTIVE 소속일 때만
+`/home`은 [홈·프로필 계약](bunch-home-profile.md)의 `BunchHomeResponse`를 반환하는
+유일한 프로필 조회 경로다. `accessScope`는 서버 current가 target의 ACTIVE 소속일 때만
 `INTERNAL`, 그 외(대상에 본인 ACTIVE 소속이 있어도 current가 아니면 포함)는 `EXTERNAL`이다.
-모든 `viewerBunchId` query는 현재 선택을 덮어쓰지 않으며, legacy 입력이 남아도 무시한다.
+`viewerBunchId`는 API 입력 계약에 없으며 query로 현재 선택을 덮어쓸 수 없다.
 
 `INTERNAL`이면 PUBLISHED 상태의 PUBLIC/PRIVATE 발행본을 모두 조회하고, `EXTERNAL`이면
 접근 flag가 허용하는 PUBLIC PUBLISHED만 조회한다. Stage는 두 범위 모두 전체 PUBLISHED
 개수의 0/2/6/10 기준을 사용하지만 외부 `publishedCount`는 `null`이다.
 
-`BunchMemberResponse`와 `BunchPublicMembersResponse`의 필드는 각각
-`{memberId,nickname,imageUrl,role}`와 `{items:[같은 필드]}`다. `role`은
-`OWNER→CO_OWNER→MEMBER`를 유지하고 메인/공동 관리자 배지는 [PRD 정렬 커밋 `d898c21`](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/commit/d898c21691201c1768f5f90e9e336d4cadd369e1)에
+`/members`는 `{memberId,nickname,imageUrl,role}`만 가진 `BunchMemberResponse` 배열을
+직접 반환한다. `role`은 `OWNER→CO_OWNER→MEMBER`를 유지하고 메인/공동 관리자 배지는 [PRD 정렬 커밋 `d898c21`](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/commit/d898c21691201c1768f5f90e9e336d4cadd369e1)에
 기록된 2026-10-29 제품 승인 근거를 따른다. `memberId`는 목록 연결용 기술 ID 예외이며,
 출생연도·성별·가입일·계정 상태·세션·관리 action·개인 프로필 이동·사진함·초안·PRIVATE 발행본·
 편집권은 반환하지 않는다.
@@ -108,6 +103,8 @@ comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
 나간 회원은 「나간 멤버」로 표시하며 탈퇴 계정 코멘트 원문은 노출하지 않는다.
 같은 memberId로 재참여하면 현재 프로필 표시를 복구하고 기여·코멘트를 복제하지 않는다.
 운영 숨김/제재 기능·소셜 댓글/좋아요 쓰기는 이 구현 범위 밖이다.
+
+기존 `public-*` 조회 경로와 멤버 wrapper는 제공하지 않는다. 제거한 경로는 인증 후에도 404다.
 
 ## 저장·알림·통합 조건
 

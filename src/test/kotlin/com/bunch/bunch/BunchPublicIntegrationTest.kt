@@ -51,14 +51,14 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `private profile exposes actual stage but selected viewer cannot borrow target membership`() {
+    fun `private home exposes actual stage but viewer query cannot borrow target membership`() {
         val actor = member()
         val viewer = create(actor).id
         val target = create(actor).id
         bunches.updateLastUsed(actor, viewer)
         published(target, actor, "PUBLIC")
         published(target, actor, "PRIVATE")
-        val profile = data(read(actor, target, "public-profile", target))
+        val profile = data(read(actor, target, "home", target))
         assertThat(profile.path("stage").asInt()).isEqualTo(2)
         assertThat(profile.path("memberCount").asLong()).isEqualTo(1)
         assertThat(profile.path("currentBunchId").asLong()).isEqualTo(viewer)
@@ -89,27 +89,27 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(profile.path("bunch").fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
             "id", "name", "introduction", "imageUrl", "characterType", "visibility"
         )
-        listOf("members", "public-members", "published-bundles", "public-bundles", "followers", "following").forEach {
+        listOf("members", "published-bundles", "followers", "following").forEach {
             read(actor, target, it, viewer).error(ErrorCode.FORBIDDEN)
         }
         val pendingId = social.follow(actor, viewer, target).followId!!
         read(actor, target, "published-bundles", target).error(ErrorCode.FORBIDDEN)
         social.decide(actor, target, pendingId, FollowDecision.APPROVE)
-        read(actor, target, "public-members", target).andExpect(status().isOk)
+        read(actor, target, "members", target).andExpect(status().isOk)
         val visible = data(read(actor, target, "published-bundles", target))
         assertThat(visible.path("totalElements").asLong()).isEqualTo(1)
-        val approved = data(read(actor, target, "public-profile", target))
+        val approved = data(read(actor, target, "home", target))
         assertThat(approved.path("canViewBundles").asBoolean()).isTrue()
         assertThat(approved.path("canViewMembers").asBoolean()).isTrue()
         assertThat(approved.path("canViewRelations").asBoolean()).isTrue()
         assertThat(approved.path("followState").asText()).isEqualTo("FOLLOWING")
         assertThat(approved.path("followId").asLong()).isEqualTo(pendingId)
         social.cancel(actor, viewer, target, pendingId)
-        read(actor, target, "public-bundles", target).error(ErrorCode.FORBIDDEN)
+        read(actor, target, "published-bundles", target).error(ErrorCode.FORBIDDEN)
     }
 
     @Test
-    fun `public reads permit zero memberships and apply bilateral blocks to every external route`() {
+    fun `canonical reads permit zero memberships and apply bilateral blocks to every external route`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundleId = published(target, owner, "PUBLIC")
@@ -123,25 +123,23 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(visitorProfile.path("permissions").path("canInvite").asBoolean()).isFalse()
         assertThat(visitorProfile.path("followState").asText()).isEqualTo("NONE")
         assertThat(visitorProfile.path("followId").isNull).isTrue()
-        read(visitor, target, "public-profile").andExpect(status().isOk)
-        read(visitor, target, "public-members").andExpect(status().isOk)
-        read(visitor, target, "public-bundles/$bundleId").andExpect(status().isOk)
+        read(visitor, target, "members").andExpect(status().isOk)
+        read(visitor, target, "published-bundles/$bundleId").andExpect(status().isOk)
         val viewerOwner = member()
         val viewer = create(viewerOwner).id
-        val viewerProfile = data(read(viewerOwner, target, "public-profile", target))
+        val viewerProfile = data(read(viewerOwner, target, "home", target))
         assertThat(viewerProfile.path("currentBunchId").asLong()).isEqualTo(viewer)
         assertThat(viewerProfile.path("accessScope").asText()).isEqualTo("EXTERNAL")
-        read(member(false), target, "public-profile").error(ErrorCode.SIGNUP_INCOMPLETE)
-        mvc.perform(get("/api/v1/bunches/$target/public-profile")).andExpect(status().isUnauthorized)
+        read(member(false), target, "home").error(ErrorCode.SIGNUP_INCOMPLETE)
+        mvc.perform(get("/api/v1/bunches/$target/home")).andExpect(status().isUnauthorized)
         social.block(owner, target, viewer)
         listOf(
-            "home", "public-profile", "members", "public-members", "published-bundles",
-            "public-bundles", "public-bundles/$bundleId", "followers"
+            "home", "members", "published-bundles", "published-bundles/$bundleId", "followers", "following"
         ).forEach {
             read(viewerOwner, target, it, viewer).error(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
         }
-        read(owner, viewer, "public-profile", target).error(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
-        read(visitor, Long.MAX_VALUE, "public-profile").error(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        read(owner, viewer, "home", target).error(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
+        read(visitor, Long.MAX_VALUE, "home").error(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
 
         val privateTarget = create(owner).id
         val privateBundle = published(privateTarget, owner, "PUBLIC")
@@ -187,7 +185,7 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `public bundle list detail and pagination omit private content and recheck changes`() {
+    fun `published bundle list detail and pagination omit private external content and recheck changes`() {
         val owner = member()
         val target = publicBunch(owner)
         val viewerOwner = member()
@@ -204,13 +202,6 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
                 .param("viewerBunchId", target.toString())
                 .param("size", "1")
         ))
-        val legacyPage = data(mvc.perform(
-            get("/api/v1/bunches/$target/public-bundles")
-                .header("Authorization", auth)
-                .param("viewerBunchId", target.toString())
-                .param("size", "1")
-        ))
-        assertThat(legacyPage).isEqualTo(result)
         assertThat(result.path("totalElements").asLong()).isEqualTo(2)
         assertThat(result.path("hasNext").asBoolean()).isTrue()
         assertThat(result.path("items").single().path("id").asLong()).isEqualTo(last)
@@ -232,24 +223,24 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(internalPage.path("totalElements").asLong()).isEqualTo(3)
         assertThat(internalPage.path("items").map { it.path("id").asLong() })
             .containsExactly(privateId, last, first)
-        val internalDetail = data(read(owner, target, "public-bundles/$privateId"))
+        val internalDetail = data(read(owner, target, "published-bundles/$privateId"))
         assertThat(internalDetail.path("id").asLong()).isEqualTo(privateId)
-        read(viewerOwner, target, "public-bundles/$privateId", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
-        read(viewerOwner, target, "public-bundles/$draft", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
+        read(viewerOwner, target, "published-bundles/$privateId", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
+        read(viewerOwner, target, "published-bundles/$draft", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
         val otherTarget = publicBunch(member())
-        read(viewerOwner, otherTarget, "public-bundles/$first", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
+        read(viewerOwner, otherTarget, "published-bundles/$first", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
         mvc.perform(
-            get("/api/v1/bunches/$target/public-bundles")
+            get("/api/v1/bunches/$target/published-bundles")
                 .header("Authorization", auth).param("viewerBunchId", viewer.toString()).param("size", "51")
         ).error(ErrorCode.INVALID_INPUT)
         jdbc.update("UPDATE bundles SET visibility = 'PRIVATE' WHERE id = ?", last)
-        read(viewerOwner, target, "public-bundles/$last", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
+        read(viewerOwner, target, "published-bundles/$last", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
         jdbc.update("UPDATE bunches SET visibility = 'PRIVATE' WHERE id = ?", target)
-        read(viewerOwner, target, "public-bundles/$first", viewer).error(ErrorCode.FORBIDDEN)
+        read(viewerOwner, target, "published-bundles/$first", viewer).error(ErrorCode.FORBIDDEN)
     }
 
     @Test
-    fun `public members and published attribution minimize personal data and restore rejoined profiles`() {
+    fun `members array and published attribution minimize personal data and restore rejoined profiles`() {
         val owner = member()
         val target = publicBunch(owner)
         val coOwner = member()
@@ -270,25 +261,23 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
             )
         }
         val visitor = member()
-        val canonicalPeople = data(read(visitor, target, "members"))
-        assertThat(canonicalPeople.isArray).isTrue()
-        assertThat(canonicalPeople.map { it.fieldNames().asSequence().toSet() }.toSet()).containsOnly(
+        val people = data(read(visitor, target, "members"))
+        assertThat(people.isArray).isTrue()
+        assertThat(people.map { it.fieldNames().asSequence().toSet() }.toSet()).containsOnly(
             setOf("memberId", "nickname", "imageUrl", "role")
         )
-        val people = data(read(visitor, target, "public-members")).path("items")
-        assertThat(people).isEqualTo(canonicalPeople)
         assertThat(people.map { it.path("role").asText() }).containsExactly("OWNER", "CO_OWNER")
         assertThat(people.first().fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
             "memberId", "nickname", "imageUrl", "role"
         )
-        assertThat(data(read(visitor, target, "public-profile")).path("memberCount").asLong()).isEqualTo(2)
-        val old = data(read(visitor, target, "public-bundles/$bundleId"))
+        assertThat(data(read(visitor, target, "home")).path("memberCount").asLong()).isEqualTo(2)
+        val old = data(read(visitor, target, "published-bundles/$bundleId"))
         assertThat(old.path("comments").first().path("nickname").asText()).isEqualTo("나간 멤버")
         assertThat(old.path("comments").first().path("content").asText()).isEqualTo("kept comment")
         assertThat(old.path("comments")[1].path("content").isNull).isTrue()
         jdbc.update("UPDATE members SET nickname = ? WHERE id = ?", "복귀${returning}", returning)
         join(returning, issue(owner, target))
-        val restored = data(read(visitor, target, "public-bundles/$bundleId"))
+        val restored = data(read(visitor, target, "published-bundles/$bundleId"))
         assertThat(restored.path("contributors").first().path("nickname").asText()).isEqualTo("복귀${returning}")
         assertThat(restored.path("comments").first().path("nickname").asText()).isEqualTo("복귀${returning}")
         assertThat(restored.path("comments")).hasSize(2)

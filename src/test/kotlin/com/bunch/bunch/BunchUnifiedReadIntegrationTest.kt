@@ -51,7 +51,7 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `home and public profile share one response while external reads hide internal data`() {
+    fun `home hides internal data until server current selects target despite viewer query injection`() {
         val actor = member()
         val current = create(actor, "현재 번치").id
         val target = create(actor, "대상 번치").id
@@ -68,16 +68,18 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
                     .param("viewerBunchId", target.toString())
             )
         )
-        val alias = data(
+        val unavailableViewerHome = data(
             mvc.perform(
-                get("/api/v1/bunches/$target/public-profile")
+                get("/api/v1/bunches/$target/home")
                     .header(HttpHeaders.AUTHORIZATION, auth.header)
                     .param("viewerBunchId", Long.MAX_VALUE.toString())
             )
         )
 
         assertHomeKeys(external)
-        assertThat(alias).isEqualTo(external)
+        assertThat(unavailableViewerHome.path("currentBunchId").asLong()).isEqualTo(current)
+        assertThat(unavailableViewerHome.path("accessScope").asText()).isEqualTo("EXTERNAL")
+        assertThat(unavailableViewerHome.path("myMembership").isNull).isTrue()
         assertThat(external.path("bunch").path("id").asLong()).isEqualTo(target)
         assertThat(external.path("currentBunchId").asLong()).isEqualTo(current)
         assertThat(external.path("accessScope").asText()).isEqualTo("EXTERNAL")
@@ -107,17 +109,11 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
             mvc.perform(
                 get("/api/v1/bunches/$target/home")
                     .header(HttpHeaders.AUTHORIZATION, auth.header)
-            )
-        )
-        val internalAlias = data(
-            mvc.perform(
-                get("/api/v1/bunches/$target/public-profile")
-                    .header(HttpHeaders.AUTHORIZATION, auth.header)
+                    .param("viewerBunchId", current.toString())
             )
         )
 
         assertHomeKeys(internal)
-        assertThat(internalAlias).isEqualTo(internal)
         assertThat(internal.path("accessScope").asText()).isEqualTo("INTERNAL")
         assertThat(internal.path("currentBunchId").asLong()).isEqualTo(target)
         assertThat(internal.path("isCurrentBunch").asBoolean()).isTrue()
@@ -323,13 +319,6 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
         assertMinimalMembers(internalMembers)
         assertThat(internalMembers.map { it.path("role").asText() })
             .containsExactly("OWNER", "CO_OWNER", "MEMBER")
-        val wrappedMembers = data(
-            mvc.perform(
-                get("/api/v1/bunches/$target/public-members")
-                    .header(HttpHeaders.AUTHORIZATION, session(owner).header)
-            )
-        )
-        assertThat(wrappedMembers.path("items")).isEqualTo(internalMembers)
 
         val internalPage = data(
             mvc.perform(
@@ -341,13 +330,6 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
         assertThat(internalPage.path("totalElements").asLong()).isEqualTo(2)
         assertThat(internalPage.path("items").map { it.path("id").asLong() })
             .containsExactly(privateBundle, publicBundle)
-        val internalAlias = data(
-            mvc.perform(
-                get("/api/v1/bunches/$target/public-bundles")
-                    .header(HttpHeaders.AUTHORIZATION, session(owner).header)
-            )
-        )
-        assertThat(internalAlias).isEqualTo(internalPage)
         assertThat(
             data(
                 mvc.perform(
@@ -380,17 +362,58 @@ class BunchUnifiedReadIntegrationTest : BunchIntegrationSupport() {
         assertPageKeys(externalPage)
         assertThat(externalPage.path("totalElements").asLong()).isEqualTo(1)
         assertThat(externalPage.path("items").single().path("id").asLong()).isEqualTo(publicBundle)
-        val externalAlias = data(
-            mvc.perform(
-                get("/api/v1/bunches/$target/public-bundles")
-                    .header(HttpHeaders.AUTHORIZATION, session(viewer).header)
-                    .param("viewerBunchId", target.toString())
-            )
-        )
-        assertThat(externalAlias).isEqualTo(externalPage)
         read(viewer, target, "published-bundles/$privateBundle", target).error(ErrorCode.RESOURCE_NOT_FOUND)
         read(viewer, target, "published-bundles/$draft", target).error(ErrorCode.RESOURCE_NOT_FOUND)
-        read(viewer, target, "public-bundles/$privateBundle", target).error(ErrorCode.RESOURCE_NOT_FOUND)
+    }
+
+    @Test
+    fun `removed read paths return 404 for owner and external viewer while canonical reads work`() {
+        val owner = member()
+        val target = create(owner, "공개 조회 대상").id
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", target)
+        val bundleId = insertBundle(target, owner, "PUBLISHED", Visibility.PUBLIC)
+        val visitor = member()
+        val removedPaths = listOf(
+            "public-profile", "public-members", "public-bundles", "public-bundles/$bundleId"
+        )
+
+        listOf(owner to "INTERNAL", visitor to "EXTERNAL").forEach { (memberId, expectedScope) ->
+            val auth = session(memberId).header
+            val home = data(mvc.perform(
+                get("/api/v1/bunches/$target/home").header(HttpHeaders.AUTHORIZATION, auth)
+            ))
+            assertHomeKeys(home)
+            assertThat(home.path("bunch").path("id").asLong()).isEqualTo(target)
+            assertThat(home.path("accessScope").asText()).isEqualTo(expectedScope)
+            if (memberId == owner) {
+                assertThat(home.path("currentBunchId").asLong()).isEqualTo(target)
+            } else {
+                assertThat(home.path("currentBunchId").isNull).isTrue()
+            }
+
+            val people = data(mvc.perform(
+                get("/api/v1/bunches/$target/members").header(HttpHeaders.AUTHORIZATION, auth)
+            ))
+            assertMinimalMembers(people)
+            assertThat(people.single().path("memberId").asLong()).isEqualTo(owner)
+            val page = data(mvc.perform(
+                get("/api/v1/bunches/$target/published-bundles").header(HttpHeaders.AUTHORIZATION, auth)
+            ))
+            assertPageKeys(page)
+            assertThat(page.path("totalElements").asLong()).isEqualTo(1)
+            assertThat(page.path("items").single().path("id").asLong()).isEqualTo(bundleId)
+            val detail = data(mvc.perform(
+                get("/api/v1/bunches/$target/published-bundles/$bundleId")
+                    .header(HttpHeaders.AUTHORIZATION, auth)
+            ))
+            assertThat(detail.path("id").asLong()).isEqualTo(bundleId)
+
+            removedPaths.forEach { path ->
+                mvc.perform(
+                    get("/api/v1/bunches/$target/$path").header(HttpHeaders.AUTHORIZATION, auth)
+                ).andExpect(status().isNotFound)
+            }
+        }
     }
 
     private fun assertHomeKeys(node: JsonNode) {
