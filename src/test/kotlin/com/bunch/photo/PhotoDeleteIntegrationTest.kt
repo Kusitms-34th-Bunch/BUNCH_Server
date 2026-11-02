@@ -1,6 +1,5 @@
 package com.bunch.photo
 
-import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleRepository
@@ -8,8 +7,6 @@ import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.image.ProfileImageStorage
-import com.bunch.global.redis.RefreshTokenRepository
-import com.bunch.global.security.TokenProvider
 import com.bunch.image.domain.ImageAsset
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.photo.domain.DateSource
@@ -31,7 +28,6 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -47,16 +43,7 @@ import java.util.concurrent.TimeUnit
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
-    @Autowired
-    private lateinit var mvc: MockMvc
-
-    @Autowired
-    private lateinit var tokens: TokenProvider
-
-    @Autowired
-    private lateinit var sessions: RefreshTokenRepository
-
+class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     @Autowired
     private lateinit var bunchRepository: BunchRepository
 
@@ -81,7 +68,6 @@ class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
     @MockitoBean
     private lateinit var storage: ProfileImageStorage
 
-    private val sessionIds = mutableListOf<Pair<String, Long>>()
     private val ownedAssetIds = mutableListOf<Long>()
 
     @AfterEach
@@ -97,8 +83,6 @@ class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM photos")
         ownedAssetIds.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
         ownedAssetIds.clear()
-        sessionIds.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
-        sessionIds.clear()
     }
 
     @Test
@@ -403,14 +387,6 @@ class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"photoIds":${photoIds.joinToString(prefix = "[", postfix = "]")}}""")
         )
-
-    private fun bearer(memberId: Long): String {
-        val pair = tokens.generateToken(memberId, "ROLE_USER")
-        val sessionId = tokens.getSessionId(pair.accessToken)
-        sessions.save(sessionId, memberId, pair.refreshToken, tokens.getRefreshTokenValiditySeconds())
-        sessionIds += sessionId to memberId
-        return "Bearer ${pair.accessToken}"
-    }
 
     private data class Fixture(val bunchId: Long, val owner: Long, val guest: Long, val third: Long)
 

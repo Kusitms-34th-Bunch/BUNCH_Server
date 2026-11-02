@@ -1,22 +1,14 @@
 package com.bunch.photo
 
-import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.global.exception.ErrorCode
-import com.bunch.global.redis.RefreshTokenRepository
-import com.bunch.global.security.TokenProvider
 import com.bunch.photo.domain.PhotoListCursor
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpHeaders
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -27,25 +19,9 @@ import java.util.UUID
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class PhotoUndatedListIntegrationTest : BunchIntegrationSupport() {
-    @Autowired
-    private lateinit var mvc: MockMvc
-
-    @Autowired
-    private lateinit var mapper: ObjectMapper
-
-    @Autowired
-    private lateinit var tokens: TokenProvider
-
-    @Autowired
-    private lateinit var sessions: RefreshTokenRepository
-
-    private val sessionIds = mutableListOf<Pair<String, Long>>()
-
+class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanUndatedFixtures() {
-        sessionIds.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
-        sessionIds.clear()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-undated/%'")
@@ -303,19 +279,6 @@ class PhotoUndatedListIntegrationTest : BunchIntegrationSupport() {
 
     private fun path(bunchId: Long) = "/api/v1/bunches/$bunchId/photos/undated"
 
-    private fun MvcResult.data(): JsonNode = mapper.readTree(response.contentAsString).path("data")
-
-    private fun bunchWithOwner(): Pair<Long, Long> {
-        val ownerId = member()
-        return ownerId to create(ownerId).id
-    }
-
-    private fun joined(ownerId: Long, bunchId: Long): Long {
-        val memberId = member()
-        join(memberId, issue(ownerId, bunchId))
-        return memberId
-    }
-
     // Inserts straight into the tables, so the list is tested without the upload flow.
     private fun photo(
         bunchId: Long,
@@ -375,17 +338,4 @@ class PhotoUndatedListIntegrationTest : BunchIntegrationSupport() {
         )
     }
 
-    private fun bearer(memberId: Long): String {
-        val pair = tokens.generateToken(memberId, "ROLE_USER")
-        val sessionId = tokens.getSessionId(pair.accessToken)
-        sessions.save(sessionId, memberId, pair.refreshToken, tokens.getRefreshTokenValiditySeconds())
-        sessionIds += sessionId to memberId
-        return "Bearer ${pair.accessToken}"
-    }
-
-    private fun ResultActions.expectError(error: ErrorCode): ResultActions =
-        andExpect(status().`is`(error.status))
-            .andExpect(jsonPath("$.success").value(false))
-            .andExpect(jsonPath("$.error.code").value(error.code))
-            .andExpect(jsonPath("$.error.message").value(error.messageKey))
 }

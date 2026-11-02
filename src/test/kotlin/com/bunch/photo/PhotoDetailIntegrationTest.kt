@@ -1,17 +1,12 @@
 package com.bunch.photo
 
-import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.global.exception.ErrorCode
-import com.bunch.global.redis.RefreshTokenRepository
-import com.bunch.global.security.TokenProvider
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpHeaders
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -21,22 +16,9 @@ import java.util.UUID
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class PhotoDetailIntegrationTest : BunchIntegrationSupport() {
-    @Autowired
-    private lateinit var mvc: MockMvc
-
-    @Autowired
-    private lateinit var tokens: TokenProvider
-
-    @Autowired
-    private lateinit var sessions: RefreshTokenRepository
-
-    private val sessionIds = mutableListOf<Pair<String, Long>>()
-
+class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanDetailFixtures() {
-        sessionIds.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
-        sessionIds.clear()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("UPDATE members SET profile_image_asset_id = NULL WHERE profile_image_asset_id IN " +
@@ -210,17 +192,6 @@ class PhotoDetailIntegrationTest : BunchIntegrationSupport() {
 
     private fun base(bunchId: Long) = "/api/v1/bunches/$bunchId/photos"
 
-    private fun bunchWithOwner(): Pair<Long, Long> {
-        val ownerId = member()
-        return ownerId to create(ownerId).id
-    }
-
-    private fun joined(ownerId: Long, bunchId: Long): Long {
-        val memberId = member()
-        join(memberId, issue(ownerId, bunchId))
-        return memberId
-    }
-
     private fun setProfileImage(memberId: Long, url: String) {
         val assetId = jdbc.queryForObject(
             "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
@@ -271,17 +242,4 @@ class PhotoDetailIntegrationTest : BunchIntegrationSupport() {
         return photoId
     }
 
-    private fun bearer(memberId: Long): String {
-        val pair = tokens.generateToken(memberId, "ROLE_USER")
-        val sessionId = tokens.getSessionId(pair.accessToken)
-        sessions.save(sessionId, memberId, pair.refreshToken, tokens.getRefreshTokenValiditySeconds())
-        sessionIds += sessionId to memberId
-        return "Bearer ${pair.accessToken}"
-    }
-
-    private fun ResultActions.expectError(error: ErrorCode): ResultActions =
-        andExpect(status().`is`(error.status))
-            .andExpect(jsonPath("$.success").value(false))
-            .andExpect(jsonPath("$.error.code").value(error.code))
-            .andExpect(jsonPath("$.error.message").value(error.messageKey))
 }
