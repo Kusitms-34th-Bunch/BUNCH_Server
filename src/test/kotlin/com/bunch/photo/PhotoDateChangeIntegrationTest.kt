@@ -104,6 +104,24 @@ class PhotoDateChangeIntegrationTest : PhotoHttpTestSupport() {
         assertThat(row(photoId)).isEqualTo(Row("2026-10-03", "08:00:00", "USER"))
     }
 
+    // 3.4.2: dragging changes only the date. The photo takes the place its shooting time gives it in that day,
+    // and photos without a time stay last in the order they were uploaded.
+    @Test
+    fun `a photo moved to a day takes the place of its shooting time and photos without a time stay last`() {
+        val fixture = fixture()
+        val undated = photo(fixture.bunchId, null, uploaders = listOf(fixture.guest))
+        val morning = photo(fixture.bunchId, "2026-10-03", "09:00:00")
+        val evening = photo(fixture.bunchId, "2026-10-03", "21:00:00")
+        val withoutTime = photo(fixture.bunchId, "2026-10-03", null)
+        val elsewhere = photo(fixture.bunchId, "2026-09-20", "15:00:00", uploaders = listOf(fixture.guest))
+
+        setDate(fixture.guest, fixture.bunchId, listOf(undated, elsewhere), "2026-10-03").andExpect(status().isOk)
+
+        // The later time comes first (3.1.3). 15:00 lands between 21:00 and 09:00. Among the photos without a time
+        // the one uploaded first comes first: the moved photo was uploaded before the one that already had a date.
+        assertThat(listedIds(fixture, "")).containsExactly(evening, elsewhere, morning, undated, withoutTime)
+    }
+
     @Test
     fun `today is allowed and tomorrow is rejected`() {
         val fixture = fixture()
