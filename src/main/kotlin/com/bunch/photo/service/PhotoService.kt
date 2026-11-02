@@ -292,10 +292,15 @@ class PhotoService(
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
         val administrator = membership.role == MembershipRole.OWNER
 
-        // A photo that is already gone is skipped, so a retry after a lost response is harmless.
         val found = photos.findAllLockedByIdInOrderByIdAsc(photoIds)
         if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
             fail(ErrorCode.INVALID_INPUT)
+        }
+        // A picked photo that is already gone runs nothing (3.3.1). The app drops the named photos from its selection.
+        val foundIds = found.map { it.id }.toSet()
+        val gone = photoIds.filter { it !in foundIds }
+        if (gone.isNotEmpty()) {
+            throw BusinessException(ErrorCode.PHOTO_SELECTION_CHANGED, mapOf("missingPhotoIds" to gone))
         }
 
         val uploaderIds = uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(found.map { it.id })

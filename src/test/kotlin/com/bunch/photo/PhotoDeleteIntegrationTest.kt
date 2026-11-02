@@ -278,18 +278,57 @@ class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
         assertThat(photos.existsById(pending.id)).isTrue()
     }
 
+    // 3.3.1: when a picked photo is already gone, nothing is run and the app drops it from the selection.
     @Test
-    fun `photos that are already gone are skipped so a retry is safe`() {
+    fun `a selection with a photo that is already gone deletes nothing and names the gone photo`() {
+        val fixture = fixture()
+        val first = photo(fixture.bunchId, listOf(fixture.guest))
+        val gone = photo(fixture.bunchId, listOf(fixture.guest))
+        val second = photo(fixture.bunchId, listOf(fixture.guest, fixture.third))
+        removeBehindTheScenes(gone)
+
+        delete(fixture.guest, fixture.bunchId, listOf(first.id, gone.id, second.id))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("PHOTO_004"))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(gone.id))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds.length()").value(1))
+
+        assertThat(photos.existsById(first.id)).isTrue()
+        assertThat(photos.existsById(second.id)).isTrue()
+        assertThat(uploaderIds(first.id)).containsExactly(fixture.guest)
+        assertThat(uploaderIds(second.id)).containsExactly(fixture.guest, fixture.third)
+        verifyNoInteractions(storage)
+    }
+
+    @Test
+    fun `a selection where every photo is gone names all of them and deletes nothing`() {
+        val fixture = fixture()
+        val firstGone = photo(fixture.bunchId, listOf(fixture.guest))
+        val secondGone = photo(fixture.bunchId, listOf(fixture.guest))
+        removeBehindTheScenes(firstGone)
+        removeBehindTheScenes(secondGone)
+
+        delete(fixture.guest, fixture.bunchId, listOf(firstGone.id, secondGone.id))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("PHOTO_004"))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds.length()").value(2))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(firstGone.id))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[1]").value(secondGone.id))
+    }
+
+    @Test
+    fun `sending a deletion again after it succeeded reports the photos as gone`() {
         val fixture = fixture()
         val mine = photo(fixture.bunchId, listOf(fixture.guest))
 
-        delete(fixture.guest, fixture.bunchId, listOf(mine.id, Long.MAX_VALUE))
+        delete(fixture.guest, fixture.bunchId, listOf(mine.id))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.deletedCount").value(1))
         delete(fixture.guest, fixture.bunchId, listOf(mine.id))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.deletedCount").value(0))
-            .andExpect(jsonPath("$.data.uploaderRemovedCount").value(0))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("PHOTO_004"))
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(mine.id))
 
         verify(storage, times(1)).delete(mine.imageAsset.publicId)
     }
@@ -392,6 +431,12 @@ class PhotoDeleteIntegrationTest : BunchIntegrationSupport() {
             Long::class.java,
             photoId
         )
+
+    /** Another member deleted the photo after the app had picked it. */
+    private fun removeBehindTheScenes(photo: Photo) {
+        jdbc.update("DELETE FROM photo_uploaders WHERE photo_id = ?", photo.id)
+        jdbc.update("DELETE FROM photos WHERE id = ?", photo.id)
+    }
 
     private fun photo(
         bunchId: Long,
