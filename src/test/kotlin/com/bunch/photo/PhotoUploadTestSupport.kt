@@ -4,8 +4,8 @@ import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.photo.service.PhotoService
 import com.bunch.photo.service.PhotoUploadCommand
-import com.bunch.photo.service.PhotoUploadService
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.mockito.ArgumentMatchers
@@ -23,7 +23,7 @@ import java.util.UUID
 
 abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
     @Autowired
-    protected lateinit var uploads: PhotoUploadService
+    protected lateinit var uploads: PhotoService
 
     @MockitoBean
     protected lateinit var storage: PhotoImageStorage

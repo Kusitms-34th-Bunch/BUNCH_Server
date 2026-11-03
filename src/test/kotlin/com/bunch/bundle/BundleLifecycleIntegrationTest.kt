@@ -34,7 +34,6 @@ import com.bunch.photo.service.PhotoUploaderRemovalResult
 import com.bunch.photo.service.PhotoService
 import com.bunch.bundle.controller.BundleSocketController
 import com.bunch.bundle.dto.BundleLeaseCommand
-import com.bunch.bundle.service.BundleRealtimeIdentity
 import com.bunch.bundle.service.BundleRealtimeSessionRegistry
 import com.bunch.global.security.JwtSessionDetails
 import org.springframework.messaging.simp.stomp.StompCommand
@@ -725,7 +724,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val draft = createDraft(owner, bunchId, listOf(photo(bunchId, listOf(owner)).id))
         val connectionId = UUID.randomUUID().toString()
         val sessionId = UUID.randomUUID().toString()
-        realtimeRegistry.bind(connectionId, BundleRealtimeIdentity(owner, sessionId))
+        realtimeRegistry.bind(connectionId, BundleActor(owner, sessionId))
         val headers = StompHeaderAccessor.create(StompCommand.SEND).apply {
             this.sessionId = connectionId
             user = UsernamePasswordAuthenticationToken(owner.toString(), null).apply {

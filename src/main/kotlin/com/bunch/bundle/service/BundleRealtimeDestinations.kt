@@ -1,11 +1,8 @@
 package com.bunch.bundle.service
 
 object BundleRealtimeDestinations {
-    const val APPLICATION_PREFIX = "/app"
     const val TOPIC_PREFIX = "/topic"
     const val USER_PREFIX = "/user"
-    const val LEASE_BROKER_QUEUE = "/queue/bundle-leases"
-    const val ACTIVITY_BROKER_QUEUE = "/queue/bundle-activity"
     const val LEASE_QUEUE = "/user/queue/bundle-leases"
     const val ACTIVITY_QUEUE = "/user/queue/bundle-activity"
 
@@ -22,7 +19,6 @@ object BundleRealtimeDestinations {
         if (destination == null) return null
         topicPattern.matchEntire(destination)?.let { match ->
             return BundleRealtimeTopicDestination(
-                destination = destination,
                 bunchId = match.groupValues[1].toLong(),
                 bundleId = match.groupValues[2].toLong()
             )
@@ -41,7 +37,6 @@ object BundleRealtimeDestinations {
             else -> return null
         }
         return BundleRealtimeCommandDestination(
-            destination = destination,
             bunchId = match.groupValues[1].toLong(),
             bundleId = match.groupValues[2].toLong(),
             command = command
