@@ -44,7 +44,7 @@ class InvitationRotationIntegrationTest : BunchIntegrationSupport() {
             assertThat(result.isFailure).isTrue()
             assertThat((result.exceptionOrNull() as BusinessException).errorCode).isEqualTo(ErrorCode.INVALID_INVITATION)
             assertThat(count("bunch_memberships")).isEqualTo(1)
-            assertThat(count("bunch_join_notifications")).isZero()
+            assertThat(countMemberJoinedNotifications()).isZero()
         } finally {
             revoked.countDown()
             executor.shutdownNow()

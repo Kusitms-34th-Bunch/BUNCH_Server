@@ -67,5 +67,8 @@ class Bundle(
     var updatedAt: Instant = createdAt,
 
     @Column(name = "published_at")
-    var publishedAt: Instant? = null
+    var publishedAt: Instant? = null,
+
+    @Column(name = "ready_notified_at")
+    var publishReadyNotifiedAt: Instant? = null
 )
