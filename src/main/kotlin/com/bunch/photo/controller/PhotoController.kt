@@ -4,13 +4,16 @@ import com.bunch.global.common.ApiResponse
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.photo.dto.PhotoUploadRequest
 import com.bunch.photo.dto.PhotoUploadResponse
+import com.bunch.photo.service.PhotoListService
 import com.bunch.photo.service.PhotoUploadService
 import org.springframework.http.MediaType
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.ModelAttribute
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
@@ -19,7 +22,8 @@ import org.springframework.web.multipart.MultipartFile
 @RequestMapping("/api/v1/bunches/{bunchId}/photos")
 class PhotoController(
     private val images: PhotoImageStorage,
-    private val uploads: PhotoUploadService
+    private val uploads: PhotoUploadService,
+    private val photoList: PhotoListService
 ) {
     @PostMapping(consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     fun upload(
@@ -31,4 +35,13 @@ class PhotoController(
         val command = request.toCommand(bunchId, userId.toLong())
         return ApiResponse.ok(PhotoUploadResponse.from(uploads.upload(command, images.inspect(photo))))
     }
+
+    @GetMapping
+    fun list(
+        @AuthenticationPrincipal userId: String,
+        @PathVariable bunchId: Long,
+        @RequestParam(required = false) memberId: Long?,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "${PhotoListService.DEFAULT_SIZE}") size: Int
+    ) = ApiResponse.ok(photoList.list(userId.toLong(), bunchId, memberId, cursor, size))
 }
