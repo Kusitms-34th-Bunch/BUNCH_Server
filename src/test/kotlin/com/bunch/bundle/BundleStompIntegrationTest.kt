@@ -2,9 +2,12 @@ package com.bunch.bundle
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.BundleActor
+import com.bunch.bundle.dto.BundleVisibilityRequest
+import com.bunch.bundle.dto.PublishBundleRequest
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.service.BundleService
@@ -198,6 +201,91 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
             first.json { it.path("type").asText() == "LEASE_RELEASED" }
             second.json { it.path("type").asText() == "LEASES" && it.path("data").path("states").isEmpty }
         }
+    }
+
+    @Test
+    fun `co owner participant keeps draft lease and read rights and published author can send comment activity`() {
+        val fixture = fixture()
+        jdbc.update(
+            "UPDATE bunch_memberships SET role = 'CO_OWNER' WHERE bunch_id = ? AND member_id = ?",
+            fixture.bunchId,
+            fixture.guest.memberId
+        )
+        val owner = connect(fixture.owner)
+        val coOwner = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(coOwner, fixture)
+        owner.clear()
+        coOwner.clear()
+        assertThat(getSnapshot(fixture, fixture.guest).path("permissions").path("administrator").asBoolean()).isTrue()
+        assertThat(getSnapshot(fixture, fixture.guest).path("permissions").path("canEdit").asBoolean()).isTrue()
+
+        coOwner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
+        val grant = coOwner.json { it.path("type").asText() == "LEASE_GRANTED" }
+        owner.json { it.path("type").asText() == "LEASES" }
+        bundles.title(
+            actor(fixture.guest),
+            fixture.bunchId,
+            fixture.bundleId,
+            BundleTextRequest("공동 관리자 제목", 0, BundleStatus.DRAFT,
+                UUID.fromString(grant.path("data").path("token").asText())),
+            "co-owner-title"
+        )
+        bundles.visibility(
+            actor(fixture.guest),
+            fixture.bunchId,
+            fixture.bundleId,
+            BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.DRAFT),
+            "co-owner-visibility"
+        )
+        listOf(fixture.owner, fixture.guest).forEach { author ->
+            bundles.comment(
+                actor(author),
+                fixture.bunchId,
+                fixture.bundleId,
+                BundleTextRequest("발행 코멘트", 0, BundleStatus.DRAFT),
+                "co-owner-comment-${author.memberId}"
+            )
+        }
+        val ready = bundles.get(fixture.guest.memberId, fixture.bunchId, fixture.bundleId)
+        val published = bundles.publish(
+            actor(fixture.guest),
+            fixture.bunchId,
+            fixture.bundleId,
+            UUID.randomUUID(),
+            PublishBundleRequest(ready.revision)
+        )
+        coOwner.json { it.path("type").asText() == "PUBLISHED" }
+        owner.json { it.path("type").asText() == "PUBLISHED" }
+        assertThat(published.permissions.canEdit).isFalse()
+        assertThat(getSnapshot(fixture, fixture.guest).path("status").asText()).isEqualTo("PUBLISHED")
+        val activityBefore = jdbc.queryForObject(
+            "SELECT last_activity_at FROM bunch_memberships WHERE bunch_id = ? AND member_id = ?",
+            java.sql.Timestamp::class.java,
+            fixture.bunchId,
+            fixture.guest.memberId
+        )
+        coOwner.clear()
+        owner.clear()
+
+        // A real SEND must pass the inbound interceptor as well as the controller check.
+        coOwner.send(command(fixture, "activity"), mapOf("type" to "COMMENT"))
+        val activity = owner.json {
+            it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "COMMENT"
+        }
+        assertThat(activity.path("data").path("memberId").asLong()).isEqualTo(fixture.guest.memberId)
+        coOwner.json { it.path("type").asText() == "ACTIVITY" }
+        coOwner.clear()
+        coOwner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
+        coOwner.assertNoEvent("LEASE_GRANTED")
+        assertThat(bundles.get(fixture.guest.memberId, fixture.bunchId, fixture.bundleId).revision)
+            .isEqualTo(published.revision)
+        assertThat(jdbc.queryForObject(
+            "SELECT last_activity_at FROM bunch_memberships WHERE bunch_id = ? AND member_id = ?",
+            java.sql.Timestamp::class.java,
+            fixture.bunchId,
+            fixture.guest.memberId
+        )).isEqualTo(activityBefore)
     }
 
     @Test

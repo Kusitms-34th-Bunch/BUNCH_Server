@@ -1,6 +1,7 @@
 package com.bunch.photo.service
 
 import com.bunch.bunch.domain.Bunch
+import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.global.exception.BusinessException
@@ -96,6 +97,7 @@ class PhotoUploadService(
             )
         )
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
+        locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))
         return PhotoUploadResult(photo.id, PhotoUploadKind.STORED)
     }
@@ -109,6 +111,7 @@ class PhotoUploadService(
         }
         requireRoomForMember(command)
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
+        locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = false))
         return PhotoUploadResult(photo.id, PhotoUploadKind.MERGED)
     }
@@ -121,8 +124,9 @@ class PhotoUploadService(
         val bunch = bunches.findLocked(command.bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         val member = members.findById(command.memberId).orElse(null)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)
-        memberships.findByMemberIdAndBunchIdAndStatus(command.memberId, command.bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        return Locked(member, bunch)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(command.memberId, command.bunchId)
+            ?: fail(ErrorCode.FORBIDDEN)
+        return Locked(member, bunch, membership)
     }
 
     private fun requireRoomForNewPhoto(command: PhotoUploadCommand) {
@@ -160,5 +164,9 @@ class PhotoUploadService(
 
     private fun fail(errorCode: ErrorCode): Nothing = throw BusinessException(errorCode)
 
-    private class Locked(val member: Member, val bunch: Bunch)
+    private class Locked(
+        val member: Member,
+        val bunch: Bunch,
+        val membership: BunchMembership
+    )
 }

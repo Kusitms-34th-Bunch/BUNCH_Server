@@ -49,8 +49,14 @@ class BundleAccessService(
         requireMember(userId, bunchId)
     }
 
-    fun isAdministrator(userId: Long, bunchId: Long): Boolean =
+    fun isOwner(userId: Long, bunchId: Long): Boolean =
         memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)?.role == MembershipRole.OWNER
+
+    fun isAdministrator(userId: Long, bunchId: Long): Boolean =
+        when (memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)?.role) {
+            MembershipRole.OWNER, MembershipRole.CO_OWNER -> true
+            else -> false
+        }
 
     fun isParticipant(userId: Long, bundleId: Long): Boolean =
         participants.findByBundleIdAndMemberId(bundleId, userId) != null
@@ -60,9 +66,17 @@ class BundleAccessService(
         if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
     }
 
-    fun requireManager(userId: Long, bundle: Bundle, participating: Boolean = false) {
-        if (participating) requireParticipant(userId, bundle)
+    fun requireCommentAuthor(userId: Long, bundle: Bundle) {
+        if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
+    }
+
+    fun requireDraftManager(userId: Long, bundle: Bundle) {
+        requireParticipant(userId, bundle)
         if (bundle.createdBy != userId && !isAdministrator(userId, bundle.bunchId)) fail(ErrorCode.FORBIDDEN)
+    }
+
+    fun requireOwner(userId: Long, bunchId: Long) {
+        if (!isOwner(userId, bunchId)) fail(ErrorCode.FORBIDDEN)
     }
 
     private fun fail(code: ErrorCode): Nothing = throw BusinessException(code)
