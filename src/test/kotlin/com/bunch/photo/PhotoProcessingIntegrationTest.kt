@@ -8,7 +8,7 @@ import com.bunch.photo.domain.DateSource
 import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.ProcessingStatus
-import com.bunch.photo.service.PhotoProcessingService
+import com.bunch.photo.service.PhotoService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -32,7 +32,7 @@ class PhotoProcessingIntegrationTest : BunchIntegrationSupport() {
     private lateinit var photos: PhotoRepository
 
     @Autowired
-    private lateinit var processing: PhotoProcessingService
+    private lateinit var processing: PhotoService
 
     private val ownedAssetIds = mutableListOf<Long>()
 
