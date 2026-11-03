@@ -1,6 +1,7 @@
 package com.bunch.photo.service
 
 import com.bunch.bunch.domain.Bunch
+import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
@@ -165,6 +166,7 @@ class PhotoService(
             )
         )
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
+        locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))
         return PhotoUploadResult(photo.id, PhotoUploadKind.STORED)
     }
@@ -178,6 +180,7 @@ class PhotoService(
         }
         requireRoomForMember(command)
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
+        locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = false))
         return PhotoUploadResult(photo.id, PhotoUploadKind.MERGED)
     }
@@ -190,8 +193,9 @@ class PhotoService(
         val bunch = bunches.findLocked(command.bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         val member = members.findById(command.memberId).orElse(null)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)
-        memberships.findByMemberIdAndBunchIdAndStatus(command.memberId, command.bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        return UploadLocks(member, bunch)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(command.memberId, command.bunchId)
+            ?: fail(ErrorCode.FORBIDDEN)
+        return UploadLocks(member, bunch, membership)
     }
 
     private fun requireRoomForNewPhoto(command: PhotoUploadCommand) {
@@ -559,7 +563,7 @@ class PhotoService(
 
     private fun fail(errorCode: ErrorCode): Nothing = throw BusinessException(errorCode)
 
-    private class UploadLocks(val member: Member, val bunch: Bunch)
+    private class UploadLocks(val member: Member, val bunch: Bunch, val membership: BunchMembership)
 
     companion object {
         const val DEFAULT_SIZE = 60

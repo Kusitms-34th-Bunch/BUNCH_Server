@@ -385,6 +385,55 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(selected!!.map { it.id }).containsExactly(result.photoId)
     }
 
+    @Test
+    fun `only a new upload or uploader merge records activity and duplicate or failed upload does not`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        val shared = image("activity")
+        assertThat(activity(ownerId, bunchId)).isNull()
+        val first = uploads.upload(command(bunchId, ownerId), shared)
+        val afterStored = activity(ownerId, bunchId)
+        assertThat(afterStored).isNotNull()
+        uploads.upload(command(bunchId, ownerId), shared)
+        assertThat(activity(ownerId, bunchId)).isEqualTo(afterStored)
+        uploads.upload(command(bunchId, otherId), shared)
+        assertThat(activity(otherId, bunchId)).isNotNull()
+        assertThat(uploaderCount(first.photoId)).isEqualTo(2)
+
+        `when`(storage.upload(anyImage())).thenThrow(BusinessException(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED))
+        assertError(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED) {
+            uploads.upload(command(bunchId, ownerId), image("failed-activity"))
+        }
+        assertThat(activity(ownerId, bunchId)).isEqualTo(afterStored)
+    }
+
+    @Test
+    fun `failed photo commit rolls back activity with the photo and uploader`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        jdbc.execute("""CREATE FUNCTION issue47_reject_activity() RETURNS trigger LANGUAGE plpgsql AS
+            'BEGIN RAISE EXCEPTION ''injected activity failure''; END'""")
+        jdbc.execute("""CREATE TRIGGER issue47_reject_activity BEFORE UPDATE ON bunch_memberships
+            FOR EACH ROW WHEN (NEW.last_activity_at IS NOT NULL) EXECUTE FUNCTION issue47_reject_activity()""")
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy {
+                uploads.upload(command(bunchId, ownerId), image("rollback-activity"))
+            }.isInstanceOf(RuntimeException::class.java)
+            assertThat(activity(ownerId, bunchId)).isNull()
+            assertThat(photoCount(bunchId)).isZero()
+            assertThat(memberUploadCount(ownerId)).isZero()
+        } finally {
+            jdbc.execute("DROP TRIGGER issue47_reject_activity ON bunch_memberships")
+            jdbc.execute("DROP FUNCTION issue47_reject_activity()")
+        }
+    }
+
+    private fun activity(memberId: Long, bunchId: Long): Instant? = jdbc.queryForObject(
+        "SELECT last_activity_at FROM bunch_memberships WHERE member_id = ? AND bunch_id = ? AND status = 'ACTIVE'",
+        java.sql.Timestamp::class.java,
+        memberId,
+        bunchId
+    )?.toInstant()
+
     private fun changeEvents(): List<PhotoChangedEvent> =
         applicationEvents.stream(PhotoChangedEvent::class.java).toList()
 }

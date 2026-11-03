@@ -85,8 +85,10 @@ class BundleRealtimeAuthorizationInterceptor(
     private fun send(message: Message<*>, accessor: StompHeaderAccessor, memberId: Long): Message<*>? {
         val parsed = BundleRealtimeDestinations.parseCommand(accessor.destination) ?: return null
         val bundle = resolveCommand(memberId, parsed) ?: return null
-        if (parsed.command != BundleRealtimeCommand.ACTIVITY || activityType(message) == BundleActivityType.COMMENT.name) {
+        if (parsed.command != BundleRealtimeCommand.ACTIVITY) {
             access.requireParticipant(memberId, bundle)
+        } else if (activityType(message) == BundleActivityType.COMMENT.name) {
+            access.requireCommentAuthor(memberId, bundle)
         }
         return message
     }

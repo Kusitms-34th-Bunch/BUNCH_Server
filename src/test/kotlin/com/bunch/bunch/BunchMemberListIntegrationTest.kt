@@ -69,6 +69,30 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `co owners precede members and null nickname ties use membership id ascending`() {
+        val owner = member()
+        val bunchId = create(owner).id
+        val ordinary = joined(owner, bunchId, "가가")
+        val first = joined(owner, bunchId)
+        val second = joined(owner, bunchId)
+        jdbc.update("UPDATE members SET nickname = NULL WHERE id IN (?, ?)", first, second)
+        jdbc.update(
+            "UPDATE bunch_memberships SET role = 'CO_OWNER' WHERE member_id IN (?, ?)",
+            first,
+            second
+        )
+
+        members(owner, bunchId)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.length()").value(4))
+            .andExpect(jsonPath("$.data[0].memberId").value(owner))
+            .andExpect(jsonPath("$.data[1].memberId").value(first))
+            .andExpect(jsonPath("$.data[1].role").value("CO_OWNER"))
+            .andExpect(jsonPath("$.data[2].memberId").value(second))
+            .andExpect(jsonPath("$.data[3].memberId").value(ordinary))
+    }
+
+    @Test
     fun `a member without a profile image has a null image URL and the image URL is returned otherwise`() {
         val ownerId = member()
         val bunchId = create(ownerId).id
