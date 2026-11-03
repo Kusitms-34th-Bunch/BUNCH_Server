@@ -4,6 +4,8 @@ import com.bunch.bunch.domain.InviteEligibility
 import com.bunch.bunch.domain.JoinOutcome
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.image.domain.ImageAsset
+import com.bunch.image.domain.ImageAssetRepository
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
@@ -20,6 +22,7 @@ import java.util.UUID
 @ActiveProfiles("test")
 class InvitationIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var mapper: ObjectMapper
+    @Autowired private lateinit var assetRepository: ImageAssetRepository
 
     @Test
     fun `concurrent issuance reuses one invitation and preserves original issuer`() {
@@ -109,17 +112,27 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         val newcomer = member()
         val invite = issue(owner, create(owner).id)
         join(existing, invite)
-        val before = count("bunch_join_notifications")
+        val before = countMemberJoinedNotifications()
         val key = UUID.randomUUID()
         val first = join(newcomer, invite, key)
         assertThat(first.outcome).isEqualTo(JoinOutcome.JOINED)
-        assertThat(count("bunch_join_notifications") - before).isEqualTo(2)
-        val recipients = jdbc.queryForList("SELECT recipient_member_id FROM bunch_join_notifications WHERE joined_member_id = ?", Long::class.java, newcomer)
+        assertThat(countMemberJoinedNotifications() - before).isEqualTo(2)
+        val membershipId = jdbc.queryForObject(
+            "SELECT id FROM bunch_memberships WHERE bunch_id = ? AND member_id = ?",
+            Long::class.java,
+            first.bunch.id,
+            newcomer
+        )
+        val recipients = jdbc.queryForList(
+            "SELECT recipient_member_id FROM notifications WHERE bunch_id = ? AND type = 'MEMBER_JOINED' AND dedupe_key = ?",
+            Long::class.java,
+            first.bunch.id,
+            "MEMBER_JOINED:$membershipId"
+        )
         assertThat(recipients).containsExactlyInAnyOrder(owner, existing)
-        val membershipId = jdbc.queryForObject("SELECT id FROM bunch_memberships WHERE member_id = ?", Long::class.java, newcomer)
         assertThat(invitations.join(newcomer, key, invite.code.lowercase())).isEqualTo(first)
         assertThat(invitations.join(newcomer, key, invite.url.substringAfterLast('/'))).isEqualTo(first)
-        assertThat(count("bunch_join_notifications")).isEqualTo(before + 2)
+        assertThat(countMemberJoinedNotifications()).isEqualTo(before + 2)
         assertThat(jdbc.queryForObject("SELECT id FROM bunch_memberships WHERE member_id = ?", Long::class.java, newcomer)).isEqualTo(membershipId)
         assertThat(bunches.defaultBunchId(newcomer)).isEqualTo(first.bunch.id)
     }
@@ -130,15 +143,15 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         val newcomer = member()
         val invite = issue(owner, create(owner).id)
         val key = UUID.randomUUID()
-        rejectWrite("bunch_test_reject_notification", "bunch_join_notifications", "INSERT")
+        rejectWrite("bunch_test_reject_notification", "notifications", "INSERT")
         assertThatThrownBy { join(newcomer, invite, key) }.isInstanceOf(DataAccessException::class.java)
         assertThat(count("bunch_memberships")).isEqualTo(1)
-        assertThat(count("bunch_join_notifications")).isZero()
+        assertThat(countMemberJoinedNotifications()).isZero()
         assertThat(bunches.defaultBunchId(newcomer)).isNull()
-        jdbc.execute("DROP TRIGGER bunch_test_reject_notification ON bunch_join_notifications")
+        jdbc.execute("DROP TRIGGER bunch_test_reject_notification ON notifications")
         assertThat(join(newcomer, invite, key).outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(count("bunch_memberships")).isEqualTo(2)
-        assertThat(count("bunch_join_notifications")).isEqualTo(1)
+        assertThat(countMemberJoinedNotifications()).isEqualTo(1)
     }
 
     @Test
@@ -154,12 +167,23 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("UPDATE bunch_invitations SET revoked_at = CURRENT_TIMESTAMP")
         expireInvitations()
         val newName = uniqueName()
-        jdbc.update("UPDATE bunches SET name = ?, image_url = ? WHERE id = ?", newName, "https://images.example/current.jpg", bunch.id)
+        val currentImage = assetRepository.saveAndFlush(
+            ImageAsset(
+                publicId = "invitation/${UUID.randomUUID()}",
+                url = "https://images.example/current.jpg"
+            )
+        )
+        jdbc.update(
+            "UPDATE bunches SET name = ?, profile_image_asset_id = ? WHERE id = ?",
+            newName,
+            currentImage.id,
+            bunch.id
+        )
         val replay = invitations.join(newcomer, key, " ${invite.code.lowercase()} ")
         assertThat(replay.outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(replay.bunch.id).isEqualTo(first.bunch.id)
         assertThat(replay.bunch.name).isEqualTo(newName)
-        assertThat(replay.bunch.imageUrl).isEqualTo("https://images.example/current.jpg")
+        assertThat(replay.bunch.imageUrl).isEqualTo(currentImage.url)
         assertError(ErrorCode.INVALID_INVITATION) { join(newcomer, invite) }
     }
 
@@ -174,10 +198,10 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         assertThat(invitations.verify(participant, invite.code).eligibility).isEqualTo(InviteEligibility.ALREADY_MEMBER)
         val keys = List(3) { UUID.randomUUID() }
         keys.forEach { key -> assertThat(join(participant, invite, key).outcome).isEqualTo(JoinOutcome.ALREADY_MEMBER) }
-        val notifications = count("bunch_join_notifications")
+        val notifications = countMemberJoinedNotifications()
         jdbc.update("UPDATE bunch_invitations SET revoked_at = CURRENT_TIMESTAMP")
         keys.forEach { key -> assertThat(invitations.join(participant, key, invite.code).outcome).isEqualTo(JoinOutcome.ALREADY_MEMBER) }
-        assertThat(count("bunch_join_notifications")).isEqualTo(notifications)
+        assertThat(countMemberJoinedNotifications()).isEqualTo(notifications)
         assertError(ErrorCode.INVALID_INVITATION) { join(participant, invite) }
     }
 
@@ -203,12 +227,12 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         val invite = issue(owner, bunch.id)
         repeat(6) { join(member(), invite) }
         val contenders = listOf(member(), member())
-        val before = count("bunch_join_notifications")
+        val before = countMemberJoinedNotifications()
         val results = concurrently(contenders.map { contender -> { join(contender, invite) } })
         assertThat(results.count { it.isSuccess }).isEqualTo(1)
         assertThat((results.single { it.isFailure }.exceptionOrNull() as BusinessException).errorCode).isEqualTo(ErrorCode.BUNCH_FULL)
         assertThat(count("bunch_memberships")).isEqualTo(8)
-        assertThat(count("bunch_join_notifications") - before).isEqualTo(7)
+        assertThat(countMemberJoinedNotifications() - before).isEqualTo(7)
         val outsider = member()
         assertThat(invitations.verify(outsider, invite.code).eligibility).isEqualTo(InviteEligibility.FULL)
     }
@@ -238,7 +262,7 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         val results = concurrently(List(5) { { join(newcomer, invite, key) } }).map { it.getOrThrow() }
         assertThat(results.toSet()).hasSize(1)
         assertThat(count("bunch_memberships")).isEqualTo(2)
-        assertThat(count("bunch_join_notifications")).isEqualTo(1)
+        assertThat(countMemberJoinedNotifications()).isEqualTo(1)
     }
 
     @Test

@@ -39,10 +39,25 @@ class BunchMembership(
     @Column(nullable = false)
     var lastUsedAt: Instant = joinedAt,
 
+    @Column
+    val endedAt: Instant? = null,
+
+    @Column
+    val roleGrantedBy: Long? = null,
+
+    @Column
+    var lastActivityAt: Instant? = null,
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
     var joinRequests: Map<String, JoinRequest> = emptyMap()
 ) {
+    fun recordActivity(now: Instant = Instant.now()) {
+        if (lastActivityAt == null || now > lastActivityAt) {
+            lastActivityAt = now
+        }
+    }
+
     fun rememberJoin(
         key: UUID,
         fingerprint: String,

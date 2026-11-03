@@ -5,6 +5,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.*
 import com.bunch.member.dto.*
 import org.springframework.dao.DataIntegrityViolationException
@@ -24,6 +25,7 @@ class RegistrationService(
     private val consents: MemberConsentRepository,
     private val terms: TermsService,
     private val images: ProfileImageStorage,
+    private val imageAssets: ImageAssetService,
     transactionManager: PlatformTransactionManager
 ) {
     private val transaction = TransactionTemplate(transactionManager)
@@ -93,8 +95,9 @@ class RegistrationService(
                 member.nickname = nickname
                 member.birthYear = request.birthYear
                 member.gender = request.gender
-                member.imagePublicId = uploaded?.publicId
-                member.imageUrl = uploaded?.url
+                val previousAssetId = member.profileImageAsset?.id
+                member.profileImageAsset = uploaded?.let(imageAssets::store)
+                imageAssets.releaseAfterCommit(previousAssetId)
                 member.signupStatus = SignupStatus.COMPLETED
                 member.completedAt = Instant.now()
                 member.registrationFingerprint = fingerprint

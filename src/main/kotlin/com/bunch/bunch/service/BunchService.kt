@@ -6,6 +6,7 @@ import com.bunch.global.common.ProfileText
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
+import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.MemberRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
@@ -23,6 +24,7 @@ class BunchService(
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
+    private val imageAssets: ImageAssetService,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactions = TransactionTemplate(transactionManager)
@@ -77,6 +79,7 @@ class BunchService(
             )
         )
 
+        bunch.membershipVersion++
         return BunchResponse.from(bunch)
     }
 
@@ -88,6 +91,15 @@ class BunchService(
     fun defaultBunch(userId: Long): BunchResponse? =
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
             ?.let { BunchResponse.from(it.bunch) }
+
+    // A read-only check: the write paths below lock the bunch, but listing members changes nothing.
+    @Transactional(readOnly = true)
+    fun members(userId: Long, bunchId: Long): List<BunchMemberResponse> {
+        completed(userId)
+        if (!bunches.existsById(bunchId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
+        return memberships.findActiveMembers(bunchId).map(BunchMemberResponse::from)
+    }
 
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
@@ -102,13 +114,13 @@ class BunchService(
     fun updateProfileImage(userId: Long, bunchId: Long, photo: MultipartFile): BunchResponse {
         transactions.execute { lockOwnerOrMember(userId, bunchId, ownerOnly = true) }
         val uploaded = images.upload(photo)
-        var previousPublicId: String? = null
         val result = try {
             transactions.execute {
                 val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
-                previousPublicId = current.imagePublicId
-                current.imagePublicId = uploaded.publicId
-                current.imageUrl = uploaded.url
+                val previousAssetId = current.profileImageAsset?.id
+                current.profileImageAsset = imageAssets.store(uploaded)
+                current.profileVersion++
+                imageAssets.releaseAfterCommit(previousAssetId)
                 bunches.flush()
                 BunchResponse.from(current)
             }!!
@@ -116,22 +128,20 @@ class BunchService(
             images.delete(uploaded.publicId)
             throw ex
         }
-        images.delete(previousPublicId)
         return result
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     fun resetProfileImage(userId: Long, bunchId: Long): BunchResponse {
-        var previousPublicId: String? = null
         val result = transactions.execute {
             val current = lockOwnerOrMember(userId, bunchId, ownerOnly = true)
-            previousPublicId = current.imagePublicId
-            current.imagePublicId = null
-            current.imageUrl = null
+            val previousAssetId = current.profileImageAsset?.id
+            if (previousAssetId != null) current.profileVersion++
+            current.profileImageAsset = null
+            imageAssets.releaseAfterCommit(previousAssetId)
             bunches.flush()
             BunchResponse.from(current)
         }!!
-        images.delete(previousPublicId)
         return result
     }
 

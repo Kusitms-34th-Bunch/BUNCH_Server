@@ -45,6 +45,7 @@ class SecurityConfig(
                     "/api/v1/auth/reissue"
                 ).permitAll()
                 it.requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()
+                it.requestMatchers(HttpMethod.GET, "/ws", "/ws/**").permitAll()
 
                 if (docsEnabled)
                     it.requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()

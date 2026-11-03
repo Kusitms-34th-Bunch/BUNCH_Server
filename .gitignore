@@ -20,3 +20,7 @@ out/
 logs/
 .omx/
 .gjc/
+
+# Local work plans and verification records
+/docs/plans/
+/docs/verification/

@@ -62,23 +62,26 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   JPEG로 재인코딩해 불필요한 EXIF 등 메타데이터를 제외한다.
 - Cloudinary는 서버 RestClient의 HTTPS Basic Auth로 Upload API를 호출한다.
   API secret·Authorization·원문 토큰은 로그에 남기지 않는다. 사용자 입력 URL 원격 다운로드는 하지 않는다.
-- 저장 정보는 publicId/HTTPS URL이며 기본 이미지는 imageUrl:null이다.
+- 저장 정보는 공용 ImageAsset의 publicId/HTTPS URL이다. 개인·번치는 nullable
+  `profile_image_asset_id`로 참조하며 기본 이미지는 imageUrl:null이다. 기존 데이터는
+  재업로드 없이 백필하고 기존 응답 URL을 유지한다. [사진함 기반 계약](photo-foundation.md)을 따른다.
   회원 사진은 가입 multipart 요청에서 최종 저장한다. 사진 검증/저장만 실패하면 null로 가입을 완료한다.
   필수 프로필 오류·요청 전체의 파싱/전송 실패는 가입을 완료하지 않는다.
-- 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→기존 파일 삭제 순서다.
+- 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→커밋 후 미참조 기존 자산·파일 삭제 순서다.
   DB 실패 시 새 파일 삭제를 시도하며 기존 파일·참조는 유지한다.
+  다른 프로필·Photo·발행본의 FK 참조가 있으면 자산·파일을 유지한다.
   외부 파일 삭제 실패는 publicId만 기록하고 수동 정리 대상으로 남긴다.
 
 ## 생성·초대·참여
 
 - Visibility: PUBLIC / PRIVATE. 생성 시 명시적으로 선택한다.
-- MembershipRole: OWNER / MEMBER, MembershipStatus: ACTIVE / LEFT / REMOVED.
+- MembershipRole: OWNER / CO_OWNER / MEMBER, MembershipStatus: ACTIVE / LEFT / REMOVED.
   같은 회원·번치의 ACTIVE 소속은 하나다. 다시 참여하면 새 소속을 만든다.
 - 번치 생성+첫 OWNER+마지막 사용 시각은 한 트랜잭션이다. 가입·권한 부여 시각을 남긴다.
 - 소속 한도 10개, 번치 정원 8명. 변경 작업은 회원 행→번치 행 순으로 잠그고 최종 시점에 확인한다.
 - 마지막 번치는 ACTIVE 소속의 lastUsedAt 내림차순으로 조회한다. 같으면 소속 ID 내림차순이다.
   무효 소속은 제외하므로 최근의 다른 유효 소속으로 복귀한다. 없으면 defaultBunchId:null이다.
-- 초대 발급은 ACTIVE OWNER/MEMBER 모두 가능하다. 번치 잠금 아래 유효한 초대 하나를 재사용한다.
+- 초대 발급은 ACTIVE OWNER/CO_OWNER/MEMBER 모두 가능하다. 번치 잠금 아래 유효한 초대 하나를 재사용한다.
   만료/폐기면 기존 것을 폐기 표시하고 새로 발급한다. 최초 발급자 표시는 재공유해도 유지한다.
 - 토큰은 SecureRandom 32바이트의 Base64URL, 보조 코드는 23456789ABCDEFGHJKLMNPQRSTUVWXYZ 중
   8자리다. 코드는 trim+대문자로 정규화한다. 충돌 시 재발급한다.
@@ -125,6 +128,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
+| GET /api/v1/bunches/{id}/members | 없음 | [{memberId,nickname,imageUrl,role}], 활성 멤버만([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
 | GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
@@ -169,6 +173,32 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 미인증·잘못된 토큰·refresh 토큰·해제된 세션,
 없는 회원·정지·탈퇴 계정의 401과 세션 해제를 확인하고 기존 온보딩 테스트를 유지한다.
 
+<a id="bunch-members"></a>
+### 번치 멤버 목록 조회 — 이슈 #43
+
+`GET /api/v1/bunches/{id}/members`는 번치의 활성 멤버를 내려준다. 사진함·번들 만들기의 멤버별 필터 칩
+(사진함 3.1.2, 번들 만들기 4.1.1), 번들 참여 멤버 추가(4.3.2), 멤버 관리(5.6.1)가 함께 쓴다.
+가입을 완료한 그 번치의 ACTIVE 멤버만 조회할 수 있다.
+
+| data 항목 | 타입·null 계약 |
+| --- | --- |
+| memberId | Long |
+| nickname | String 또는 null. 가입 완료 멤버는 항상 있다 |
+| imageUrl | String 또는 null. 미등록이면 null이며 앱이 기본 이미지를 표시 |
+| role | `OWNER`(메인 관리자) / `CO_OWNER`(공동 관리자) / `MEMBER` |
+
+- 활성 멤버만 포함한다. 나가기·내보내짐으로 소속이 끝난 멤버와 탈퇴·정지 계정은 제외한다(3.1.2).
+  사진이 없는 멤버도 포함하고, 나갔다가 다시 참여한 멤버는 한 번만 나온다.
+- 정렬: OWNER→CO_OWNER→MEMBER, 같은 역할 안에서는 닉네임 오름차순·소속 ID 오름차순이다(5.6.1 로직 1).
+  닉네임은 DB 문자 코드 순서(`COLLATE "C"`)라 한글끼리는 가나다순이고 영문·숫자가 한글보다 앞에 온다.
+- 번치당 최대 8명이라 페이지가 없다. 출생연도·성별·계정 상태 등 다른 개인 정보는 내려주지 않는다(5.10.8 로직 2).
+- 오류: 미인증 401 `AUTH_001`, 가입 미완료 403 `AUTH_015`, 번치 멤버가 아님 403 `AUTH_002`, 번치 없음 404
+  `RESOURCE_001`.
+- 멤버 관리 작업(권한 변경·내보내기)과 다른 번치의 멤버 목록(5.10.8, 팔로우 상태 확인 필요)은 이 API의 범위가 아니다.
+
+검증 기준: 실제 PostgreSQL·JWT 인증을 거쳐 정렬(메인 관리자 우선, 닉네임순), 프로필 이미지 null,
+나간·내보내진·탈퇴 멤버 제외, 재참여 1회 표시, 다른 번치 멤버 미포함, 비멤버·가입 미완료·없는 번치·토큰 없음을 확인한다.
+
 오류는 ErrorCode enum을 확장한다: 입력400, 미인증/이용불가401, 가입미완료/권한403,
 무효초대404, 이름중복/필수동의버전/이미가입완료다른입력/정원/소속한도/요청키충돌409,
 요청제한429, 외부사진실패503. 서버 message key와 앱 안내 문구를 구분한다.
@@ -184,3 +214,5 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 정리 계획: 인증의 단일 refresh 구현만 세션 단위로 교체하고 기존 검증기를 재사용한다.
 기존 테스트로 OIDC·회원 유일성·응답 계약을 보호한 뒤 동작 변경 테스트를 교체/추가한다.
 관련 없는 패키지 정리·의존성 변경은 하지 않는다.
+
+역할·버전·활동기록의 #47 변경은 [역할 계약](bunch-role-stage.md)을 함께 따른다.
