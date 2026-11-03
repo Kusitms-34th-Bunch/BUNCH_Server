@@ -281,6 +281,28 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
             .isEqualTo(PhotoUploadKind.STORED)
     }
 
+    // The limit counts the photos still in the photo box, so whoever deletes them, the uploader gets room back.
+    @Test
+    fun `an administrator deleting a member's photo frees the daily limit of that member`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val memberId = joined(ownerId, bunchId)
+        seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_MEMBER_PER_BUNCH_PER_DAY, memberId)
+        assertError(ErrorCode.PHOTO_DAILY_LIMIT_EXCEEDED) {
+            uploads.upload(command(bunchId, memberId), image("over"))
+        }
+
+        photoService.deletePhoto(
+            bunchId,
+            jdbc.queryForObject("SELECT min(photo_id) FROM photo_uploaders", Long::class.java)!!
+        )
+
+        assertThat(uploads.upload(command(bunchId, memberId), image("room-again")).kind)
+            .isEqualTo(PhotoUploadKind.STORED)
+        // Only that member got room back: the administrator's own limit never changed.
+        assertThat(uploads.upload(command(bunchId, ownerId), image("owner-upload")).kind)
+            .isEqualTo(PhotoUploadKind.STORED)
+    }
+
     @Test
     fun `an upload batch holds at most 50 photos but a retry of a stored photo still succeeds`() {
         val (ownerId, bunchId) = bunchWithOwner()
