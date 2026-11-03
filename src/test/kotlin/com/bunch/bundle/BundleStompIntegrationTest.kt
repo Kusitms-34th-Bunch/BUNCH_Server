@@ -30,6 +30,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -59,6 +61,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var photoRows: PhotoRepository
     @Autowired private lateinit var uploaderRows: PhotoUploaderRepository
     @Autowired private lateinit var bunchRows: BunchRepository
+    @Autowired private lateinit var transactionManager: PlatformTransactionManager
 
     private val connections = mutableListOf<WireClient>()
     private val credentials = mutableListOf<Credential>()
@@ -348,6 +351,67 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
             BundleTextRequest("외부인에게 비노출", 0, BundleStatus.DRAFT), "foreign-change")
         owner.json { it.path("type").asText() == "COMMENT" }
         assertThat(wire.frames.poll(400, TimeUnit.MILLISECONDS)).isNull()
+    }
+
+    @Test
+    fun `nonparticipant commands are silently dropped while view activity remains available`() {
+        val fixture = fixture()
+        val viewerCredential = credential(member())
+        join(viewerCredential.memberId, issue(fixture.owner.memberId, fixture.bunchId))
+        val viewer = connect(viewerCredential)
+        viewer.subscribe("/user/queue/bundle-leases", "leases")
+        viewer.subscribe("/user/queue/bundle-activity", "activity")
+        viewer.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
+        viewer.json { it.path("type").asText() == "ACTIVITY" }
+
+        val rejectedCommands = listOf(
+            "lease/acquire" to mapOf("target" to "TITLE"),
+            "lease/heartbeat" to mapOf("target" to "TITLE", "token" to UUID.randomUUID()),
+            "lease/release" to mapOf("target" to "TITLE", "token" to UUID.randomUUID()),
+            "activity" to mapOf("type" to " comment ")
+        )
+        rejectedCommands.forEach { (suffix, body) ->
+            viewer.send(command(fixture, suffix), body)
+            assertThat(viewer.frames.poll(500, TimeUnit.MILLISECONDS)).isNull()
+        }
+
+        viewer.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
+        val response = viewer.json { it.path("type").asText() == "ACTIVITY" }
+        assertThat(response.path("data").path("activity").asText()).isEqualTo("VIEW")
+        assertThat(getSnapshot(fixture, viewerCredential).path("revision").asLong()).isEqualTo(fixture.revision)
+    }
+
+    @Test
+    fun `content events wait for commit and rolled back changes never reach subscribers`() {
+        val fixture = fixture()
+        val guest = connect(fixture.guest)
+        guest.subscribe(topic(fixture), "topic")
+        guest.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
+        guest.json { it.path("type").asText() == "ACTIVITY" }
+        val transaction = TransactionTemplate(transactionManager)
+
+        transaction.executeWithoutResult {
+            bundles.visibility(
+                actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+                BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.DRAFT), "committed-visibility"
+            )
+            guest.assertNoEvent("VISIBILITY")
+        }
+        val committed = guest.json { it.path("type").asText() == "VISIBILITY" }
+        assertThat(committed.path("requestId").asText()).isEqualTo("committed-visibility")
+        assertThat(committed.path("data").path("value").asText()).isEqualTo("PRIVATE")
+
+        transaction.executeWithoutResult { status ->
+            bundles.visibility(
+                actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+                BundleVisibilityRequest(Visibility.PUBLIC, 1, BundleStatus.DRAFT), "rolled-back-visibility"
+            )
+            status.setRollbackOnly()
+        }
+        guest.assertNoEvent("VISIBILITY")
+        val snapshot = getSnapshot(fixture, fixture.guest)
+        assertThat(snapshot.path("visibility").asText()).isEqualTo("PRIVATE")
+        assertThat(snapshot.path("revision").asLong()).isEqualTo(fixture.revision + 1)
     }
 
     private fun fixture(): Fixture {

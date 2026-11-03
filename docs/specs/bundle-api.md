@@ -776,6 +776,14 @@ connection의 늦은 disconnect나 이전 token은 새 lease에 영향을 주지
 인증·구독 권한을 통과하지 못한 frame은 응답 없이 폐기할 수 있다. 클라이언트는 timeout도
 실패로 처리한다. 오류에 token·인증 header·session·REST conflict detail을 노출하지 않는다.
 
+현재 서버는 허용된 명령 경로에서도 편집권 명령의 초안 참여 권한과 `COMMENT` 활동의
+본인 코멘트 권한을 dispatch 전에 검사한다. 이 검사를 통과하지 못하면 `COMMAND_REJECTED`나
+`ERROR`를 보내지 않고 frame을 폐기하며 연결은 유지한다. 비참여 번치 멤버의 `VIEW` 활동은
+계속 허용한다. 실행 지점의 권한 검증도 유지하며, 사전 검사를 제거해 거부 응답을 바꾸지 않는다.
+
+내용 변경 이벤트는 트랜잭션 commit 이후에만 전송한다. commit 전에는 구독자에게 전달하지
+않고, rollback된 변경은 전송하지 않는다.
+
 ## 추가 복구 절차: 동기화·복구 규칙
 
 최초 진입·구독 직후·재연결·내용 revision 누락 시 REST snapshot으로 복구한다.
