@@ -1,20 +1,21 @@
 package com.bunch.bundle.service
 
+import com.bunch.bundle.dto.BundleActor
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
 
 @Component
 class BundleRealtimeSessionRegistry {
-    private val identities = ConcurrentHashMap<String, BundleRealtimeIdentity>()
+    private val identities = ConcurrentHashMap<String, BundleActor>()
     private val subscriptions = ConcurrentHashMap<String, ConcurrentHashMap<String, BundleRealtimeSubscription>>()
 
-    fun bind(connectionId: String, identity: BundleRealtimeIdentity): Boolean {
+    fun bind(connectionId: String, identity: BundleActor): Boolean {
         if (identities.putIfAbsent(connectionId, identity) != null) return false
         subscriptions[connectionId] = ConcurrentHashMap()
         return true
     }
 
-    fun identity(connectionId: String?): BundleRealtimeIdentity? =
+    fun identity(connectionId: String?): BundleActor? =
         connectionId?.let(identities::get)
 
     fun addSubscription(
