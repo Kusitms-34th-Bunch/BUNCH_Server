@@ -1,9 +1,9 @@
 package com.bunch.bundle
 
 import com.bunch.bundle.domain.Bundle
+import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.service.BundleRealtimeDestinations
-import com.bunch.bundle.service.BundleRealtimeIdentity
 import com.bunch.bundle.service.BundleRealtimeOutboundInterceptor
 import com.bunch.bundle.service.BundleRealtimeSessionRegistry
 import com.bunch.bundle.service.BundleRealtimeSubscription
@@ -99,7 +99,7 @@ class BundleRealtimeOutboundInterceptorTest {
         `when`(sessions.isActive(AUTH_SESSION_ID, MEMBER_ID)).thenReturn(true)
         val message = privateMessage()
 
-        assertThat(registry.bind("other-connection", BundleRealtimeIdentity(MEMBER_ID, "other-auth-session"))).isTrue()
+        assertThat(registry.bind("other-connection", BundleActor(MEMBER_ID, "other-auth-session"))).isTrue()
         assertThat(
             registry.addSubscription(
                 "other-connection",
@@ -122,7 +122,7 @@ class BundleRealtimeOutboundInterceptorTest {
     }
 
     private fun bindConnection() {
-        assertThat(registry.bind(CONNECTION_ID, BundleRealtimeIdentity(MEMBER_ID, AUTH_SESSION_ID))).isTrue()
+        assertThat(registry.bind(CONNECTION_ID, BundleActor(MEMBER_ID, AUTH_SESSION_ID))).isTrue()
     }
 
     private fun subscribeToTopic() {

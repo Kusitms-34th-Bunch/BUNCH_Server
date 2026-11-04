@@ -1,6 +1,7 @@
 package com.bunch.photo.service
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 object PhotoUploadLimits {
@@ -15,4 +16,7 @@ object PhotoUploadLimits {
 
     fun startOfUploadDay(now: Instant): Instant =
         now.atZone(UPLOAD_DAY_ZONE).toLocalDate().atStartOfDay(UPLOAD_DAY_ZONE).toInstant()
+
+    /** Today on the Korean calendar, the day after which no capture date can be chosen (3.4.1). */
+    fun today(now: Instant): LocalDate = now.atZone(UPLOAD_DAY_ZONE).toLocalDate()
 }
