@@ -1,4 +1,4 @@
-package com.bunch.notification.domain
+package com.bunch.notification.domain.push
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity

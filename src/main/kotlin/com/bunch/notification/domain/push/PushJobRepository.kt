@@ -1,4 +1,4 @@
-package com.bunch.notification.domain
+package com.bunch.notification.domain.push
 
 import com.bunch.notification.dto.PushPayload
 import jakarta.persistence.LockModeType
@@ -69,9 +69,9 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
 
     @Modifying
     @Query("""
-        update PushJob j set j.status = com.bunch.notification.domain.PushJobStatus.CANCELLED,
+        update PushJob j set j.status = com.bunch.notification.domain.push.PushJobStatus.CANCELLED,
             j.lastErrorCode = :reason
-        where j.status = com.bunch.notification.domain.PushJobStatus.PENDING
+        where j.status = com.bunch.notification.domain.push.PushJobStatus.PENDING
           and j.recipientMemberId = :memberId
           and j.bunchId = :bunchId
           and j.type = com.bunch.notification.domain.NotificationType.MEMBER_REMOVED
@@ -80,9 +80,9 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
 
     @Modifying
     @Query("""
-        update PushJob j set j.status = com.bunch.notification.domain.PushJobStatus.CANCELLED,
+        update PushJob j set j.status = com.bunch.notification.domain.push.PushJobStatus.CANCELLED,
             j.lastErrorCode = :reason
-        where j.status = com.bunch.notification.domain.PushJobStatus.PENDING
+        where j.status = com.bunch.notification.domain.push.PushJobStatus.PENDING
           and j.recipientMemberId = :memberId
           and j.sessionId = :sessionId
     """)
@@ -90,9 +90,9 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
 
     @Modifying
     @Query("""
-        update PushJob j set j.status = com.bunch.notification.domain.PushJobStatus.CANCELLED,
+        update PushJob j set j.status = com.bunch.notification.domain.push.PushJobStatus.CANCELLED,
             j.lastErrorCode = :reason
-        where j.status = com.bunch.notification.domain.PushJobStatus.PENDING
+        where j.status = com.bunch.notification.domain.push.PushJobStatus.PENDING
           and j.recipientMemberId = :memberId
           and j.deviceId = :deviceId
     """)
@@ -106,11 +106,18 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
     @Modifying
     @Query("""
         update PushJob j set j.payload = :payload
-        where j.id = :id and j.status = com.bunch.notification.domain.PushJobStatus.PENDING
+        where j.id = :id and j.status = com.bunch.notification.domain.push.PushJobStatus.PENDING
     """)
     fun updatePendingPayload(id: UUID, payload: PushPayload): Int
 
     @Modifying
-    @Query("delete from PushJob j where j.status in (com.bunch.notification.domain.PushJobStatus.SENT, com.bunch.notification.domain.PushJobStatus.FAILED, com.bunch.notification.domain.PushJobStatus.CANCELLED) and j.createdAt <= :cutoff")
+    @Query("""
+        delete from PushJob j
+        where j.status in (
+            com.bunch.notification.domain.push.PushJobStatus.SENT,
+            com.bunch.notification.domain.push.PushJobStatus.FAILED,
+            com.bunch.notification.domain.push.PushJobStatus.CANCELLED
+        ) and j.createdAt <= :cutoff
+    """)
     fun deleteFinishedBefore(cutoff: Instant): Int
 }

@@ -1,6 +1,6 @@
 package com.bunch.notification.service
 
-import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceEnvironment
 import com.bunch.notification.dto.ApnsResponse
 import com.bunch.notification.dto.PushPayload
 import com.fasterxml.jackson.databind.ObjectMapper

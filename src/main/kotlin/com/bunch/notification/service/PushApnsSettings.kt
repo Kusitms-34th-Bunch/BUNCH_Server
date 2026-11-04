@@ -1,6 +1,6 @@
 package com.bunch.notification.service
 
-import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceEnvironment
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import org.springframework.beans.factory.annotation.Value

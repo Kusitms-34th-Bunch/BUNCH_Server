@@ -13,12 +13,11 @@ import com.bunch.member.domain.MemberRepository
 import com.bunch.member.domain.SignupStatus
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushAuthorizationStatus
-import com.bunch.notification.domain.PushDeviceRepository
-import com.bunch.notification.domain.PushJob
-import com.bunch.notification.domain.PushJobRepository
-import com.bunch.notification.domain.PushJobStatus
-import com.bunch.notification.domain.PushPreferenceRepository
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJob
+import com.bunch.notification.domain.push.PushJobRepository
+import com.bunch.notification.domain.push.PushJobStatus
+import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.ApnsResponse
 import com.bunch.notification.dto.PushAttempt
 import org.slf4j.LoggerFactory
@@ -104,7 +103,7 @@ class PushWorker(
         }
         val device = job.deviceId?.let { devices.findById(it).orElse(null) }
         if (device == null || device.memberId != job.recipientMemberId || device.sessionId != job.sessionId ||
-            device.authorizationStatus !in setOf(PushAuthorizationStatus.AUTHORIZED, PushAuthorizationStatus.PROVISIONAL)
+            !device.authorizationStatus.canReceive
         ) {
             cancel(job, "DeviceUnavailable")
             return null

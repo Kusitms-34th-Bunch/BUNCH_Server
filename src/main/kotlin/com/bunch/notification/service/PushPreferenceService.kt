@@ -4,7 +4,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushPreferenceRepository
+import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.PushPreferencePatchRequest
 import com.bunch.notification.dto.PushPreferenceResponse
 import com.fasterxml.jackson.databind.ObjectMapper

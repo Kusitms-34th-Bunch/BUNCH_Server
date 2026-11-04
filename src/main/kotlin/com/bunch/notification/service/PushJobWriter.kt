@@ -2,12 +2,11 @@ package com.bunch.notification.service
 
 import com.bunch.notification.domain.Notification
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushAuthorizationStatus
-import com.bunch.notification.domain.PushDeviceRepository
-import com.bunch.notification.domain.PushJob
-import com.bunch.notification.domain.PushJobRepository
-import com.bunch.notification.domain.PushJobStatus
-import com.bunch.notification.domain.PushPreferenceRepository
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJob
+import com.bunch.notification.domain.push.PushJobRepository
+import com.bunch.notification.domain.push.PushJobStatus
+import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.NotificationTarget
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -15,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import kotlin.collections.Collection
 
 @Service
 class PushJobWriter(
@@ -172,8 +170,5 @@ class PushJobWriter(
         const val SESSION_ENDED = "SESSION_ENDED"
         const val DEVICE_UNREGISTERED = "DEVICE_UNREGISTERED"
         const val REJOINED = "REJOINED"
-        val PushAuthorizationStatus.canReceive: Boolean
-            get() = this == PushAuthorizationStatus.AUTHORIZED ||
-                this == PushAuthorizationStatus.PROVISIONAL
     }
 }
