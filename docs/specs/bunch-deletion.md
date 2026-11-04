@@ -7,7 +7,8 @@
 
 ## 1. 현재 기준과 선행 게이트
 
-작업 브랜치는 `origin/feat/28-notification-foundation`의 `8fbf45a`에서 시작한다.
+초기 작업 브랜치는 `origin/feat/28-notification-foundation`의 `8fbf45a`에서 시작했다.
+현재 삭제·이탈·홈 기능은 PR #62에서 함께 통합하며 dev의 #61·#65 구현을 유지한다.
 현재 브랜치에는 실제 선행 migration V14~V17까지 병합되어 있으며, 아래 선행
 산출물의 소유 파일을 복제해 임시 테이블·adapter·범용 이벤트·빈 service를
 만들지 않는다.
@@ -87,7 +88,7 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
 
    - `BundleAccessService`/`BundleService`와 `PhotoService`는 `bunches.findLocked`
      후 bundle/photo/lease를 잠근다.
-   - `PhotoUploadService`는 upload-batch advisory lock → bunch row lock →
+   - `PhotoService.upload`는 upload-batch advisory lock → bunch row lock →
      non-locking member 조회 → membership/photo 잠금 순서다.
    - `BunchService` 프로필/last-used와 `#49` 관리 service는 member row lock 후
      bunch row lock을 잡는 경로가 있어, 삭제 service가 여러 member row를
@@ -230,10 +231,9 @@ DB·공유 Redis key를 사용하지 않는다.
 - 신규 소유 파일은 `BunchDeletionController`, `BunchDeletionRequest`,
   `BunchDeletionService`, `BunchDeletionIntegrationTest`다. V18은 추가하지 않았다.
   V1~V17의 기존 SQL/도메인만으로 삭제 cascade·독립 안내·요청 결과 계약을 충족한다.
-- #48 최종 `2f52c7e`의 `PushDevice.tokenHash` CHAR mapping, AuthHTTP fixture,
-  PushCoreTest 랜덤 검사, device→job 순서 보정을 병합했다. 실제 PostgreSQL
-  `bunch_issue50_test`/Redis에서 기본 `ddl-auto=validate`로 `./gradlew clean test`가
-  실패 없이 완료됐다.
+- dev에 반영된 #65의 `notification.domain.push` 모델, device→job 잠금 순서,
+  조건부 payload 갱신·활동 합산 동시성 회귀를 유지한다. 사진 정리는 dev의 통합
+  `PhotoService`와 기존 callback·발행 자산 보존·커밋 후 해제 계약을 함께 사용한다.
 - #59의 기존 `BundleRealtimeSessionRegistry` concrete 경계를 삭제 service의 commit 후
   callback으로 연결했다. 삭제 후 DB 권한 검증과 발신 frame 차단은 기존 interceptor
   경로를 재사용하고, 별도 interface/fake hook은 만들지 않는다.

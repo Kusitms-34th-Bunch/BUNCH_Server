@@ -9,10 +9,10 @@ import com.bunch.bunch.dto.BunchRemovalRequest
 import com.bunch.bunch.service.BunchMembershipExitService
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushDeviceRepository
-import com.bunch.notification.domain.PushJob
-import com.bunch.notification.domain.PushJobRepository
-import com.bunch.notification.domain.PushJobStatus
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJob
+import com.bunch.notification.domain.push.PushJobRepository
+import com.bunch.notification.domain.push.PushJobStatus
 import com.bunch.notification.dto.PushAlert
 import com.bunch.notification.dto.PushAps
 import com.bunch.notification.dto.PushPayload

@@ -4,8 +4,8 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.member.domain.MemberRepository
-import com.bunch.notification.domain.PushDevice
-import com.bunch.notification.domain.PushDeviceRepository
+import com.bunch.notification.domain.push.PushDevice
+import com.bunch.notification.domain.push.PushDeviceRepository
 import jakarta.persistence.EntityManager
 import com.bunch.notification.dto.PushDeviceRegistrationRequest
 import com.bunch.notification.dto.PushDeviceResponse

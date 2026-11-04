@@ -1,6 +1,6 @@
 package com.bunch.notification.dto
 
-import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceEnvironment
 import java.time.Instant
 import java.util.UUID
 

@@ -146,6 +146,8 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 
 ## 소유 경계와 선행
 
+- 홈·프로필과 #25/#38 이탈·사진 정리, #50 삭제는 PR #62에서 함께 통합한다.
+  #61 역할 관리·#65 푸시 기반은 dev에 반영된 구현을 유지한다.
 - #49/V16의 `BunchActionRequest`와 `PROFILE` operation을 재사용한다. 별도 action table/entity를 만들지 않는다.
 - #51/V14의 `BunchFollow`, block 필터, social count, `NotificationWriter.followApproved`를 재사용한다.
 - #25/V17의 AccessNotice entity/repository/service를 목록과 home의 최소 접근 검사에만 연결한다.
@@ -156,4 +158,4 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 
 제품 색인의 47개 기능 ID와 최종 문서 링크는 부모가 관리하는 [번치 색인](bunch.md)을 따른다. 이 문서는 원문 1009줄을 복제하지 않고 #52의 실제 endpoint·코드·선행 migration만 추적한다.
 
-관련 검증은 `BunchHomeProfileIntegrationTest`, 기존 name-availability 회귀, 실제 PostgreSQL/Redis의 V14/V15/V16/V17 Flyway 적용, 프로필 version/idempotency/image 보상 및 공개 전환·block 경합·실제 기기 등록 후 type 16/19 job·push_jobs 쓰기 실패 rollback 테스트를 포함한다. 실제 iOS SDK·APNs 수신은 환경 밖이며, #48의 worker 최종 lock-order 보정은 부모가 전달할 후속 SHA에서 별도로 기록한다.
+관련 검증은 `BunchHomeProfileIntegrationTest`, 기존 name-availability 회귀, 실제 PostgreSQL/Redis의 V1~V17 Flyway 적용, 프로필 version/idempotency/image 보상 및 공개 전환·block 경합·실제 기기 등록 후 type 16/19 job·push_jobs 쓰기 실패 rollback 테스트를 포함한다. dev의 최신 push worker 잠금 순서와 활동 합산 동시성 회귀도 유지한다. 실제 iOS SDK·APNs 수신은 앱·기기 환경에서 별도로 검증한다.

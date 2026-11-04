@@ -7,13 +7,13 @@ import com.bunch.bunch.domain.Visibility
 import com.bunch.notification.domain.Notification
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushAuthorizationStatus
-import com.bunch.notification.domain.PushDevice
-import com.bunch.notification.domain.PushDeviceEnvironment
-import com.bunch.notification.domain.PushDeviceRepository
-import com.bunch.notification.domain.PushJob
-import com.bunch.notification.domain.PushJobRepository
-import com.bunch.notification.domain.PushPreferenceRepository
+import com.bunch.notification.domain.push.PushAuthorizationStatus
+import com.bunch.notification.domain.push.PushDevice
+import com.bunch.notification.domain.push.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJob
+import com.bunch.notification.domain.push.PushJobRepository
+import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.service.DeviceTokenCipher
 import com.bunch.notification.service.PushJobWriter
@@ -22,8 +22,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import java.time.Instant
@@ -49,8 +52,17 @@ class PushCoreTest {
         assertThat(cipher.hash(token)).hasSize(64)
     }
 
-    @Test
-    fun `writer snapshots only authorized current devices and keeps job payload contract`() {
+    @ParameterizedTest
+    @CsvSource(
+        "AUTHORIZED,true",
+        "PROVISIONAL,true",
+        "DENIED,false",
+        "NOT_DETERMINED,false"
+    )
+    fun `writer snapshots only authorized current devices and keeps job payload contract`(
+        authorization: PushAuthorizationStatus,
+        receivesPush: Boolean
+    ) {
         val devices = mock(PushDeviceRepository::class.java)
         val preferences = mock(PushPreferenceRepository::class.java)
         val jobs = mock(PushJobRepository::class.java)
@@ -64,7 +76,7 @@ class PushCoreTest {
             topic = "com.bunch.app",
             tokenCiphertext = byteArrayOf(1, 2, 3),
             tokenHash = "a".repeat(64),
-            authorizationStatus = PushAuthorizationStatus.AUTHORIZED,
+            authorizationStatus = authorization,
             registeredAt = Instant.parse("2026-01-01T00:00:00Z")
         )
         val notification = Notification(
@@ -102,6 +114,10 @@ class PushCoreTest {
         writer.enqueue(listOf(notification), notification.createdAt)
 
         val saved = ArgumentCaptor.forClass(PushJob::class.java)
+        if (!receivesPush) {
+            verify(jobs, never()).save(saved.capture())
+            return
+        }
         verify(jobs).save(saved.capture())
         assertThat(saved.value.recipientMemberId).isEqualTo(1)
         assertThat(saved.value.deviceId).isEqualTo(0)

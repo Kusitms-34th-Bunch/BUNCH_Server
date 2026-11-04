@@ -1,10 +1,10 @@
 # 번치 이탈·접근 불가 안내 구현 계약
 
 이 문서는 #25 나가기·내보내기와 #38 사진 업로더 정리의 구현 연결을 기록한다.
-기준 HEAD는 #57 보정이 포함된 `8fbf45a`이며, V16은 #49의 `BunchActionRequest`/
-`BunchActionRequestRepository`를 merge해 재사용하고 이 기능에서는 복제하지 않는다. 푸시
-경계는 #60 소셜 선행 뒤 검증된 #65 `2f52c7e`를 병합해 사용하며, 이탈 기능은 그 writer
-호출부만 연결한다.
+이탈·삭제·홈 기능은 PR #62에서 함께 통합한다. V16은 dev에 반영된 #49의
+`BunchActionRequest`/`BunchActionRequestRepository`를 재사용하고 복제하지 않는다.
+푸시는 dev에 반영된 #65의 `notification.domain.push` 모델과 조건부 writer·worker를
+유지하며, 이탈 기능은 그 writer 호출부만 연결한다.
 
 ## API와 상태
 
@@ -73,11 +73,11 @@ notice ID를 담으며, body는 승인 원문인 `번치 멤버 목록에서 제
 rollback하며 fake push나 APNs 호출을 만들지 않는다. 재생 요청은 업무와 job을 재생성하지
 않는다.
 
-사진 파일 API 변경은 추가하지 않았다. #46 `c04ecb6`의 `PhotoService.deleteLocked`
-추출/`deletePhoto`가 먼저 통합되면 이 브랜치의 member-wide uploader 정리와 같은
-final-delete 블록을 대조해 충돌을 해소해야 한다. #45의 PhotoRepository 목록 함수는
-보존한다. 최종 PR에서는 #46 선행 변경과 final-delete 블록을 대조하고, 타 사진 API는
-확장하지 않는다.
+사진 파일 API 변경은 추가하지 않았다. dev의 사진 업로드·목록·상세·날짜 변경·삭제를
+유지하면서 `PhotoService.removeAllUploaders`를 같은 업로더 제거·`deleteLocked` 경계에
+연결한다. 사진 잠금은 ID 오름차순이며 callback·발행 자산 보존·`releaseAfterCommit`을
+유지한다. 사진 변경 알림도 기존 `announceChange`를 재사용해 날짜가 있는 사진만 한 번씩
+기록하고, 날짜 미확인 사진의 이탈 정리는 변경 알림을 만들지 않는다.
 
 #50/#52는 `BunchAccessNotice`, repository, service의 `recordRemoval`/`recordDeletion`/get/delete/active/removeForRejoin
 계약을 재사용한다. 번치 본체 삭제·홈/목록의 호출부는 각각 자기 transaction에서

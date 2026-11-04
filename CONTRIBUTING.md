@@ -25,7 +25,7 @@ dev  - 개발 통합 브랜치
 
 - 최신 dev에서 작업 브랜치를 생성하고 dev로 PR을 보낸다.
 - main/dev에 직접 push하지 않는다. 최초 루트 커밋의 main·dev 생성 push만 예외로 한다.
-- 작업 PR은 Squash merge, dev → main은 Merge commit으로 병합한다.
+- dev → main은 Merge commit으로 병합한다.
 - 작업 브랜치는 머지 후 삭제한다.
 - 운영 긴급 수정은 main에서 시작하고 dev에도 반영한다.
 - 일정은 PRD에서 관리한다. 현재 확정 마감일은 없다.
@@ -178,7 +178,6 @@ Not-tested: 실제 iOS SDK 연동
 
 - 하나의 PR에는 하나의 목적을 담고 작업 중에는 Draft로 생성한다.
 - 실제 PR 양식은 `.github/pull_request_template.md`를 사용한다.
-- Squash merge 커밋 제목은 domain을 포함한 커밋 규칙에 맞춘다.
 - 관련 이슈의 자동 종료는 기본 브랜치 머지 시점에 적용될 수 있으므로 상태를 확인한다.
 
 ---

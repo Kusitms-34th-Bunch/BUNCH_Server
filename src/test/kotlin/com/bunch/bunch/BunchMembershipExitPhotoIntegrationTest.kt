@@ -15,6 +15,7 @@ import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploader
 import com.bunch.photo.domain.PhotoUploaderRepository
+import com.bunch.photo.service.PhotoChangedEvent
 import com.bunch.bunch.dto.BunchRemovalRequest
 import com.bunch.bunch.service.BunchMembershipExitService
 import org.assertj.core.api.Assertions.assertThat
@@ -26,12 +27,19 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataAccessException
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.event.ApplicationEvents
+import org.springframework.test.context.event.RecordApplicationEvents
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 @SpringBootTest
 @ActiveProfiles("test")
+@RecordApplicationEvents
 class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
+    @Autowired
+    private lateinit var events: ApplicationEvents
+
     @Autowired
     private lateinit var exits: BunchMembershipExitService
 
@@ -164,7 +172,41 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
         assertThat(issue(owner, bunch.id).code).isEqualTo(invitation.code)
     }
 
-    private fun photo(bunchId: Long, uploaderIds: List<Long>): Photo {
+    @Test
+    fun `exit announces each dated photo change once and skips undated photos`() {
+        val owner = member()
+        val removed = member()
+        val remaining = member()
+        val bunch = create(owner)
+        join(removed, issue(owner, bunch.id))
+        join(remaining, issue(owner, bunch.id))
+        val sharedDate = LocalDate.of(2026, 10, 19)
+        val deletedDate = sharedDate.plusDays(1)
+        photo(bunch.id, listOf(removed, remaining), sharedDate)
+        photo(bunch.id, listOf(removed), deletedDate)
+        photo(bunch.id, listOf(removed, remaining))
+        photo(bunch.id, listOf(removed))
+        val ownerMembership = memberships.findByMemberIdAndBunchIdAndStatus(owner, bunch.id)!!
+        val removedMembership = memberships.findByMemberIdAndBunchIdAndStatus(removed, bunch.id)!!
+
+        exits.remove(
+            owner,
+            bunch.id,
+            removedMembership.id,
+            BunchRemovalRequest(ownerMembership.id, bunchVersion(bunch.id))
+        )
+
+        assertThat(events.stream(PhotoChangedEvent::class.java).toList()).containsExactly(
+            PhotoChangedEvent(bunch.id, sharedDate, photoAdded = false),
+            PhotoChangedEvent(bunch.id, deletedDate, photoAdded = false)
+        )
+    }
+
+    private fun photo(
+        bunchId: Long,
+        uploaderIds: List<Long>,
+        capturedDate: LocalDate? = null
+    ): Photo {
         val asset = assets.saveAndFlush(
             ImageAsset(
                 publicId = "exit-test/${UUID.randomUUID()}",
@@ -177,7 +219,8 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
                 imageAsset = asset,
                 fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2),
                 processingStatus = com.bunch.photo.domain.ProcessingStatus.READY,
-                dateSource = DateSource.UNKNOWN,
+                capturedDate = capturedDate,
+                dateSource = if (capturedDate == null) DateSource.UNKNOWN else DateSource.USER,
                 createdAt = Instant.parse("2026-01-01T00:00:00Z")
             )
         )
