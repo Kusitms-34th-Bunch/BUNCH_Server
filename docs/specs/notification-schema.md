@@ -1,7 +1,7 @@
 # 알림 inbox 저장 계약 — #28
 
 > #28은 앱 내 `notifications`와 실제 업무 변경의 원자적 연결을 다룬다.
-> APNs protocol, device registration, push preference, retry wire/schema는 이 문서의 범위가 아니며 [이슈 #48](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/48)이 소유한다.
+> V15 기기·설정·전송 job의 실제 스키마와 재시도는 [푸시 계약](push.md)을 따른다.
 
 [알림 Spec](notification.md)과 [알림 inbox API](notification-api.md)의 저장 기준이다.
 번치·번들 업무의 실제 잠금과 멱등성은 [번들 기능 계약](bundle.md)·[번들 API](bundle-api.md) 및 [역할·Stage 계약](bunch-role-stage.md)을 따른다.
@@ -11,7 +11,7 @@
 - 실제 업무 변경을 적용한 서비스가 같은 DB 트랜잭션에서 수신자별 `notifications`를 직접 저장한다.
 - 업무 서비스가 이미 성공한 요청을 재생하면 저장된 업무 결과만 반환한다. notification writer를 다시 호출하거나 별도 이벤트 원장을 조회하지 않는다.
 - 기존 번치·번들 잠금을 먼저 잡고, 활동 합산 때 해당 수신자의 열린 notification 행을 잠근다. 새 행·읽음·합산·취소의 실패는 업무 변경과 함께 롤백한다.
-- 이 PR은 `push_jobs`, `push_devices`, `push_preferences` 테이블이나 임시 큐를 추가하지 않는다. 기기가 없는 사건은 앱 inbox만 남기며, 나중에 등록한 기기로 소급 전송하지 않는다.
+- V15는 `push_jobs`, `push_devices`, `push_preferences`를 추가한다. 기존 writer에서 notification과 현재 기기별 job을 함께 저장한다. 기기가 없는 사건은 앱 inbox만 남기며, 나중에 등록한 기기로 소급 전송하지 않는다.
 
 ## 2. `notifications`
 
@@ -114,7 +114,7 @@ Retention은 `created_at <= clock.instant() - 30 days`인 행을 주기 삭제�
 - 활동 합산 시 아직 전송되지 않은 현재 기기 job의 payload도 같은 트랜잭션에서 갱신한다. notification만 보고 job을 재생성하지 않는다.
 - 당시 기기가 없으면 job을 만들지 않으며, 나중에 등록한 기기로 과거 notification을 소급 전송하지 않는다.
 
-기기 등록·개인 설정·APNs payload/인증·retry 횟수와 오류별 wire 계약은 #48 범위로 남긴다. 앱 inbox의 동작과 실제 iOS 수신·표시는 별도 검증이다.
+기기 등록·개인 설정·APNs payload/인증·retry는 [푸시 계약](push.md)을 따른다. 앱 inbox의 동작과 실제 iOS 수신·표시는 별도 검증이다.
 
 주기 실행은 기존 `SchedulingConfig`를 사용한다. 기본 운영 설정은 활성화되어 있고,
 `async-job.worker.enabled=false`로 전역 스케줄링을 끄면 독촉·보관 정리도 중지된다.
