@@ -1,7 +1,7 @@
 package com.bunch.notification
 
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceEnvironment
 import com.bunch.notification.dto.PushAlert
 import com.bunch.notification.dto.PushAps
 import com.bunch.notification.dto.PushPayload

@@ -14,11 +14,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
-import com.bunch.notification.domain.PushAuthorizationStatus
-import com.bunch.notification.domain.PushDevice
-import com.bunch.notification.domain.PushDeviceEnvironment
-import com.bunch.notification.domain.PushDeviceRepository
-import com.bunch.notification.domain.PushJobRepository
+import com.bunch.notification.domain.push.PushAuthorizationStatus
+import com.bunch.notification.domain.push.PushDevice
+import com.bunch.notification.domain.push.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJobRepository
 import com.bunch.notification.service.DeviceTokenCipher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

@@ -1,7 +1,7 @@
 package com.bunch.notification.dto
 
-import com.bunch.notification.domain.PushAuthorizationStatus
-import com.bunch.notification.domain.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushAuthorizationStatus
+import com.bunch.notification.domain.push.PushDeviceEnvironment
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 
 data class PushDeviceRegistrationRequest(

@@ -1,5 +1,6 @@
-package com.bunch.notification.domain
+package com.bunch.notification.domain.push
 
+import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.PushPayload
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
