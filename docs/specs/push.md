@@ -58,6 +58,8 @@ writer는 기존 업무 트랜잭션을 요구하며 실패하면 모두 롤백�
 나중에 기기를 등록해도 과거 알림을 소급 전송하지 않는다. 업무 요청 replay는 job도 재생성하지 않는다.
 10분 활동 합산은 기존 pending job 본문만 함께 갱신하며 최초 제목·job ID·발생 시각·만료는 유지한다.
 이미 전송된 job이나 나중에 등록한 기기에는 추가 job을 만들지 않는다.
+합산은 현재 `PENDING`인 job의 payload만 조건부 갱신한다. 동시 전송·취소가 기록한
+상태·시도 횟수·재시도 시각을 이전 값으로 덮어쓰지 않는다.
 
 내보내짐(14)·번치 삭제(15)는 inbox 없이 detached job만 저장한다. 번치 FK가 없으므로 삭제 뒤에도 안내를 전송할 수 있다.
 이 producer 및 재참여 시 이전 removal job 취소는 [이탈 #25](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/25)·

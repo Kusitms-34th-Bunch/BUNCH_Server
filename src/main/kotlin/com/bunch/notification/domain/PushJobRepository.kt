@@ -1,5 +1,6 @@
 package com.bunch.notification.domain
 
+import com.bunch.notification.dto.PushPayload
 import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
@@ -101,6 +102,13 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
         notificationId: Long,
         status: PushJobStatus
     ): List<PushJob>
+
+    @Modifying
+    @Query("""
+        update PushJob j set j.payload = :payload
+        where j.id = :id and j.status = com.bunch.notification.domain.PushJobStatus.PENDING
+    """)
+    fun updatePendingPayload(id: UUID, payload: PushPayload): Int
 
     @Modifying
     @Query("delete from PushJob j where j.status in (com.bunch.notification.domain.PushJobStatus.SENT, com.bunch.notification.domain.PushJobStatus.FAILED, com.bunch.notification.domain.PushJobStatus.CANCELLED) and j.createdAt <= :cutoff")

@@ -34,10 +34,13 @@ class PushJobWriter(
 
     @Transactional(propagation = Propagation.MANDATORY)
     fun refreshMergedActivity(notification: Notification) {
-        val groupUntil = notification.groupUntil ?: return
+        if (notification.groupUntil == null) return
         jobs.findAllByNotificationIdAndStatus(notification.id, PushJobStatus.PENDING).forEach { job ->
-            job.payload = payloads.forNotification(job.id, notification, job.payload.aps.alert.title)
-            job.availableAt = groupUntil
+            // The worker or device registration may have changed the job after it was loaded.
+            jobs.updatePendingPayload(
+                job.id,
+                payloads.forNotification(job.id, notification, job.payload.aps.alert.title)
+            )
         }
     }
 
