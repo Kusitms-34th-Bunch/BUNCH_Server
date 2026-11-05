@@ -74,6 +74,13 @@ class BuiltInTitleSentencesTest {
         }
     }
 
+    @Test
+    fun `no blank is followed by a particle that changes with the final consonant`() {
+        sentences.forEach { sentence ->
+            assertThat(PARTICLE_AFTER_BLANK.containsMatchIn(sentence.text)).describedAs(sentence.id).isFalse()
+        }
+    }
+
     private fun letters(text: String): Long = Pattern.compile("\\X").matcher(text).results().count()
 
     private companion object {
@@ -88,6 +95,11 @@ class BuiltInTitleSentencesTest {
         )
 
         val ALLOWED_BLANKS = setOf("{요일}", "{A}", "{B}", "{N}")
+
+        // A particle right after a blank: 이/가, 와/과, 랑/이랑, 은/는, 을/를, 으로/로. The list joins a blank with
+        // 「·」, 「의」 or a space instead, because the particle would have to change with the final consonant of the
+        // filled word.
+        val PARTICLE_AFTER_BLANK = Regex("\\{(?:요일|A|B|N)}(?:이랑|으로|[이가와과랑은는을를로])")
 
         // Examples of what the list leaves out (활동·장소·날씨·직업·놀림·술). It is a safety net, not the full rule.
         val FORBIDDEN = arrayOf("러닝", "한강", "비 오", "퇴근", "출근", "여행", "소주", "맥주", "술 ", "운동")
