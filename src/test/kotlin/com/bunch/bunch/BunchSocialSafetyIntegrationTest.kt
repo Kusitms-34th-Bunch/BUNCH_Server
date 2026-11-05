@@ -119,10 +119,10 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
         assertThat(follows.findByFollowerBunchIdAndFollowedBunchId(first, second)).isNull()
         assertThat(follows.findByFollowerBunchIdAndFollowedBunchId(second, first)).isNull()
         assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) {
-            social.relations(firstOwner, second, first, false, 0, 20)
+            social.relations(firstOwner, second, false, 0, 20)
         }
         assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) {
-            social.relations(secondOwner, first, second, false, 0, 20)
+            social.relations(secondOwner, first, false, 0, 20)
         }
         assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) { social.follow(secondOwner, second, first) }
 
@@ -140,14 +140,14 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
         assertThat(social.blocks(secondOwner, second, 0, 20).items.map { it.id })
             .containsExactly(oppositeBlockId)
         assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) {
-            social.relations(firstOwner, second, first, false, 0, 20)
+            social.relations(firstOwner, second, false, 0, 20)
         }
 
         social.unblock(secondOwner, second, first, oppositeBlockId)
         assertThat(follows.findByFollowerBunchIdAndFollowedBunchId(first, second)).isNull()
         assertThat(follows.findByFollowerBunchIdAndFollowedBunchId(second, first)).isNull()
-        assertThat(social.relations(firstOwner, second, first, false, 0, 20).items).isEmpty()
-        assertThat(social.relations(secondOwner, first, second, false, 0, 20).items).isEmpty()
+        assertThat(social.relations(firstOwner, second, false, 0, 20).items).isEmpty()
+        assertThat(social.relations(secondOwner, first, false, 0, 20).items).isEmpty()
     }
 
     @Test

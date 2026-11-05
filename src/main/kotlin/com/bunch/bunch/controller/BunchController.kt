@@ -16,8 +16,9 @@ class BunchController(private val bunches: BunchService, private val invitations
     @GetMapping("/name-availability")
     fun nameAvailability(
         @AuthenticationPrincipal userId: String,
-        @RequestParam name: String
-    ) = ApiResponse.ok(bunches.nameAvailability(userId.toLong(), name))
+        @RequestParam name: String,
+        @RequestParam(required = false) excludeBunchId: Long?
+    ) = ApiResponse.ok(bunches.nameAvailability(userId.toLong(), name, excludeBunchId))
 
     @PostMapping
     fun create(
@@ -38,12 +39,6 @@ class BunchController(private val bunches: BunchService, private val invitations
         @AuthenticationPrincipal userId: String,
         @PathVariable id: Long
     ) = ApiResponse.ok(bunches.resetProfileImage(userId.toLong(), id))
-
-    @GetMapping("/{id}/members")
-    fun members(
-        @AuthenticationPrincipal userId: String,
-        @PathVariable id: Long
-    ) = ApiResponse.ok(bunches.members(userId.toLong(), id))
 
     @PutMapping("/{id}/last-used")
     fun lastUsed(

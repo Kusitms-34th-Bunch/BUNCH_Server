@@ -106,6 +106,16 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllLockedByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""select distinct photo from Photo photo
+        join PhotoUploader uploader on uploader.photo.id = photo.id
+        where photo.bunch.id = :bunchId and uploader.member.id = :memberId
+        order by photo.id asc""")
+    fun findAllLockedByBunchIdAndUploaderMemberIdOrderByIdAsc(
+        @Param("bunchId") bunchId: Long,
+        @Param("memberId") memberId: Long
+    ): List<Photo>
+
     // The caller holds the photo locks, so an update by ID is enough. The time is not touched: only the date changes.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(

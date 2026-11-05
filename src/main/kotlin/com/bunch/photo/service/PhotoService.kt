@@ -397,18 +397,42 @@ class PhotoService(
 
         if (photo.bunch.id != bunchId) fail(ErrorCode.FORBIDDEN)
 
-        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photoId)
+        return removeLockedUploader(photo, memberId, finalDeletionCallback)
+    }
+
+    /**
+     * Removes every uploader row for one member while keeping the bunch and all photo locks
+     * in the contract's order. The caller owns the surrounding membership transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllUploaders(
+        bunchId: Long,
+        memberId: Long
+    ): List<PhotoUploaderRemovalResult> {
+        lockBunch(bunchId)
+        return photos
+            .findAllLockedByBunchIdAndUploaderMemberIdOrderByIdAsc(bunchId, memberId)
+            .map { removeLockedUploader(it, memberId, PhotoFinalDeletionCallback.NONE) }
+    }
+
+    private fun removeLockedUploader(
+        photo: Photo,
+        memberId: Long,
+        finalDeletionCallback: PhotoFinalDeletionCallback
+    ): PhotoUploaderRemovalResult {
+
+        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photo.id)
         val target = rows.firstOrNull { it.member.id == memberId }
-            ?: return PhotoUploaderRemovalResult(photoId, uploaderRemoved = false, photoDeleted = false)
+            ?: return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = false, photoDeleted = false)
 
         uploaders.delete(target)
-        announceChange(bunchId, photo.capturedDate)
+        announceChange(photo.bunch.id, photo.capturedDate)
         if (rows.size > 1) {
-            return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
+            return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = false)
         }
 
         deleteLocked(photo, finalDeletionCallback)
-        return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = true)
+        return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = true)
     }
 
     /**

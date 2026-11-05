@@ -89,17 +89,15 @@ class BunchSocialController(private val social: BunchSocialService) {
     fun followers(
         @AuthenticationPrincipal userId: String,
         @PathVariable targetId: Long,
-        @RequestParam(required = false) viewerBunchId: Long?,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int
-    ) = ApiResponse.ok(social.relations(userId.toLong(), targetId, viewerBunchId, false, page, size))
+    ) = ApiResponse.ok(social.relations(userId.toLong(), targetId, false, page, size))
 
     @GetMapping("/{targetId}/following")
     fun following(
         @AuthenticationPrincipal userId: String,
         @PathVariable targetId: Long,
-        @RequestParam(required = false) viewerBunchId: Long?,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int
-    ) = ApiResponse.ok(social.relations(userId.toLong(), targetId, viewerBunchId, true, page, size))
+    ) = ApiResponse.ok(social.relations(userId.toLong(), targetId, true, page, size))
 }

@@ -1,9 +1,11 @@
 package com.bunch.bunch
 
+import com.bunch.bunch.service.BunchPublicService
 import com.bunch.global.exception.ErrorCode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataAccessException
 import org.springframework.test.context.ActiveProfiles
@@ -12,6 +14,9 @@ import java.util.UUID
 @SpringBootTest
 @ActiveProfiles("test")
 class BunchVersionIntegrationTest : BunchIntegrationSupport() {
+    @Autowired
+    private lateinit var content: BunchPublicService
+
     @Test
     fun `creation and each new join increment membership version once but replay and reads do not`() {
         val owner = member()
@@ -27,7 +32,7 @@ class BunchVersionIntegrationTest : BunchIntegrationSupport() {
         assertThat(version(bunch.id)).isEqualTo(2)
         join(visitor, invite, joinKey)
         join(visitor, invite)
-        bunches.members(visitor, bunch.id)
+        content.members(visitor, bunch.id)
         bunches.updateLastUsed(visitor, bunch.id)
         assertThat(version(bunch.id)).isEqualTo(2)
         assertThat(jdbc.queryForObject(
