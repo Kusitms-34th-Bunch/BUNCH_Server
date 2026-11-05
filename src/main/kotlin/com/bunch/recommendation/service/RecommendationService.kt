@@ -1,26 +1,189 @@
 package com.bunch.recommendation.service
 
+import com.bunch.bunch.domain.BunchMembershipRepository
+import com.bunch.bunch.domain.BunchRepository
+import com.bunch.recommendation.domain.BundleCandidate
+import com.bunch.recommendation.domain.CandidateMatch
+import com.bunch.recommendation.domain.CandidateMatcher
+import com.bunch.recommendation.domain.CandidatePhoto
+import com.bunch.recommendation.domain.CardSelection
+import com.bunch.recommendation.domain.CardSelector
+import com.bunch.recommendation.domain.MaterialPhotoRow
+import com.bunch.recommendation.domain.PhotoCluster
+import com.bunch.recommendation.domain.PhotoClusterer
 import com.bunch.recommendation.domain.PhotoSample
 import com.bunch.recommendation.domain.RecommendationRepository
+import com.bunch.recommendation.domain.TitleContextBuilder
+import com.bunch.recommendation.domain.TitleGenerator
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
+import java.time.LocalDate
 
 @Service
 class RecommendationService(
-    private val recommendations: RecommendationRepository
+    private val recommendations: RecommendationRepository,
+    private val entityManager: EntityManager,
+    private val bunches: BunchRepository,
+    private val memberships: BunchMembershipRepository,
+    private val clusterer: PhotoClusterer,
+    private val cardSelector: CardSelector,
+    private val matcher: CandidateMatcher,
+    private val titleGenerator: TitleGenerator,
+    private val titleContexts: TitleContextBuilder
 ) {
     /** The photos of a bunch a recommended bundle can be made of, one sample per photo. */
     @Transactional(readOnly = true)
-    fun materialPhotos(bunchId: Long): List<PhotoSample> =
-        recommendations.findMaterialRows(bunchId)
-            .groupBy { it.photoId }
-            .map { (photoId, uploads) ->
-                PhotoSample(
-                    photoId = photoId,
-                    capturedDate = uploads.first().capturedDate,
-                    capturedTime = uploads.first().capturedTime,
-                    uploaderIds = uploads.map { it.memberId }.toSet(),
-                    batchIds = uploads.map { it.uploadBatchId }.toSet()
-                )
-            }
+    fun materialPhotos(bunchId: Long): List<PhotoSample> = toSamples(recommendations.findMaterialRows(bunchId))
+
+    /**
+     * Calculates the recommended bundles of a bunch again after its photos changed on [changedDates] (4.2.9). Only the
+     * candidates and clusters on those dates and the day before and after are changed, because a cluster over midnight
+     * can reach into the next day. The clusters are made out of all the material of the bunch (at most 1,000 photos),
+     * so a cluster that reaches out of those dates is still seen whole.
+     * The bunch is locked like the photo changes are, so two calculations of a bunch never run at the same time and
+     * the photos do not change while they are read.
+     */
+    @Transactional
+    fun recalculate(bunchId: Long, changedDates: Set<LocalDate>) {
+        if (changedDates.isEmpty()) return
+        if (bunches.findLocked(bunchId) == null) return
+
+        val affected = changedDates.flatMap { listOf(it.minusDays(1), it, it.plusDays(1)) }.toSet()
+        val samples = materialPhotos(bunchId)
+        val clusters = clusterer.cluster(samples).filter { touches(it.startDate, it.endDate, affected) }
+        val sampleById = samples.associateBy { it.photoId }
+        val selections = clusters.associateWith { cluster ->
+            cardSelector.select(cluster.photoIds.map { sampleById.getValue(it) })
+        }
+
+        val stored = recommendations.findCandidates(bunchId)
+        val inRange = stored.filter { touches(it.startDate, it.endDate, affected) }
+        val match = matcher.match(photoIdsOf(inRange), clusters) { selections.getValue(it).recommended }
+        val addedAt = addedAtOf(clusters)
+
+        if (match.deletedCandidateIds.isNotEmpty()) recommendations.deleteCandidates(match.deletedCandidateIds)
+        keep(match, inRange, selections, addedAt)
+        create(bunchId, match, stored, selections, sampleById, addedAt)
+    }
+
+    private fun toSamples(rows: List<MaterialPhotoRow>): List<PhotoSample> =
+        rows.groupBy { it.photoId }.map { (photoId, uploads) ->
+            PhotoSample(
+                photoId = photoId,
+                capturedDate = uploads.first().capturedDate,
+                capturedTime = uploads.first().capturedTime,
+                uploaderIds = uploads.map { it.memberId }.toSet(),
+                batchIds = uploads.map { it.uploadBatchId }.toSet()
+            )
+        }
+
+    // A candidate or a cluster is on the dates from its first day to its last day.
+    private fun touches(startDate: LocalDate, endDate: LocalDate?, dates: Set<LocalDate>): Boolean =
+        dates.any { !it.isBefore(startDate) && !it.isAfter(endDate ?: startDate) }
+
+    private fun photoIdsOf(stored: List<BundleCandidate>): Map<Long, Set<Long>> {
+        if (stored.isEmpty()) return emptyMap()
+
+        val photos = recommendations.findCandidatePhotos(stored.map { it.id })
+            .groupBy({ it.candidateId }, { it.photoId })
+
+        return stored.associate { it.id to photos[it.id].orEmpty().toSet() }
+    }
+
+    private fun addedAtOf(clusters: List<PhotoCluster>): Map<Long, Instant> =
+        recommendations.findAddedAt(clusters.flatMap { it.photoIds }.toSet())
+            .associate { it.photoId to it.createdAt }
+
+    // The title stays. The time of the last photo added only goes up, so deleting photos never moves it back (4.2.9
+    // rule 3), and a photo that was moved to this cluster or came back from a draft is not a new photo.
+    private fun keep(
+        match: CandidateMatch,
+        inRange: List<BundleCandidate>,
+        selections: Map<PhotoCluster, CardSelection>,
+        addedAt: Map<Long, Instant>
+    ) {
+        if (match.kept.isEmpty()) return
+
+        val byId = inRange.associateBy { it.id }
+        recommendations.deleteCandidatePhotos(match.kept.keys)
+        match.kept.forEach { (candidateId, cluster) ->
+            val candidate = byId.getValue(candidateId)
+            candidate.startDate = cluster.startDate
+            candidate.endDate = cluster.endDate
+            candidate.lastPhotoAddedAt = maxOf(candidate.lastPhotoAddedAt, latestAdded(cluster, addedAt))
+            candidate.updatedAt = Instant.now()
+            photosOf(candidateId, cluster, selections.getValue(cluster)).forEach(entityManager::persist)
+        }
+    }
+
+    // The new candidates one after the other, so a title made for one is not made again for the next (4.2.2).
+    private fun create(
+        bunchId: Long,
+        match: CandidateMatch,
+        stored: List<BundleCandidate>,
+        selections: Map<PhotoCluster, CardSelection>,
+        sampleById: Map<Long, PhotoSample>,
+        addedAt: Map<Long, Instant>
+    ) {
+        if (match.created.isEmpty()) return
+
+        val datedPhotos = toSamples(recommendations.findDatedRows(bunchId))
+        val nicknames = nicknamesOf(match.created, sampleById)
+        val memberCount = memberships.countByBunchIdAndStatus(bunchId).toInt()
+        val shownTitles = stored.filter { it.id !in match.deletedCandidateIds }.map { it.title }.toMutableSet()
+        val recentSentenceIds = stored
+            .sortedWith(compareByDescending<BundleCandidate> { it.createdAt }.thenByDescending { it.id })
+            .mapNotNull { it.titleSentenceKey }
+            .toMutableList()
+
+        match.created.forEach { cluster ->
+            val context = titleContexts.build(
+                cluster = cluster,
+                nicknames = nicknames,
+                bunchMemberCount = memberCount,
+                datedPhotos = datedPhotos,
+                visibleTitles = shownTitles.toSet(),
+                recentSentenceIds = recentSentenceIds.toList()
+            )
+            val title = titleGenerator.generate(context)
+            val now = Instant.now()
+            val candidate = BundleCandidate(
+                bunchId = bunchId,
+                startDate = cluster.startDate,
+                endDate = cluster.endDate,
+                title = title.title,
+                titleSentenceKey = title.sentenceId,
+                lastPhotoAddedAt = latestAdded(cluster, addedAt),
+                createdAt = now,
+                updatedAt = now
+            )
+            entityManager.persist(candidate)
+            photosOf(candidate.id, cluster, selections.getValue(cluster)).forEach(entityManager::persist)
+
+            shownTitles += title.title
+            title.sentenceId?.let { recentSentenceIds.add(0, it) }
+        }
+    }
+
+    private fun nicknamesOf(clusters: List<PhotoCluster>, sampleById: Map<Long, PhotoSample>): Map<Long, String> {
+        val memberIds = clusters.flatMap { it.photoIds }.flatMap { sampleById.getValue(it).uploaderIds }.toSet()
+
+        return recommendations.findNicknames(memberIds)
+            .mapNotNull { row -> row.nickname?.let { row.memberId to it } }
+            .toMap()
+    }
+
+    private fun latestAdded(cluster: PhotoCluster, addedAt: Map<Long, Instant>): Instant =
+        cluster.photoIds.maxOf { addedAt.getValue(it) }
+
+    // Every photo of the cluster is kept. Only the photos of the card have a position, in the order they are shown.
+    private fun photosOf(candidateId: Long, cluster: PhotoCluster, selection: CardSelection): List<CandidatePhoto> {
+        val positions = selection.photoIds.withIndex().associate { (index, photoId) -> photoId to index + 1 }
+
+        return cluster.photoIds.map { photoId ->
+            CandidatePhoto(candidateId = candidateId, photoId = photoId, position = positions[photoId])
+        }
+    }
 }
