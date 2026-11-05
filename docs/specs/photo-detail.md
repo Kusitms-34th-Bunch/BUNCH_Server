@@ -112,12 +112,12 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
     "uploaders": [
       {
         "memberId": 12,
-        "nickname": "경진",
+        "nickname": "멤버 A",
         "imageUrl": "https://res.cloudinary.com/demo/image/upload/profile/k.jpg"
       },
       {
         "memberId": 15,
-        "nickname": "은우",
+        "nickname": "멤버 B",
         "imageUrl": null
       }
     ]
