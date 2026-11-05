@@ -81,6 +81,48 @@ class CardSelectorTest {
     }
 
     @Test
+    fun `the photos of one member are spread over the day even when others already cover a time`() {
+        // Both members have a photo every hour from 09:00 to 20:00. The other member's photos have the lower IDs, so
+        // they win every tie. Judging only by the time of all chosen photos leaves the member with a few photos in
+        // one part of the day (4.2.8 rule 2).
+        val other = series(12, stepMinutes = 60, startMinute = 9 * 60, uploaderOf = { 2L })
+        val mine = series(12, stepMinutes = 60, startMinute = 9 * 60, uploaderOf = { 1L })
+        val all = other + mine
+
+        val selection = selector.select(all)
+
+        val chosen = all.filter { it.photoId in selection.photoIds }
+        listOf(1L, 2L).forEach { member ->
+            val hours = chosen.filter { member in it.uploaderIds }.map { it.capturedTime!!.hour }
+            assertThat(hours.max() - hours.min()).isGreaterThanOrEqualTo(6)
+        }
+    }
+
+    @Test
+    fun `no two chosen photos share a time while other times are free`() {
+        val other = series(12, stepMinutes = 60, startMinute = 9 * 60, uploaderOf = { 2L })
+        val mine = series(12, stepMinutes = 60, startMinute = 9 * 60, uploaderOf = { 1L })
+        val all = other + mine
+
+        val selection = selector.select(all)
+
+        val hours = all.filter { it.photoId in selection.photoIds }.map { it.capturedTime!!.hour }
+        assertThat(hours).doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `the first photo of a member is the one farthest from what others chose`() {
+        val lone = photo(minutes(12 * 60), 2L)
+        val nearTheLone = listOf(12 * 60 + 30, 13 * 60, 14 * 60, 15 * 60, 16 * 60).map { photo(minutes(it), 1L) }
+        val farFromTheLone = photo(minutes(20 * 60), 1L)
+        val narrow = CardSelector(RecommendationSettings(maxCardPhotos = 2))
+
+        val selection = narrow.select(listOf(lone) + nearTheLone + farFromTheLone)
+
+        assertThat(selection.photoIds).containsExactlyInAnyOrder(lone.photoId, farFromTheLone.photoId)
+    }
+
+    @Test
     fun `a member whose photos have no time still gets a photo`() {
         val timed = series(10)
         val untimed = listOf(photo(null, 2L), photo(null, 2L))
