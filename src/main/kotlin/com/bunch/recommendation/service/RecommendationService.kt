@@ -15,8 +15,11 @@ import com.bunch.recommendation.domain.PhotoSample
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.TitleContextBuilder
 import com.bunch.recommendation.domain.TitleGenerator
+import com.bunch.photo.service.PhotoChangedEvent
 import jakarta.persistence.EntityManager
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.time.LocalDate
@@ -36,6 +39,38 @@ class RecommendationService(
     /** The photos of a bunch a recommended bundle can be made of, one sample per photo. */
     @Transactional(readOnly = true)
     fun materialPhotos(bunchId: Long): List<PhotoSample> = toSamples(recommendations.findMaterialRows(bunchId))
+
+    /**
+     * Notes the date of a photo change in the transaction of the change itself, so the note is there exactly when the
+     * change is (4.2.9 rule 1). A photo without a date is part of no recommended bundle (4.2.7), so it is not noted.
+     * Whether a photo was added does not matter here: the time of the last photo added comes from the photos.
+     */
+    @EventListener
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun noteChange(event: PhotoChangedEvent) {
+        val date = event.capturedDate ?: return
+        recommendations.markChanged(event.bunchId, date, Instant.now())
+    }
+
+    /** The bunches whose photos have not changed since [cutoff], the ones waiting the longest first. */
+    @Transactional(readOnly = true)
+    fun quietBunchIds(cutoff: Instant, limit: Int): List<Long> = recommendations.findQuietBunchIds(cutoff, limit)
+
+    /**
+     * Calculates the noted dates of a bunch once when its photos did not change since [cutoff] (4.2.9 rule 2). The
+     * bunch is locked first and the check is made again, because a change that was committed while this waited for the
+     * lock is newer than the cutoff and has to wait for its own five quiet minutes.
+     */
+    @Transactional
+    fun recalculateIfQuiet(bunchId: Long, cutoff: Instant) {
+        if (bunches.findLocked(bunchId) == null) return
+
+        val changed = recommendations.findChangedDates(bunchId)
+        if (changed.isEmpty() || changed.any { it.changedAt.isAfter(cutoff) }) return
+
+        recalculate(bunchId, changed.map { it.capturedDate }.toSet())
+        recommendations.deleteChangedDates(bunchId)
+    }
 
     /**
      * Calculates the recommended bundles of a bunch again after its photos changed on [changedDates] (4.2.9). Only the

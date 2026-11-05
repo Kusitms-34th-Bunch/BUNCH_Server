@@ -22,6 +22,7 @@ abstract class RecommendationIntegrationSupport : PhotoHttpTestSupport() {
     fun cleanRecalculationFixtures() {
         jdbc.update("DELETE FROM candidate_photos")
         jdbc.update("DELETE FROM bundle_candidates")
+        jdbc.update("DELETE FROM recommendation_dirty_dates")
         jdbc.update("DELETE FROM bundle_photos")
         jdbc.update("DELETE FROM bundles")
         jdbc.update("DELETE FROM photo_uploaders")

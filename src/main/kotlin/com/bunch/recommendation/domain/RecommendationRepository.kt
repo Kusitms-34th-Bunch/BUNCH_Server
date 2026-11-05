@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
 import org.springframework.data.repository.query.Param
 import java.time.Instant
+import java.time.LocalDate
 
 // The READY photos with a date and one row for each of their uploaders. This is every photo the bunch shows by date.
 private const val DATED_ROWS =
@@ -54,6 +55,40 @@ interface RecommendationRepository : Repository<Photo, Long> {
     @Query("delete from CandidatePhoto p where p.candidateId in :candidateIds")
     fun deleteCandidatePhotos(@Param("candidateIds") candidateIds: Collection<Long>)
 
+    // A date that changed again only gets a newer time, so a bunch has one row for each changed date.
+    @Modifying
+    @Query(
+        value = """INSERT INTO recommendation_dirty_dates (bunch_id, captured_date, changed_at)
+        VALUES (:bunchId, :capturedDate, :changedAt)
+        ON CONFLICT (bunch_id, captured_date) DO UPDATE SET changed_at = EXCLUDED.changed_at""",
+        nativeQuery = true
+    )
+    fun markChanged(
+        @Param("bunchId") bunchId: Long,
+        @Param("capturedDate") capturedDate: LocalDate,
+        @Param("changedAt") changedAt: Instant
+    )
+
+    @Query(
+        value = """SELECT captured_date AS capturedDate, changed_at AS changedAt
+        FROM recommendation_dirty_dates WHERE bunch_id = :bunchId""",
+        nativeQuery = true
+    )
+    fun findChangedDates(@Param("bunchId") bunchId: Long): List<ChangedDateRow>
+
+    // The bunches whose latest change is not newer than the cutoff, the ones waiting the longest first.
+    @Query(
+        value = """SELECT bunch_id FROM recommendation_dirty_dates
+        GROUP BY bunch_id HAVING max(changed_at) <= :cutoff
+        ORDER BY min(changed_at), bunch_id LIMIT :limit""",
+        nativeQuery = true
+    )
+    fun findQuietBunchIds(@Param("cutoff") cutoff: Instant, @Param("limit") limit: Int): List<Long>
+
+    @Modifying
+    @Query(value = "DELETE FROM recommendation_dirty_dates WHERE bunch_id = :bunchId", nativeQuery = true)
+    fun deleteChangedDates(@Param("bunchId") bunchId: Long)
+
     /** When a photo was added to the photo box (`photos.created_at`). */
     interface PhotoAddedRow {
         val photoId: Long
@@ -64,5 +99,11 @@ interface RecommendationRepository : Repository<Photo, Long> {
     interface MemberNicknameRow {
         val memberId: Long
         val nickname: String?
+    }
+
+    /** A date whose photos changed and when they changed last (4.2.9 rule 2). */
+    interface ChangedDateRow {
+        val capturedDate: LocalDate
+        val changedAt: Instant
     }
 }
