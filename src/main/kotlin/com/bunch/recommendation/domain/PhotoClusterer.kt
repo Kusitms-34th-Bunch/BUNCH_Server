@@ -6,12 +6,13 @@ import java.time.LocalDate
 /**
  * Groups the photos of a bunch into clusters of photos taken together (4.2.7).
  *
- * Per day, the photos with a time are split at long gaps, then the photos without a time are attached to one of the
- * resulting parts. Afterwards the last part of a day and the first part of the next day are joined when the shooting
- * went on past midnight. A part joins at most once, so a cluster never covers more than two days.
+ * Per day, the photos with a time are split at long gaps or where no member uploaded on both sides (4.2.7 detail 2),
+ * then the photos without a time are attached to one of the resulting parts. Afterwards the last part of a day and the
+ * first part of the next day are joined when the shooting went on past midnight. A part joins at most once, so a
+ * cluster never covers more than two days.
  *
- * The rule "no member uploaded on both sides of the cut" (4.2.7 detail 2) waits for the planning team's answer and
- * is not applied; [split] is the place for it.
+ * "No member uploaded on both sides" compares all uploaders of the photos before the cut with all uploaders after it.
+ * The exact meaning is waiting for the planning team's answer.
  */
 class PhotoClusterer(private val settings: RecommendationSettings = RecommendationSettings()) {
     fun cluster(samples: List<PhotoSample>): List<PhotoCluster> {
@@ -39,12 +40,19 @@ class PhotoClusterer(private val settings: RecommendationSettings = Recommendati
         return parts.mapIndexed { index, part -> Part(date, part.timed, attached[index].orEmpty()) }
     }
 
-    // Cuts at the longest gap that leaves enough photos on both sides, then looks at each side again.
+    // A cut is possible when the gap is long or no member uploaded on both sides, and enough photos stay on each side.
+    // The longest gap among the possible cuts goes first, then each side is looked at again.
     private fun split(photos: List<PhotoSample>): List<List<PhotoSample>> {
         val side = settings.minPhotosOnEachSide.coerceAtLeast(1)
+        val uploadersBefore = photos.runningFold(emptySet<Long>()) { all, photo -> all + photo.uploaderIds }
+        val uploadersAfter = photos.asReversed()
+            .runningFold(emptySet<Long>()) { all, photo -> all + photo.uploaderIds }
+            .asReversed()
         val cut = (side..photos.size - side)
             .map { it to Duration.between(photos[it - 1].moment, photos[it].moment) }
-            .filter { it.second >= settings.splitGap }
+            .filter { (index, gap) ->
+                gap >= settings.splitGap || uploadersBefore[index].none(uploadersAfter[index]::contains)
+            }
             .maxByOrNull { it.second }
             ?: return listOf(photos)
         return split(photos.subList(0, cut.first)) + split(photos.subList(cut.first, photos.size))

@@ -78,6 +78,73 @@ class PhotoClustererTest {
     }
 
     @Test
+    fun `members who do not overlap split the day even when the gap is short`() {
+        val firstPair = burst("13:00", "16:00", 8, uploaders = setOf(1L, 2L))
+        val secondPair = burst("18:00", "21:00", 6, uploaders = setOf(3L, 4L))
+
+        val clusters = clusterer.cluster(firstPair + secondPair)
+
+        assertThat(groups(clusters)).containsExactly(ids(firstPair), ids(secondPair))
+    }
+
+    @Test
+    fun `members who do not overlap split the day even when the gap is minutes`() {
+        val first = burst("13:00", "13:20", 3, uploaders = setOf(1L))
+        val second = burst("13:30", "13:50", 3, uploaders = setOf(2L))
+
+        assertThat(groups(clusterer.cluster(first + second))).containsExactly(ids(first), ids(second))
+    }
+
+    @Test
+    fun `one shared member keeps the day together`() {
+        val before = burst("13:00", "16:00", 8, uploaders = setOf(1L, 2L))
+        val after = burst("18:00", "21:00", 6, uploaders = setOf(2L, 3L))
+
+        assertThat(clusterer.cluster(before + after)).hasSize(1)
+    }
+
+    @Test
+    fun `members who do not overlap are not split when a side has fewer than three photos`() {
+        val three = burst("13:00", "13:20", 3, uploaders = setOf(1L))
+        val twoLater = burst("13:30", "13:40", 2, uploaders = setOf(2L))
+        val twoEarlier = burst("12:00", "12:10", 2, uploaders = setOf(3L))
+
+        assertThat(clusterer.cluster(three + twoLater)).hasSize(1)
+        assertThat(clusterer.cluster(twoEarlier + three)).hasSize(1)
+    }
+
+    @Test
+    fun `a photo uploaded together on the border keeps the day together`() {
+        val before = burst("13:00", "13:20", 3, uploaders = setOf(1L))
+        val together = photo("13:30", uploaders = setOf(1L, 2L))
+        val after = burst("13:40", "14:00", 3, uploaders = setOf(2L))
+
+        assertThat(clusterer.cluster(before + together + after)).hasSize(1)
+    }
+
+    @Test
+    fun `the longest gap decides when a gap and a member split are both possible`() {
+        val first = burst("08:00", "08:20", 3, uploaders = setOf(1L))
+        val second = burst("08:30", "08:40", 2, uploaders = setOf(2L))
+        val third = burst("13:00", "13:20", 3, uploaders = setOf(2L))
+
+        // Cutting the 4 hour gap first leaves only two photos behind the member split, so that one is not cut.
+        // Cutting the short member split first would give a different result.
+        val clusters = clusterer.cluster(first + second + third)
+
+        assertThat(groups(clusters)).containsExactly(ids(first + second), ids(third))
+    }
+
+    @Test
+    fun `photos without a time do not take part in the member comparison`() {
+        val first = burst("13:00", "13:20", 3, uploaders = setOf(1L))
+        val second = burst("13:30", "13:50", 3, uploaders = setOf(2L))
+        val untimed = photo(null, uploaders = setOf(1L, 2L))
+
+        assertThat(clusterer.cluster(first + second + untimed)).hasSize(2)
+    }
+
+    @Test
     fun `a day where no photo has a time is one cluster`() {
         val photos = listOf(photo(null), photo(null), photo(null))
 
@@ -256,8 +323,9 @@ class PhotoClustererTest {
 
     @Test
     fun `six photos from two uploaders qualify`() {
-        val photos = burst("13:00", "13:30", 3, uploaders = setOf(1L)) +
-            burst("13:40", "14:10", 3, uploaders = setOf(2L))
+        // The uploaders take turns. Members who stay apart would be split into two clusters (4.2.7 detail 2).
+        val photos = listOf("13:00" to 1L, "13:10" to 2L, "13:20" to 1L, "13:30" to 2L, "13:40" to 1L, "13:50" to 2L)
+            .map { (time, uploader) -> photo(time, uploaders = setOf(uploader)) }
 
         assertThat(clusterer.cluster(photos).single().qualifies).isTrue()
     }
