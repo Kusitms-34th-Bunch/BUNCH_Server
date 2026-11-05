@@ -26,6 +26,7 @@ import java.time.Instant
 @Service
 class NotificationWriter(
     private val notifications: NotificationRepository,
+    private val pushJobs: PushJobWriter,
     private val memberships: BunchMembershipRepository,
     private val participants: BundleParticipantRepository,
     private val clock: Clock
@@ -69,7 +70,7 @@ class NotificationWriter(
         title: String,
         body: String
     ) {
-        notifications.saveAll(memberships.findActiveMembers(recipientBunchId).filter { it.member.id != actorId }.map {
+        saveNotifications(memberships.findActiveMembers(recipientBunchId).filter { it.member.id != actorId }.map {
             Notification(
                 recipientMemberId = it.member.id,
                 bunchId = recipientBunchId,
@@ -91,7 +92,7 @@ class NotificationWriter(
     @Transactional(propagation = Propagation.MANDATORY)
     fun memberJoined(bunchId: Long, membershipId: Long, actorId: Long, nickname: String, now: Instant) {
         val recipients = memberships.findActiveMembers(bunchId).filter { it.member.id != actorId }
-        notifications.saveAll(recipients.map { recipient ->
+        saveNotifications(recipients.map { recipient ->
             Notification(
                 recipientMemberId = recipient.member.id,
                 bunchId = bunchId,
@@ -125,7 +126,7 @@ class NotificationWriter(
             val current = notifications.openActivity(recipient.member.id, bunchId, bundleId, now)
             if (current == null) {
                 val activity = NotificationActivity(mapOf(actorId to actor.nickname!!), photoCount)
-                notifications.save(
+                saveNotifications(listOf(
                     Notification(
                         recipientMemberId = recipient.member.id,
                         bunchId = bunchId,
@@ -138,12 +139,13 @@ class NotificationWriter(
                         groupUntil = now.plus(Duration.ofMinutes(10)),
                         createdAt = now
                     )
-                )
+                ))
             } else {
                 val activity = requireNotNull(current.activityData).added(actorId, actor.nickname!!, photoCount)
                 current.activityData = activity
                 current.body = activity.body()
                 current.readAt = null
+                pushJobs.refreshMergedActivity(current)
             }
         }
     }
@@ -195,7 +197,7 @@ class NotificationWriter(
             " 번들이 완성됐어요", "함께한 순간들이 하나의 소중한 기록으로 남았어요.", NotificationTargetKind.BUNDLE
         )
         if (grew) {
-            notifications.saveAll(recipients.filter { it != actorId }.map {
+            saveNotifications(recipients.filter { it != actorId }.map {
                 Notification(
                     recipientMemberId = it,
                     bunchId = bundle.bunchId,
@@ -219,6 +221,11 @@ class NotificationWriter(
         )
     }
 
+    private fun saveNotifications(rows: List<Notification>) {
+        val saved = notifications.saveAll(rows)
+        pushJobs.enqueue(saved, clock.instant())
+    }
+
     private fun bundleNotification(
         bundle: Bundle,
         type: NotificationType,
@@ -231,7 +238,7 @@ class NotificationWriter(
         now: Instant = clock.instant()
     ) {
         val current = memberships.findActiveMembers(bundle.bunchId).map { it.member.id }.toSet()
-        notifications.saveAll(recipients.distinct().filter { it != actorId && it in current }.sorted().map {
+        saveNotifications(recipients.distinct().filter { it != actorId && it in current }.sorted().map {
             Notification(
                 recipientMemberId = it,
                 bunchId = bundle.bunchId,

@@ -24,7 +24,7 @@ class BunchMembership(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val role: MembershipRole,
+    var role: MembershipRole,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -34,7 +34,7 @@ class BunchMembership(
     val joinedAt: Instant,
 
     @Column(nullable = false)
-    val roleGrantedAt: Instant = joinedAt,
+    var roleGrantedAt: Instant = joinedAt,
 
     @Column(nullable = false)
     var lastUsedAt: Instant = joinedAt,
@@ -43,7 +43,7 @@ class BunchMembership(
     val endedAt: Instant? = null,
 
     @Column
-    val roleGrantedBy: Long? = null,
+    var roleGrantedBy: Long? = null,
 
     @Column
     var lastActivityAt: Instant? = null,
@@ -52,6 +52,16 @@ class BunchMembership(
     @Column(nullable = false, columnDefinition = "jsonb")
     var joinRequests: Map<String, JoinRequest> = emptyMap()
 ) {
+    fun changeRole(
+        newRole: MembershipRole,
+        grantorMemberId: Long,
+        now: Instant
+    ) {
+        role = newRole
+        roleGrantedAt = now
+        roleGrantedBy = grantorMemberId
+    }
+
     fun recordActivity(now: Instant = Instant.now()) {
         if (lastActivityAt == null || now > lastActivityAt) {
             lastActivityAt = now

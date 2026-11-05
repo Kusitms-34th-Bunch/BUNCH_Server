@@ -57,7 +57,7 @@ BUNCH_Server/
     │   ├── auth/             # controller / service / dto
     │   ├── member/           # 약관·프로필·개인 계정·온보딩 조회
     │   ├── bunch/            # 번치·소속·초대
-    │   ├── notification/     # 참여 알림 영속성
+    │   ├── notification/     # 알림과 푸시; domain/push에 기기·설정·전송 작업 분리
     │   ├── image/            # 공용 이미지 자산·참조 보호·커밋 후 정리
     │   ├── photo/            # Photo·공동 업로더·번들 연결 기반
     │   ├── bundle/           # 번들 생성·공동 편집·발행
