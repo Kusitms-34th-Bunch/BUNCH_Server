@@ -149,23 +149,23 @@ class BunchSocialService(
     fun relations(
         userId: Long,
         targetId: Long,
-        viewerBunchId: Long?,
         following: Boolean,
         page: Int,
         size: Int
     ): BunchSocialPage<BunchRelationItem> {
         positive(targetId)
         val pageable = pageable(page, size, "approvedAt")
-        access.target(userId, targetId, viewerBunchId, requireContent = true)
+        val currentId = access.current(userId)?.bunch?.id
+        access.target(userId, targetId, requireContent = true)
         val result = if (following) {
-            follows.visibleFollowing(targetId, viewerBunchId, pageable)
+            follows.visibleFollowing(targetId, currentId, pageable)
         } else {
-            follows.visibleFollowers(targetId, viewerBunchId, pageable)
+            follows.visibleFollowers(targetId, currentId, pageable)
         }
         val ids = result.content.map { if (following) it.followedBunchId else it.followerBunchId }
         val cards = cards(ids)
-        val viewerRelations = if (viewerBunchId != null && ids.isNotEmpty()) {
-            follows.findAllByFollowerBunchIdAndFollowedBunchIdIn(viewerBunchId, ids).associateBy { it.followedBunchId }
+        val viewerRelations = if (currentId != null && ids.isNotEmpty()) {
+            follows.findAllByFollowerBunchIdAndFollowedBunchIdIn(currentId, ids).associateBy { it.followedBunchId }
         } else {
             emptyMap()
         }

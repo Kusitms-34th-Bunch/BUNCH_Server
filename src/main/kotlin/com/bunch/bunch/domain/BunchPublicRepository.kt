@@ -15,12 +15,13 @@ interface BunchPublicRepository : Repository<Bundle, Long> {
         select bundle from Bundle bundle
         where bundle.bunchId = :bunchId
           and bundle.status = com.bunch.bundle.domain.BundleStatus.PUBLISHED
-          and bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC
+          and (:includePrivate = true or bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC)
         order by bundle.publishedAt desc, bundle.id desc
         """
     )
-    fun findPublicPublishedBundles(
+    fun findPublishedBundles(
         @Param("bunchId") bunchId: Long,
+        @Param("includePrivate") includePrivate: Boolean,
         pageable: Pageable
     ): Page<Bundle>
 
@@ -30,12 +31,13 @@ interface BunchPublicRepository : Repository<Bundle, Long> {
         where bundle.bunchId = :bunchId
           and bundle.id = :bundleId
           and bundle.status = com.bunch.bundle.domain.BundleStatus.PUBLISHED
-          and bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC
+          and (:includePrivate = true or bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC)
         """
     )
-    fun findPublicPublishedBundle(
+    fun findPublishedBundle(
         @Param("bunchId") bunchId: Long,
-        @Param("bundleId") bundleId: Long
+        @Param("bundleId") bundleId: Long,
+        @Param("includePrivate") includePrivate: Boolean
     ): Bundle?
 
     @Query(

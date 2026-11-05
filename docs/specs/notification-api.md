@@ -17,11 +17,13 @@
 `NotificationTarget`은 `kind,bunchId,bundleId?,noticeId?,targetBunchId?`를 가진다.
 kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_LIST`, `BUNDLE`, `BUNDLE_COMMENTS`,
 `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다. 저장된 target 자체는 접근 권한의 증거가 아니다.
+저장된 `bunchId`는 inbox 행의 소유·읽음 범위를 식별할 뿐, 프로필을 여는 current 명의나
+대상 접근 권한을 고정하지 않는다.
 
 ## 2. type 호환성
 
-wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응답·생산자는 1~7, 9, 10이고 #51은 17~19를 실제 관계 변경에 연결한다.
-8, 11~16, 20~21은 enum/storage compatibility만 유지한다. 미래 type의 producer나 fake routing은 이 API에서 만들지 않는다.
+wire enum의 번호와 이름은 저장 계약과 동일하다. 실제 inbox 생산자는 1~7, 9~13, 16~19다.
+14·15는 이탈·삭제의 detached push만 저장한다. 8·20·21은 별도 후보/피드 생산자가 없어 enum/storage 호환만 유지한다.
 
 전체 enum 표는 [저장 계약의 type 호환성](notification-schema.md#type과-target-호환성)을 따른다.
 
@@ -49,7 +51,7 @@ wire enum의 번호와 이름은 저장 계약과 동일하다. 현재 #28 응�
 
 ### open
 
-open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·참여·공개 상태를 검사한다.
+open은 먼저 수신 회원이 소유한 해당 inbox 행의 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·참여·공개 상태를 검사한다.
 대상이 삭제됐거나 현재 접근할 수 없으면 다음처럼 200을 반환한다.
 
 ```json
@@ -57,11 +59,25 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 ```
 
 읽음 저장이 성공한 뒤 이동 검사가 실패해도 읽음을 되돌리지 않는다. 읽음 저장 자체가 실패하면 이동하지 않는다.
-현재 번치 홈·멤버·역할 안내·초안 목록 target은 현재 번치 소속을 확인한다. ROLE_PERMISSIONS는 별도 조회 API 없이 여는 static target이다.
+알림 소유권과 기존 행의 `readAt`은 원래 inbox 번치에 그대로 남기며, open이 행을 다른 번치로
+이동·복제하거나 current를 변경하지 않는다.
+`BUNCH_HOME` target은 unified `targetAvailable`로 대상 존재·차단·공개 정책을 다시 확인하며,
+현재 대상 번치의 Membership이 없어도 최소 EXTERNAL 홈을 연다. `MEMBERS` target은 같은 current
+문맥의 멤버 접근 flag(`canViewMembers`)가 허용될 때만 최소 멤버 목록을 연다. 역할 안내·초안
+목록 target은 현재 번치 소속을 확인하고, ROLE_PERMISSIONS는 별도 조회 API 없이 여는 static
+target이다.
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
-`OTHER_BUNCH_PROFILE`은 #51의 실제 프로필 접근 검사로 현재 수신 번치 소속·대상 존재·양방향 차단을 확인한다.
+`OTHER_BUNCH_PROFILE`은 원래 inbox `bunchId`의 Membership이 이미 종료됐어도 open을 막지 않는다.
+서버가 계산한 현재 번치(남은 ACTIVE 소속의 fallback 포함)를 명의로 사용하고, ACTIVE 소속이
+0개면 `currentBunchId:null`인 EXTERNAL 문맥으로 대상 프로필의 공개 정책을 적용한다. 원래
+알림 번치·저장 payload를 current override로 사용하지 않는다.
+대상 lookup 전에 본인 소유의 미확인·미만료 AccessNotice가 있으면 그 notice를 우선 처리한다.
+notice가 acknowledged/expired라서 active notice가 없으면 정상적인 EXTERNAL 정책으로 계속하고,
+대상에 다시 ACTIVE로 참여한 경우에는 notice를 무시한다. 그 뒤 #51의 대상 존재·양방향 차단·
+공개/승인 검사를 수행하며 결과는 canonical `/bunches/{id}/home`의 `BunchHomeResponse` 범위다.
 비공개 미승인도 최소 프로필은 열 수 있지만 상세 목록 권한을 부여하지 않는다.
-`CANDIDATES`와 `ACCESS_NOTICE`는 실제 접근 구현이 연결될 때까지 `available:false`다.
+`CANDIDATES`는 후보 생산자가 연결되기 전까지 `available:false`다.
+14·15의 `ACCESS_NOTICE`는 inbox open 대상이 아니며 푸시 target의 notice ID로 [이탈 안내 API](bunch-membership-exit.md)를 조회한다. 본인 소유·만료·재참여 상태를 서버가 다시 확인한다.
 저장 payload를 접근 권한의 근거로 사용하지 않으며 차단·삭제 후 open도 읽음 시각을 유지한다.
 
 ## 4. producer·시간 경계
@@ -77,5 +93,5 @@ open은 먼저 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·�
 앱 inbox는 기기 등록과 독립적으로 동작한다. iOS 권한·실제 APNs 수신·푸시 복귀는 앱/운영 설정을 갖춘 별도 수동 검증이다.
 기기·개인 설정·payload·retry와 job wire는 [푸시 계약](push.md)을 따른다.
 
-#48을 연결해 출시할 때는 실제 업무 변경·notification·현재 바인딩된 기기별 job을 같은 DB transaction에 저장해야 한다.
+현재 생산자는 실제 업무 변경·notification·현재 바인딩된 기기별 job을 같은 DB transaction에 저장한다.
 활동 합산 시 미전송 current-device job도 같은 transaction에서 갱신해야 하며, 기기가 없으면 job을 만들지 않고 나중에 등록한 기기로 과거 알림을 소급 전송하지 않는다.

@@ -300,7 +300,7 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `viewerBunchId may be omitted only for a completed user with no memberships`() {
+    fun `relation reads use server current and allow public reads without memberships`() {
         val targetOwner = member()
         val target = create(targetOwner).id
         makePublic(target)
@@ -326,7 +326,9 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(
             get(followersPath(target))
                 .header(HttpHeaders.AUTHORIZATION, activeAccess)
-        ).expectError(ErrorCode.CURRENT_BUNCH_REQUIRED)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items").isEmpty)
     }
 
     @Test
@@ -421,7 +423,8 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
             get(followersPath(target))
                 .header(HttpHeaders.AUTHORIZATION, access)
                 .param("viewerBunchId", "0")
-        ).expectError(ErrorCode.INVALID_INPUT)
+        )
+            .andExpect(status().isOk)
 
         mvc.perform(
             put(followingPath(viewerBunch, 0))

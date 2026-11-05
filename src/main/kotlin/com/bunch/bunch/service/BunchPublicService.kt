@@ -1,6 +1,5 @@
 package com.bunch.bunch.service
 
-import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchPublicRepository
 import com.bunch.bunch.domain.MembershipStatus
@@ -9,19 +8,13 @@ import com.bunch.bunch.dto.BunchPublicBundleComment
 import com.bunch.bunch.dto.BunchPublicBundleContributor
 import com.bunch.bunch.dto.BunchPublicBundleDetail
 import com.bunch.bunch.dto.BunchPublicBundlePhoto
-import com.bunch.bunch.dto.BunchPublicMember
-import com.bunch.bunch.dto.BunchPublicMembersResponse
-import com.bunch.bunch.dto.BunchPublicProfile
-import com.bunch.bunch.dto.BunchPublicProfileCard
+import com.bunch.bunch.dto.BunchMemberResponse
 import com.bunch.bunch.dto.BunchSocialPage
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleComment
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleCommentRepository
 import com.bunch.bundle.domain.BundleParticipantRepository
-import com.bunch.bundle.domain.BundleRepository
-import com.bunch.bundle.domain.BundleStatus
-import com.bunch.bundle.service.BundleStagePolicy
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.AccountStatus
@@ -38,63 +31,27 @@ class BunchPublicService(
     private val access: BunchSocialAccessService,
     private val publicRepository: BunchPublicRepository,
     private val memberships: BunchMembershipRepository,
-    private val follows: BunchFollowRepository,
-    private val bundles: BundleRepository,
     private val participants: BundleParticipantRepository,
     private val comments: BundleCommentRepository,
-    private val members: MemberRepository,
-    private val stagePolicy: BundleStagePolicy
+    private val members: MemberRepository
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    fun profile(userId: Long, targetId: Long, viewerBunchId: Long?): BunchPublicProfile {
-        val target = access.target(userId, targetId, viewerBunchId)
-        val canViewContent = access.canView(target, viewerBunchId)
-        val relation = viewerBunchId?.let {
-            follows.findByFollowerBunchIdAndFollowedBunchId(it, target.id)
-        }
-        val publishedCount = bundles.countByBunchIdAndStatus(target.id, BundleStatus.PUBLISHED)
-
-        return BunchPublicProfile(
-            bunch = BunchPublicProfileCard.from(target),
-            stage = stagePolicy.stage(publishedCount),
-            followerCount = follows.countFollowers(target.id, viewerBunchId),
-            followingCount = follows.countFollowing(target.id, viewerBunchId),
-            memberCount = publicRepository.countActiveMembers(target.id),
-            followState = com.bunch.bunch.dto.FollowResult.from(relation).followState,
-            followId = relation?.id,
-            canViewBundles = canViewContent,
-            canViewMembers = canViewContent,
-            canViewRelations = canViewContent,
-            isCurrentBunch = viewerBunchId == target.id
-        )
-    }
-
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
-    fun members(userId: Long, targetId: Long, viewerBunchId: Long?): BunchPublicMembersResponse {
-        val target = access.target(userId, targetId, viewerBunchId, requireContent = true)
-        return BunchPublicMembersResponse(
-            items = memberships.findActiveMembers(target.id).map { membership ->
-                BunchPublicMember(
-                    memberId = membership.member.id,
-                    nickname = membership.member.nickname,
-                    imageUrl = membership.member.imageUrl,
-                    role = membership.role
-                )
-            }
-        )
+    fun members(userId: Long, targetId: Long): List<BunchMemberResponse> {
+        val target = access.target(userId, targetId, requireContent = true)
+        return memberships.findActiveMembers(target.id).map(BunchMemberResponse::from)
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun bundles(
         userId: Long,
         targetId: Long,
-        viewerBunchId: Long?,
         page: Int,
         size: Int
     ): BunchSocialPage<BunchPublicBundleCard> {
         val pageable = pageable(page, size)
-        val target = access.target(userId, targetId, viewerBunchId, requireContent = true)
-        val result = publicRepository.findPublicPublishedBundles(target.id, pageable)
+        val target = access.target(userId, targetId, requireContent = true)
+        val internal = access.current(userId)?.bunch?.id == target.id
+        val result = publicRepository.findPublishedBundles(target.id, internal, pageable)
         val coverImageUrls = if (result.content.isEmpty()) {
             emptyMap()
         } else {
@@ -117,12 +74,12 @@ class BunchPublicService(
     fun bundle(
         userId: Long,
         targetId: Long,
-        bundleId: Long,
-        viewerBunchId: Long?
+        bundleId: Long
     ): BunchPublicBundleDetail {
         positive(bundleId)
-        val target = access.target(userId, targetId, viewerBunchId, requireContent = true)
-        val bundle = publicRepository.findPublicPublishedBundle(target.id, bundleId)
+        val target = access.target(userId, targetId, requireContent = true)
+        val internal = access.current(userId)?.bunch?.id == target.id
+        val bundle = publicRepository.findPublishedBundle(target.id, bundleId, internal)
             ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
         val photos = publicRepository.findBundlePhotos(bundle.id)
         val participantRows = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)

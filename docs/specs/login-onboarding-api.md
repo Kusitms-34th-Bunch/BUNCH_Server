@@ -79,8 +79,10 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   같은 회원·번치의 ACTIVE 소속은 하나다. 다시 참여하면 새 소속을 만든다.
 - 번치 생성+첫 OWNER+마지막 사용 시각은 한 트랜잭션이다. 가입·권한 부여 시각을 남긴다.
 - 소속 한도 10개, 번치 정원 8명. 변경 작업은 회원 행→번치 행 순으로 잠그고 최종 시점에 확인한다.
-- 마지막 번치는 ACTIVE 소속의 lastUsedAt 내림차순으로 조회한다. 같으면 소속 ID 내림차순이다.
-  무효 소속은 제외하므로 최근의 다른 유효 소속으로 복귀한다. 없으면 defaultBunchId:null이다.
+- 서버 current/default 번치는 ACTIVE 소속의 `lastUsedAt DESC, membership.id DESC`로 계산한다.
+  무효 소속은 제외하므로 최근의 다른 유효 소속으로 복귀하며, 없으면 `currentBunchId`와
+  `defaultBunchId`는 `null`이다. `default`는 별도 저장 설정이 아니라 이 current 계산의
+  호환 필드명이다. GET query로 현재 번치를 선택하거나 갱신하지 않는다.
 - 초대 발급은 ACTIVE OWNER/CO_OWNER/MEMBER 모두 가능하다. 번치 잠금 아래 유효한 초대 하나를 재사용한다.
   만료/폐기면 기존 것을 폐기 표시하고 새로 발급한다. 최초 발급자 표시는 재공유해도 유지한다.
 - 토큰은 SecureRandom 32바이트의 Base64URL, 보조 코드는 23456789ABCDEFGHJKLMNPQRSTUVWXYZ 중
@@ -128,7 +130,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
-| GET /api/v1/bunches/{id}/members | 없음 | [{memberId,nickname,imageUrl,role}], 활성 멤버만([상세](#bunch-members)) |
+| GET /api/v1/bunches/{id}/members | 없음 | canonical `[{memberId,nickname,imageUrl,role}]`; INTERNAL/허용된 EXTERNAL의 ACTIVE 멤버([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
 | GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
@@ -156,10 +158,15 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | gender | FEMALE / MALE 또는 null. 선택하지 않았으면 null, 본인에게만 반환 |
 | defaultBunch | 기존 BunchResponse 형식의 {id,name,characterType,imageUrl} 또는 null |
 
-`defaultBunch`는 가입 완료 회원의 ACTIVE 소속 중 lastUsedAt 내림차순, 같은 시각이면
-소속 ID 내림차순으로 선택한다. 기존 온보딩의 defaultBunchId와 같은 기준이며 별도 기본 번치
+`defaultBunch`는 가입 완료 회원의 서버 current 번치를 기존 `BunchResponse`로 보여주는
+호환 필드다. ACTIVE 소속 중 `lastUsedAt DESC, membership.id DESC`로 선택하며 별도 기본 번치
 설정을 저장하지 않는다. 가입 중이거나 유효한 소속이 없으면 null이다. 나가거나 내보내진 소속은
 제외하고 번치가 삭제되면 다른 유효 소속으로 복귀한다. 번치 기본 이미지는 imageUrl:null이다.
+
+사용자의 명시적 current 전환은 `PUT /api/v1/bunches/{id}/last-used`다. 번치 생성·참여의 성공
+처리와 create/join 성공 replay(`ALREADY_MEMBER` 결과 포함)는 기존 최근 사용(`lastUsedAt`) 갱신을
+유지한다. 홈·소셜 GET과 알림 open은 갱신하지 않는다. 이탈 시에는 남은 ACTIVE 소속의 정렬로
+fallback한다.
 
 null 필드도 JSON에 포함하며 임시 입력이나 기본값을 만들어 반환하지 않는다. 위 여섯 필드만
 반환하고 사진 publicId·약관·소셜 식별자·내부 계정 정보는 포함하지 않는다.
@@ -176,9 +183,11 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 <a id="bunch-members"></a>
 ### 번치 멤버 목록 조회 — 이슈 #43
 
-`GET /api/v1/bunches/{id}/members`는 번치의 활성 멤버를 내려준다. 사진함·번들 만들기의 멤버별 필터 칩
-(사진함 3.1.2, 번들 만들기 4.1.1), 번들 참여 멤버 추가(4.3.2), 멤버 관리(5.6.1)가 함께 쓴다.
-가입을 완료한 그 번치의 ACTIVE 멤버만 조회할 수 있다.
+`GET /api/v1/bunches/{id}/members`는 [홈·프로필 계약](bunch-home-profile.md)의 canonical
+멤버 목록이다. 사진함·번들 만들기의 멤버별 필터 칩(사진함 3.1.2, 번들 만들기 4.1.1),
+번들 참여 멤버 추가(4.3.2), 멤버 관리(5.6.1)가 내부 범위에서 함께 쓴다. 대상이 서버 current의
+ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책을 적용하며, 허용된 경우에만
+대상의 ACTIVE 멤버 배열을 직접 반환한다. 별도 외부 멤버 조회 경로나 wrapper는 없다.
 
 | data 항목 | 타입·null 계약 |
 | --- | --- |
@@ -192,9 +201,9 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 - 정렬: OWNER→CO_OWNER→MEMBER, 같은 역할 안에서는 닉네임 오름차순·소속 ID 오름차순이다(5.6.1 로직 1).
   닉네임은 DB 문자 코드 순서(`COLLATE "C"`)라 한글끼리는 가나다순이고 영문·숫자가 한글보다 앞에 온다.
 - 번치당 최대 8명이라 페이지가 없다. 출생연도·성별·계정 상태 등 다른 개인 정보는 내려주지 않는다(5.10.8 로직 2).
-- 오류: 미인증 401 `AUTH_001`, 가입 미완료 403 `AUTH_015`, 번치 멤버가 아님 403 `AUTH_002`, 번치 없음 404
-  `RESOURCE_001`.
-- 멤버 관리 작업(권한 변경·내보내기)과 다른 번치의 멤버 목록(5.10.8, 팔로우 상태 확인 필요)은 이 API의 범위가 아니다.
+- 오류: 미인증 401 `AUTH_001`, 가입 미완료 403 `AUTH_015`, 현재/외부 접근 flag가 허용하지 않는
+  조회 403 `AUTH_002`, 대상 번치 없음·양방향 차단 404 `BUNCH_009`, 본인 소유의 미확인·미만료
+  AccessNotice 선행 409 `BUNCH_008`(`noticeId`, `reason`).
 
 검증 기준: 실제 PostgreSQL·JWT 인증을 거쳐 정렬(메인 관리자 우선, 닉네임순), 프로필 이미지 null,
 나간·내보내진·탈퇴 멤버 제외, 재참여 1회 표시, 다른 번치 멤버 미포함, 비멤버·가입 미완료·없는 번치·토큰 없음을 확인한다.

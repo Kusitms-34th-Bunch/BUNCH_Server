@@ -81,42 +81,50 @@ class NotificationService(
     }
 
     private fun available(memberId: Long, target: NotificationTarget): Boolean {
-        if (memberships.findByMemberIdAndBunchIdAndStatus(memberId, target.bunchId) == null) return false
         return when (target.kind) {
-            NotificationTargetKind.BUNCH_HOME,
-            NotificationTargetKind.MEMBERS,
+            NotificationTargetKind.BUNCH_HOME -> targetAvailable(memberId, target.bunchId)
+            NotificationTargetKind.MEMBERS -> targetAvailable(memberId, target.bunchId, requireContent = true)
             NotificationTargetKind.ROLE_PERMISSIONS,
-            NotificationTargetKind.DRAFT_LIST -> true
+            NotificationTargetKind.DRAFT_LIST -> hasMembership(memberId, target.bunchId)
             NotificationTargetKind.DRAFT -> {
+                if (!hasMembership(memberId, target.bunchId)) return false
                 val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
                 bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.DRAFT &&
                     access.isParticipant(memberId, bundle.id)
             }
             NotificationTargetKind.BUNDLE,
             NotificationTargetKind.BUNDLE_COMMENTS -> {
+                if (!hasMembership(memberId, target.bunchId)) return false
                 val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
                 bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.PUBLISHED
             }
             NotificationTargetKind.OTHER_BUNCH_PROFILE -> {
                 val targetId = target.targetBunchId ?: return false
-                try {
-                    socialAccess.target(memberId, targetId, target.bunchId)
-                    true
-                } catch (ex: BusinessException) {
-                    if (ex.errorCode !in setOf(
-                            ErrorCode.BUNCH_PROFILE_UNAVAILABLE,
-                            ErrorCode.CURRENT_BUNCH_REQUIRED,
-                            ErrorCode.FORBIDDEN
-                        )
-                    ) throw ex
-                    false
-                }
+                targetAvailable(memberId, targetId)
             }
             // These destinations still have no real producer/access implementation.
             NotificationTargetKind.CANDIDATES,
             NotificationTargetKind.ACCESS_NOTICE -> false
         }
     }
+
+    private fun targetAvailable(memberId: Long, targetId: Long, requireContent: Boolean = false): Boolean {
+        try {
+            socialAccess.target(memberId, targetId, requireContent)
+            return true
+        } catch (ex: BusinessException) {
+            if (ex.errorCode !in setOf(
+                    ErrorCode.BUNCH_PROFILE_UNAVAILABLE,
+                    ErrorCode.BUNCH_ACCESS_UNAVAILABLE,
+                    ErrorCode.FORBIDDEN
+                )
+            ) throw ex
+            return false
+        }
+    }
+
+    private fun hasMembership(memberId: Long, bunchId: Long): Boolean =
+        memberships.findByMemberIdAndBunchIdAndStatus(memberId, bunchId) != null
 
     private fun owned(memberId: Long, bunchId: Long, id: Long): Notification =
         notifications.findOwnedLocked(id, memberId, bunchId, cutoff())
