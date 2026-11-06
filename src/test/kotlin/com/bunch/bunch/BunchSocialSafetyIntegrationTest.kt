@@ -200,7 +200,7 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `report accepts any active member, normalizes detail, and validates before replay`() {
+    fun `report accepts active members, normalizes detail, and enforces the bunch quota`() {
         val owner = member()
         val viewer = create(owner).id
         val reporter = member()
@@ -231,17 +231,24 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
         assertThat(stored.reportedByMemberId).isEqualTo(reporter)
         assertThat(stored.reason).isEqualTo(BunchReportReason.OTHER)
         assertThat(stored.detail).isEqualTo("first detail")
+        assertThat(stored.status).isEqualTo("RECEIVED")
 
-        val replay = social.report(
+        val second = social.report(
             owner,
             viewer,
             BunchReportRequest(target, BunchReportReason.SPAM, "  replacement  ")
         )
-        assertThat(replay.reportId).isEqualTo(first.reportId)
-        assertThat(reports.findById(first.reportId).orElseThrow().reason)
-            .isEqualTo(BunchReportReason.OTHER)
-        assertThat(reports.findById(first.reportId).orElseThrow().detail)
-            .isEqualTo("first detail")
+        assertThat(second.reportId).isNotEqualTo(first.reportId)
+        val secondStored = reports.findById(second.reportId).orElseThrow()
+        assertThat(secondStored.reportedByMemberId).isEqualTo(owner)
+        assertThat(secondStored.reason).isEqualTo(BunchReportReason.SPAM)
+        assertThat(secondStored.detail).isEqualTo("replacement")
+        assertThat(secondStored.status).isEqualTo("RECEIVED")
+        assertThat(reportCount(viewer, target)).isEqualTo(2)
+
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) {
+            social.report(owner, viewer, BunchReportRequest(target, BunchReportReason.SPAM, "third"))
+        }
 
         assertError(ErrorCode.INVALID_INPUT) {
             social.report(
@@ -252,12 +259,12 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
         }
 
         val secondViewer = create(owner).id
-        val second = social.report(
+        val otherBunchReport = social.report(
             owner,
             secondViewer,
             BunchReportRequest(target, BunchReportReason.SPAM, "  ")
         )
-        assertThat(reports.findById(second.reportId).orElseThrow().detail).isNull()
+        assertThat(reports.findById(otherBunchReport.reportId).orElseThrow().detail).isNull()
     }
 
     @Test
@@ -292,7 +299,7 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
             assertThatThrownBy { social.report(reportOwner, reportViewer, reportRequest) }
                 .isInstanceOf(DataAccessException::class.java)
         }
-        assertThat(reports.findByReporterBunchIdAndTargetBunchId(reportViewer, reportTarget)).isNull()
+        assertThat(reportCount(reportViewer, reportTarget)).isZero()
 
         assertThatThrownBy {
             transaction.executeWithoutResult {
@@ -300,7 +307,7 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
                 error("caller rollback")
             }
         }.isInstanceOf(IllegalStateException::class.java)
-        assertThat(reports.findByReporterBunchIdAndTargetBunchId(reportViewer, reportTarget)).isNull()
+        assertThat(reportCount(reportViewer, reportTarget)).isZero()
     }
 
     @Test
@@ -367,39 +374,45 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `a valid report replays its original row after either direction blocks the pair`() {
+    fun `blocks reject reports before quota and unblocking preserves consumed quota`() {
         val reporter = member()
         val reporterBunch = publicBunch(reporter)
         val targetOwner = member()
         val target = publicBunch(targetOwner)
-        val request = BunchReportRequest(target, BunchReportReason.OTHER, "  original detail  ")
-
-        val first = social.report(reporter, reporterBunch, request)
-        val firstRow = reports.findById(first.reportId).orElseThrow()
-        assertThat(firstRow.reason).isEqualTo(BunchReportReason.OTHER)
-        assertThat(firstRow.detail).isEqualTo("original detail")
-
-        social.block(reporter, reporterBunch, target)
-        val afterReporterBlock = social.report(
+        val first = social.report(
+            reporter,
+            reporterBunch,
+            BunchReportRequest(target, BunchReportReason.OTHER, "  original detail  ")
+        )
+        val second = social.report(
             reporter,
             reporterBunch,
             BunchReportRequest(target, BunchReportReason.SPAM, "replacement")
         )
-        assertThat(afterReporterBlock.reportId).isEqualTo(first.reportId)
+        assertThat(second.reportId).isNotEqualTo(first.reportId)
+        assertThat(reports.findById(first.reportId).orElseThrow().detail).isEqualTo("original detail")
+        assertThat(reports.findById(second.reportId).orElseThrow().detail).isEqualTo("replacement")
+
+        social.block(reporter, reporterBunch, target)
+        assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) {
+            social.report(reporter, reporterBunch, BunchReportRequest(target, BunchReportReason.SPAM))
+        }
 
         val reporterBlockId = social.blocks(reporter, reporterBunch, 0, 20).items.single().id
         social.unblock(reporter, reporterBunch, target, reporterBlockId)
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) {
+            social.report(reporter, reporterBunch, BunchReportRequest(target, BunchReportReason.SPAM))
+        }
+
         social.block(targetOwner, target, reporterBunch)
-        val afterTargetBlock = social.report(
-            reporter,
-            reporterBunch,
-            BunchReportRequest(target, BunchReportReason.SPAM, "replacement")
-        )
-        assertThat(afterTargetBlock.reportId).isEqualTo(first.reportId)
-        assertThat(reports.findById(first.reportId).orElseThrow().reason)
-            .isEqualTo(BunchReportReason.OTHER)
-        assertThat(reports.findById(first.reportId).orElseThrow().detail)
-            .isEqualTo("original detail")
+        assertError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE) {
+            social.report(reporter, reporterBunch, BunchReportRequest(target, BunchReportReason.SPAM))
+        }
+        val targetBlockId = social.blocks(targetOwner, target, 0, 20).items.single().id
+        social.unblock(targetOwner, target, reporterBunch, targetBlockId)
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) {
+            social.report(reporter, reporterBunch, BunchReportRequest(target, BunchReportReason.SPAM))
+        }
     }
 
     @Test
@@ -648,6 +661,13 @@ class BunchSocialSafetyIntegrationTest : BunchIntegrationSupport() {
         "SELECT name FROM bunches WHERE id = ?",
         String::class.java,
         id
+    )!!
+
+    private fun reportCount(reporterBunchId: Long, targetBunchId: Long): Long = jdbc.queryForObject(
+        "SELECT count(*) FROM bunch_profile_reports WHERE reporter_bunch_id = ? AND target_bunch_id = ?",
+        Long::class.java,
+        reporterBunchId,
+        targetBunchId
     )!!
 
     private fun rejectWrites(table: String, operation: String, action: () -> Unit) {

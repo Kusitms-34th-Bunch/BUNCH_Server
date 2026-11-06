@@ -30,7 +30,9 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
 import jakarta.persistence.EntityManager
+import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.regex.Pattern
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -47,7 +49,8 @@ class BunchSocialService(
     private val reports: BunchProfileReportRepository,
     private val access: BunchSocialAccessService,
     private val notifications: NotificationWriter,
-    private val entityManager: EntityManager
+    private val entityManager: EntityManager,
+    private val clock: Clock
 ) {
     @Transactional
     fun follow(userId: Long, viewerId: Long, targetId: Long): FollowResult {
@@ -231,10 +234,23 @@ class BunchSocialService(
         val locked = lockPair(viewerId, request.targetBunchId)
         access.viewer(userId, viewerId)
         if (locked[request.targetBunchId] == null) fail(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
-        reports.findByReporterBunchIdAndTargetBunchId(viewerId, request.targetBunchId)?.let {
-            return BunchReportResult(it.id)
-        }
         access.visible(viewerId, request.targetBunchId)
+
+        val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+        val latest = reports.findFirstByReporterBunchIdAndTargetBunchIdOrderByWindowStartedAtDescIdDesc(
+            viewerId,
+            request.targetBunchId
+        )
+        val windowStartedAt = latest?.windowStartedAt
+            ?.takeIf { now.isBefore(it.plus(24, ChronoUnit.HOURS)) }
+            ?: now
+        val acceptedCount = reports.countByReporterBunchIdAndTargetBunchIdAndWindowStartedAt(
+            viewerId,
+            request.targetBunchId,
+            windowStartedAt
+        )
+        if (acceptedCount >= 2) fail(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED)
+
         val saved = reports.save(
             BunchProfileReport(
                 reporterBunchId = viewerId,
@@ -242,7 +258,8 @@ class BunchSocialService(
                 reportedByMemberId = userId,
                 reason = request.reason,
                 detail = detail,
-                createdAt = Instant.now()
+                createdAt = now,
+                windowStartedAt = windowStartedAt
             )
         )
         return BunchReportResult(saved.id)
