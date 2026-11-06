@@ -3,6 +3,8 @@ package com.bunch.recommendation.service
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.service.BunchAccessNoticeService
+import com.bunch.bundle.domain.BundleEventType
+import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.PhotoImageUrls
@@ -21,6 +23,7 @@ import com.bunch.recommendation.domain.PhotoSample
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.TitleContextBuilder
 import com.bunch.recommendation.domain.TitleGenerator
+import com.bunch.recommendation.domain.UsedCandidate
 import com.bunch.recommendation.dto.RecommendedBundleCard
 import com.bunch.recommendation.dto.RecommendedBundleDetailResponse
 import com.bunch.recommendation.dto.RecommendedBundleListResponse
@@ -121,6 +124,37 @@ class RecommendationService(
     }
 
     /**
+     * Notes that the photos of a draft changed, so the recommended bundles are calculated again (4.1.3 rule 6, 4.2.9).
+     * A draft taking photos, giving photos back or being deleted changes what is left to recommend. Only these three
+     * changes of a bundle are listened to, and they are always made in a transaction, so the note is there exactly
+     * when the change is. The bundle events of the live editing are left out by the condition.
+     * A bundle that is deleted gives its photos back (4.2.9 rule 1): they are not noted as used any more, so they can
+     * be recommended again. This runs before the bundle and its photos are deleted.
+     */
+    @EventListener(condition = "#event.type.name() matches 'CREATED|PHOTOS|DELETED'")
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun noteBundleChange(event: BundleChangedEvent) {
+        if (event.type == BundleEventType.DELETED) recommendations.releaseUsedPhotosOfBundle(event.bundleId)
+        recommendations.markAllChanged(event.bunchId, Instant.now())
+    }
+
+    /**
+     * Takes the recommended bundle a draft is made from (4.1.3 rules 5 and 8). The recommended bundle is deleted and
+     * its photos are noted as used, so the photos the draft does not take only become a new recommended bundle when a
+     * photo is added to them (4.2.9 rule 5). The draft gets its title and its first day. Returns null when the
+     * recommended bundle is not there any more or belongs to another bunch; the draft is made without it then. The
+     * caller is the creation of the draft, which has locked the bunch, so two drafts never take the same recommended
+     * bundle.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun useCandidate(bunchId: Long, candidateId: Long): UsedCandidate? {
+        val candidate = recommendations.findCandidate(bunchId, candidateId) ?: return null
+        recommendations.markCandidatePhotosUsed(bunchId, candidate.id)
+        recommendations.deleteCandidates(listOf(candidate.id))
+        return UsedCandidate(candidate.title, candidate.startDate)
+    }
+
+    /**
      * The recommended bundles of a bunch in the order of the list (4.2.9 rule 6). The list belongs to the bunch, so
      * every member of it gets the same one.
      */
@@ -183,13 +217,22 @@ class RecommendationService(
 
         if (match.deletedCandidateIds.isNotEmpty()) recommendations.deleteCandidates(match.deletedCandidateIds)
         keep(match, inRange, selections, addedAt)
-        val toCreate = match.copy(created = notExpired(match.created, addedAt))
+        val toCreate = match.copy(created = withNewPhotos(notExpired(match.created, addedAt), bunchId))
         create(bunchId, toCreate, stored, selections, sampleById, addedAt)
     }
 
     // A cluster whose last photo was added more than 30 days ago is not made a candidate. It would be deleted at the
     // next daily check, and a bundle that expired must not come back until a new photo is added (4.2.9 rule 4). The old
     // photos are still material, so a new photo gives the cluster a recent time and it comes back as a new candidate.
+    // The photos of a recommended bundle a draft was made from are not recommended again (4.1.3 rule 5). A cluster of
+    // only those photos is not a new recommended bundle; one with a photo that was added since is (4.2.9 rule 5).
+    private fun withNewPhotos(clusters: List<PhotoCluster>, bunchId: Long): List<PhotoCluster> {
+        if (clusters.isEmpty()) return clusters
+
+        val used = recommendations.findUsedPhotoIds(bunchId).toSet()
+        return clusters.filter { cluster -> cluster.photoIds.any { it !in used } }
+    }
+
     private fun notExpired(clusters: List<PhotoCluster>, addedAt: Map<Long, Instant>): List<PhotoCluster> {
         val now = Instant.now()
 

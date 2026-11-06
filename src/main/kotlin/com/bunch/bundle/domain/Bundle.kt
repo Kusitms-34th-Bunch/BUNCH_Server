@@ -70,5 +70,8 @@ class Bundle(
     var publishedAt: Instant? = null,
 
     @Column(name = "ready_notified_at")
-    var publishReadyNotifiedAt: Instant? = null
+    var publishReadyNotifiedAt: Instant? = null,
+
+    @Column(name = "recommended_date")
+    val recommendedDate: LocalDate? = null
 )

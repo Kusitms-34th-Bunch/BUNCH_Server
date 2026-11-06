@@ -5,7 +5,10 @@ import com.bunch.bundle.domain.BundleStatus
 import java.time.LocalDate
 import java.util.UUID
 
-data class CreateBundleRequest(val photoIds: List<Long>)
+data class CreateBundleRequest(
+    val photoIds: List<Long>,
+    val recommendationId: Long? = null
+)
 
 data class BundleTextRequest(
     val value: String,
