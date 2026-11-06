@@ -1,34 +1,17 @@
 package com.bunch.recommendation
 
-import com.bunch.photo.PhotoHttpTestSupport
-import com.bunch.recommendation.service.RecommendationService
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import java.time.LocalDate
 import java.time.LocalTime
-import java.util.UUID
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class MaterialPhotoIntegrationTest : PhotoHttpTestSupport() {
-    @Autowired
-    private lateinit var recommendation: RecommendationService
-
-    @AfterEach
-    fun cleanMaterialFixtures() {
-        jdbc.update("DELETE FROM bundle_photos")
-        jdbc.update("DELETE FROM bundles")
-        jdbc.update("DELETE FROM photo_uploaders")
-        jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-http/%'")
-    }
-
+class MaterialPhotoIntegrationTest : RecommendationIntegrationSupport() {
     @Test
     fun `a ready dated photo is material with its date time and uploader`() {
         val (ownerId, bunchId) = bunchWithOwner()
@@ -133,29 +116,5 @@ class MaterialPhotoIntegrationTest : PhotoHttpTestSupport() {
         val (_, bunchId) = bunchWithOwner()
 
         assertThat(recommendation.materialPhotos(bunchId)).isEmpty()
-    }
-
-    // A bundle that uses the photos, inserted straight into the tables so a test does not need the bundle flow.
-    private fun bundleWith(bunchId: Long, creatorId: Long, status: String, vararg photoIds: Long): Long {
-        val bundleId = jdbc.queryForObject(
-            """INSERT INTO bundles (bunch_id, created_by, status, created_at, updated_at, published_at)
-                VALUES (?, ?, ?, now(), now(), CASE WHEN ? = 'PUBLISHED' THEN now() END) RETURNING id""",
-            Long::class.java,
-            bunchId,
-            creatorId,
-            status,
-            status
-        )!!
-        photoIds.forEachIndexed { position, photoId ->
-            jdbc.update(
-                """INSERT INTO bundle_photos (bundle_id, photo_id, image_asset_id, position, added_by, added_at)
-                    SELECT ?, id, image_asset_id, ?, ?, now() FROM photos WHERE id = ?""",
-                bundleId,
-                position,
-                creatorId,
-                photoId
-            )
-        }
-        return bundleId
     }
 }
