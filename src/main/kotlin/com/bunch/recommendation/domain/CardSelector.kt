@@ -12,7 +12,8 @@ import kotlin.math.abs
  * remaining places go to the photos that are farthest in time from the ones already taken, so the whole time of the
  * cluster shows. The distance is also taken from the photos the same member already has, so the photos of one member
  * do not crowd into a part of the day that other members already cover (rule 2). A photo uploaded together is taken
- * once and counts for the member whose turn it was.
+ * once and counts for the one of its uploaders who has the fewest photos in the cluster, the one who uploaded it
+ * first when they have as many (rule 3).
  */
 class CardSelector(
     private val settings: RecommendationSettings = RecommendationSettings(),
@@ -35,11 +36,12 @@ class CardSelector(
 
     private fun pick(photos: List<PhotoSample>): List<PhotoSample> {
         val chosen = mutableListOf<PhotoSample>()
-        val members = photos.flatMap { it.uploaderIds }.distinct()
-            .sortedWith(compareBy({ member -> photos.count { member in it.uploaderIds } }, { member -> member }))
+        val counts = photos.flatMap { it.uploaderIds }.groupingBy { it }.eachCount()
+        val members = counts.keys.sortedWith(compareBy({ member -> counts.getValue(member) }, { member -> member }))
+        val owners = photos.associate { photo -> photo.photoId to ownerOf(photo, counts) }
         for (member in members) {
             if (chosen.size >= settings.maxCardPhotos) break
-            val own = notChosen(photos, chosen).filter { member in it.uploaderIds }
+            val own = notChosen(photos, chosen).filter { owners[it.photoId] == member }
             farthest(own, chosen, photos)?.let { chosen += it }
         }
         while (chosen.size < settings.maxCardPhotos) {
@@ -48,6 +50,12 @@ class CardSelector(
         }
         return chosen
     }
+
+    // The member a photo counts for (4.2.8 rule 3). A photo several members uploaded counts for the one of them with
+    // the fewest photos in the cluster, so a member with few photos does not lose a place to it, and for the one who
+    // uploaded it first when they have as many. The uploaders are kept in the order they uploaded in.
+    private fun ownerOf(photo: PhotoSample, counts: Map<Long, Int>): Long =
+        photo.uploaderIds.minBy { member -> counts.getValue(member) }
 
     private fun notChosen(photos: List<PhotoSample>, chosen: List<PhotoSample>): List<PhotoSample> =
         photos.filter { photo -> chosen.none { it === photo } }
