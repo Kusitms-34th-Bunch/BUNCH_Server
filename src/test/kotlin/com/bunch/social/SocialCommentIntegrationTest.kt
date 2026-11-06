@@ -20,6 +20,8 @@ import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.service.NotificationService
+import com.bunch.notification.service.PublishedNotificationAccess
 import com.bunch.social.domain.SocialCommentRepository
 import com.bunch.social.dto.CreateSocialCommentRequest
 import com.bunch.social.dto.SocialCommentItem
@@ -68,6 +70,10 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     private lateinit var reports: BunchProfileReportRepository
     @Autowired
     private lateinit var notifications: NotificationRepository
+    @Autowired
+    private lateinit var notificationService: NotificationService
+    @Autowired
+    private lateinit var notificationAccess: PublishedNotificationAccess
     @Autowired
     private lateinit var mvc: MockMvc
     @Autowired
@@ -349,6 +355,80 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val payload = jdbc.queryForObject("SELECT payload::text FROM push_jobs WHERE notification_id = ?",
             String::class.java, external.id)!!
         assertThat(mapper.readTree(payload).path("target").path("sourceBunchId").asLong()).isEqualTo(target)
+    }
+
+    @Test
+    fun `comment notification identifies personal author alongside acting bunch badge`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        device(owner)
+        val actor = member()
+        val source = publicBunch(actor)
+        jdbc.update("UPDATE members SET nickname = '댓글작성자' WHERE id = ?", actor)
+        val sourceName = jdbc.queryForObject("SELECT name FROM bunches WHERE id = ?", String::class.java, source)
+
+        write(actor, bundle.id)
+
+        val event = socialNotifications().single()
+        assertThat(event.title).isEqualTo("$sourceName 번치 댓글작성자님이 '발행 번들' 번들에 댓글을 남겼어요")
+        val payload = jdbc.queryForObject(
+            "SELECT payload::text FROM push_jobs WHERE notification_id = ?",
+            String::class.java,
+            event.id
+        )!!
+        assertThat(mapper.readTree(payload).path("aps").path("alert").path("title").asText())
+            .contains(event.title)
+    }
+
+    @Test
+    fun `comment specific hide and deletion suppress actual queued notification access`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        val actor = member()
+        publicBunch(actor)
+        val root = write(actor, bundle.id)
+        val event = socialNotifications().single()
+        assertThat(event.target.commentId).isEqualTo(root.id)
+        assertThat(notificationService.open(owner, target, event.id).available).isTrue()
+        jdbc.update(
+            "INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) " +
+                "VALUES ('COMMENT',?,?, 'REPORTED')",
+            root.id, target
+        )
+        assertThat(notificationService.open(owner, target, event.id).available).isFalse()
+        assertThat(notificationAccess.canDeliver(target, event.target)).isFalse()
+        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
+        service.delete(actor, bundle.id, root.id)
+        assertThat(notificationService.open(owner, target, event.id).available).isFalse()
+        assertThat(notificationAccess.canDeliver(target, event.target)).isFalse()
+    }
+
+    @Test
+    fun `parent hide suppresses reply delivery but parent deletion preserves normal reply`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        val actor = member()
+        val source = publicBunch(actor)
+        val root = write(actor, bundle.id)
+        val reply = write(owner, bundle.id, root.id)
+        val event = socialNotifications().single { it.recipientMemberId == actor }
+        assertThat(event.target.commentId).isEqualTo(reply.id)
+        jdbc.update(
+            "INSERT INTO feed_content_hides(target_kind,target_id,reason) VALUES ('COMMENT',?,'review')",
+            root.id
+        )
+        assertThat(notificationService.open(actor, source, event.id).available).isFalse()
+        assertThat(notificationAccess.canDeliver(source, event.target)).isFalse()
+        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
+        service.delete(actor, bundle.id, root.id)
+        assertThat(notificationService.open(actor, source, event.id).available).isTrue()
+        assertThat(notificationAccess.canDeliver(source, event.target)).isTrue()
     }
 
     @Test

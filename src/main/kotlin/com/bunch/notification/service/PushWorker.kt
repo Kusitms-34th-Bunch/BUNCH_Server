@@ -161,7 +161,8 @@ class PushWorker(
                         bunchId = job.bunchId,
                         bundleId = bundleId,
                         targetBunchId = (target["targetBunchId"] as? Number)?.toLong(),
-                        sourceBunchId = (target["sourceBunchId"] as? Number)?.toLong()
+                        sourceBunchId = (target["sourceBunchId"] as? Number)?.toLong(),
+                        commentId = (target["commentId"] as? Number)?.toLong()
                     )
                 )
             }

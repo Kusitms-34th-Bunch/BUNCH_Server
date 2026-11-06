@@ -250,6 +250,7 @@ class NotificationWriter(
         sourceBunch: Bunch,
         commentId: Long,
         actorId: Long,
+        actorNickname: String,
         content: String,
         parentAuthorId: Long?,
         parentBunchId: Long?,
@@ -275,14 +276,15 @@ class NotificationWriter(
                 type = NotificationType.SOCIAL_COMMENT_CREATED,
                 dedupeKey = "SOCIAL_COMMENT_CREATED:$commentId",
                 title = if (inbox.second) "내 댓글에 답글이 달렸어요"
-                    else "${sourceBunch.name} 번치가 '${bundle.title}' 번들에 댓글을 남겼어요",
+                    else "${sourceBunch.name} 번치 ${actorNickname}님이 '${bundle.title}' 번들에 댓글을 남겼어요",
                 body = content,
                 target = NotificationTarget(
                     kind = NotificationTargetKind.BUNDLE_COMMENTS,
                     bunchId = inbox.first,
                     bundleId = bundle.id,
                     targetBunchId = bundle.bunchId,
-                    sourceBunchId = sourceBunch.id
+                    sourceBunchId = sourceBunch.id,
+                    commentId = commentId
                 ),
                 createdAt = now
             )
