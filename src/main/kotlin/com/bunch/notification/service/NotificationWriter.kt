@@ -283,7 +283,8 @@ class NotificationWriter(
                     bunchId = inbox.first,
                     bundleId = bundle.id,
                     targetBunchId = bundle.bunchId,
-                    sourceBunchId = sourceBunch.id
+                    sourceBunchId = sourceBunch.id,
+                    commentId = commentId
                 ),
                 createdAt = now
             )
