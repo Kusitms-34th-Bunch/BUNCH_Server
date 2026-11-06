@@ -352,6 +352,31 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `comment notification identifies personal author alongside acting bunch badge`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        device(owner)
+        val actor = member()
+        val source = publicBunch(actor)
+        jdbc.update("UPDATE members SET nickname = '댓글작성자' WHERE id = ?", actor)
+        val sourceName = jdbc.queryForObject("SELECT name FROM bunches WHERE id = ?", String::class.java, source)
+
+        write(actor, bundle.id)
+
+        val event = socialNotifications().single()
+        assertThat(event.title).isEqualTo("$sourceName 번치 댓글작성자님이 '발행 번들' 번들에 댓글을 남겼어요")
+        val payload = jdbc.queryForObject(
+            "SELECT payload::text FROM push_jobs WHERE notification_id = ?",
+            String::class.java,
+            event.id
+        )!!
+        assertThat(mapper.readTree(payload).path("aps").path("alert").path("title").asText())
+            .contains(event.title)
+    }
+
+    @Test
     fun `own bunch comments do not notify participants and self replies do not notify actor`() {
         val owner = member()
         val bunch = publicBunch(owner)
