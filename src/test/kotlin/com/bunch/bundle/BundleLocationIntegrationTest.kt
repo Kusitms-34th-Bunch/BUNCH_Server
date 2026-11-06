@@ -56,6 +56,9 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import javax.sql.DataSource
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -94,6 +97,8 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     private lateinit var photos: PhotoRepository
     @Autowired
     private lateinit var bunchRows: BunchRepository
+    @Autowired
+    private lateinit var dataSource: DataSource
 
     private val credentials = mutableListOf<Pair<Long, String>>()
     private val assetIds = mutableListOf<Long>()
@@ -367,6 +372,79 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         assertThat(published.title).isEqualTo("publishable")
         assertThat(published.photos.single().photoId).isEqualTo(photo.id)
         assertThat(published.leases).isEmpty()
+    }
+
+    @Test
+    fun `published location read keeps versions and locations from one snapshot across an atomic edit`() {
+        val f = fixture()
+        val before = save(f, listOf(place("a", 0)))
+        jdbc.update(
+            "UPDATE bundles SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+            f.bundleId
+        )
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            dataSource.connection.use { writer ->
+                writer.autoCommit = false
+                try {
+                    writer.createStatement().use { statement ->
+                        statement.execute("LOCK TABLE bundle_locations IN ACCESS EXCLUSIVE MODE")
+                    }
+                    val writerPid = writer.createStatement().use { statement ->
+                        statement.executeQuery("SELECT pg_backend_pid()").use { result ->
+                            check(result.next())
+                            result.getInt(1)
+                        }
+                    }
+                    val reading = executor.submit<BundleLocationState> {
+                        locations.get(f.owner.memberId, f.bunchId, f.bundleId)
+                    }
+                    // The reader has loaded Bundle and is blocked on its separate location SELECT.
+                    awaitBlockedLocationRead(writerPid)
+                    writer.prepareStatement(
+                        "UPDATE bundles SET revision = revision + 1, location_version = location_version + 1 WHERE id = ?"
+                    ).use { statement ->
+                        statement.setLong(1, f.bundleId)
+                        check(statement.executeUpdate() == 1)
+                    }
+                    writer.prepareStatement("UPDATE bundle_locations SET name = 'edited place' WHERE bundle_id = ?")
+                        .use { statement ->
+                            statement.setLong(1, f.bundleId)
+                            check(statement.executeUpdate() == 1)
+                        }
+                    writer.commit()
+
+                    assertThat(reading.get(10, TimeUnit.SECONDS)).isEqualTo(before)
+                    val after = locations.get(f.owner.memberId, f.bunchId, f.bundleId)
+                    assertThat(after.revision).isEqualTo(before.revision + 1)
+                    assertThat(after.locationVersion).isEqualTo(before.locationVersion + 1)
+                    assertThat(after.locations.single().name).isEqualTo("edited place")
+                    assertThat(after.locations.single().id).isEqualTo(before.locations.single().id)
+                } finally {
+                    writer.rollback()
+                }
+            }
+        } finally {
+            executor.shutdownNow()
+            check(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    private fun awaitBlockedLocationRead(writerPid: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline) {
+            val blocked = jdbc.queryForObject(
+                """SELECT count(*) FROM pg_stat_activity
+                   WHERE datname = current_database() AND wait_event_type = 'Lock'
+                     AND query LIKE '%bundle_locations%'
+                     AND ? = ANY(pg_blocking_pids(pid))""",
+                Long::class.java,
+                writerPid
+            )!!
+            if (blocked > 0) return
+            Thread.sleep(20)
+        }
+        error("Reader did not reach the location SELECT while the writer held the table lock")
     }
 
     private fun fixture(): Fixture {
