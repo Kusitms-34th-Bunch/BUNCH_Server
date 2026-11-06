@@ -2,7 +2,13 @@ package com.bunch.recommendation.service
 
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.service.BunchAccessNoticeService
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.exception.ErrorCode
+import com.bunch.global.image.PhotoImageUrls
+import com.bunch.photo.service.PhotoChangedEvent
 import com.bunch.recommendation.domain.BundleCandidate
+import com.bunch.recommendation.domain.CandidateExpiry
 import com.bunch.recommendation.domain.CandidateMatch
 import com.bunch.recommendation.domain.CandidateMatcher
 import com.bunch.recommendation.domain.CandidatePhoto
@@ -15,7 +21,11 @@ import com.bunch.recommendation.domain.PhotoSample
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.TitleContextBuilder
 import com.bunch.recommendation.domain.TitleGenerator
-import com.bunch.photo.service.PhotoChangedEvent
+import com.bunch.recommendation.dto.RecommendedBundleCard
+import com.bunch.recommendation.dto.RecommendedBundleDetailResponse
+import com.bunch.recommendation.dto.RecommendedBundleListResponse
+import com.bunch.recommendation.dto.RecommendedBundlePhoto
+import com.bunch.recommendation.dto.RecommendedUploader
 import jakarta.persistence.EntityManager
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
@@ -33,12 +43,70 @@ class RecommendationService(
     private val clusterer: PhotoClusterer,
     private val cardSelector: CardSelector,
     private val matcher: CandidateMatcher,
+    private val expiry: CandidateExpiry,
     private val titleGenerator: TitleGenerator,
-    private val titleContexts: TitleContextBuilder
+    private val titleContexts: TitleContextBuilder,
+    private val accessNotices: BunchAccessNoticeService
 ) {
     /** The photos of a bunch a recommended bundle can be made of, one sample per photo. */
     @Transactional(readOnly = true)
     fun materialPhotos(bunchId: Long): List<PhotoSample> = toSamples(recommendations.findMaterialRows(bunchId))
+
+    /**
+     * The cards of the recommended bundle sheet of a bunch (4.2.1, 4.2.2). The list belongs to the bunch, so every
+     * member gets the same one. A bundle with no photo of its card left is left out: its photos were all deleted and
+     * the next calculation will delete the bundle. The count is the photos that are left, so it can be under six until
+     * then.
+     */
+    @Transactional(readOnly = true)
+    fun bundleCards(userId: Long, bunchId: Long): RecommendedBundleListResponse {
+        accessNotices.requireMemberOrAccessNotice(userId, bunchId)
+        val candidates = recommendations.findOrderedCandidates(bunchId)
+        if (candidates.isEmpty()) return RecommendedBundleListResponse(emptyList())
+
+        val photosOf = recommendations.findCardPhotoRows(candidates.map { it.id }).groupBy { it.candidateId }
+        val uploadersOf = uploadersOf(photosOf.values.flatten().map { it.photoId })
+        val cards = candidates.mapNotNull { candidate ->
+            val photos = photosOf[candidate.id] ?: return@mapNotNull null
+            RecommendedBundleCard(
+                id = candidate.id,
+                title = candidate.title,
+                startDate = candidate.startDate,
+                endDate = candidate.endDate,
+                photoCount = photos.size,
+                uploaders = chipsOf(photos.map { uploadersOf[it.photoId].orEmpty() }),
+                coverImageUrl = PhotoImageUrls.full(photos.first().imageUrl)
+            )
+        }
+        return RecommendedBundleListResponse(cards)
+    }
+
+    /**
+     * The photos of a recommended bundle in the order they are applied in (4.2.3, 4.2.5). The photos that were deleted
+     * are not there, so the app gets only the photos that can still be used. A bundle that was deleted, or one of
+     * another bunch, is not found, and the app tells the member and reloads the sheet (4.2.5).
+     */
+    @Transactional(readOnly = true)
+    fun bundlePhotos(userId: Long, bunchId: Long, candidateId: Long): RecommendedBundleDetailResponse {
+        accessNotices.requireMemberOrAccessNotice(userId, bunchId)
+        val candidate = recommendations.findCandidate(bunchId, candidateId)
+            ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
+        val rows = recommendations.findCardPhotoRows(listOf(candidateId))
+        if (rows.isEmpty()) throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
+
+        val uploadersOf = uploadersOf(rows.map { it.photoId })
+        val photos = rows.map { row ->
+            RecommendedBundlePhoto(
+                photoId = row.photoId,
+                thumbnailUrl = PhotoImageUrls.thumbnail(row.imageUrl),
+                imageUrl = PhotoImageUrls.full(row.imageUrl),
+                capturedDate = row.capturedDate,
+                capturedTime = row.capturedTime,
+                uploaders = uploadersOf[row.photoId].orEmpty()
+            )
+        }
+        return RecommendedBundleDetailResponse(candidate.id, candidate.title, photos)
+    }
 
     /**
      * Notes the date of a photo change in the transaction of the change itself, so the note is there exactly when the
@@ -51,6 +119,21 @@ class RecommendationService(
         val date = event.capturedDate ?: return
         recommendations.markChanged(event.bunchId, date, Instant.now())
     }
+
+    /**
+     * The recommended bundles of a bunch in the order of the list (4.2.9 rule 6). The list belongs to the bunch, so
+     * every member of it gets the same one.
+     */
+    @Transactional(readOnly = true)
+    fun orderedCandidates(bunchId: Long): List<BundleCandidate> = recommendations.findOrderedCandidates(bunchId)
+
+    /**
+     * Deletes the recommended bundles whose last photo was added more than 30 days ago at [now] and returns how many
+     * (4.2.9 rule 4). The photos stay in the photo box. Running it again deletes nothing more, so a run that was missed
+     * or repeated does no harm.
+     */
+    @Transactional
+    fun expireCandidates(now: Instant): Int = recommendations.deleteExpiredCandidates(expiry.cutoff(now))
 
     /** The bunches whose photos have not changed since [cutoff], the ones waiting the longest first. */
     @Transactional(readOnly = true)
@@ -100,7 +183,32 @@ class RecommendationService(
 
         if (match.deletedCandidateIds.isNotEmpty()) recommendations.deleteCandidates(match.deletedCandidateIds)
         keep(match, inRange, selections, addedAt)
-        create(bunchId, match, stored, selections, sampleById, addedAt)
+        val toCreate = match.copy(created = notExpired(match.created, addedAt))
+        create(bunchId, toCreate, stored, selections, sampleById, addedAt)
+    }
+
+    // A cluster whose last photo was added more than 30 days ago is not made a candidate. It would be deleted at the
+    // next daily check, and a bundle that expired must not come back until a new photo is added (4.2.9 rule 4). The old
+    // photos are still material, so a new photo gives the cluster a recent time and it comes back as a new candidate.
+    private fun notExpired(clusters: List<PhotoCluster>, addedAt: Map<Long, Instant>): List<PhotoCluster> {
+        val now = Instant.now()
+
+        return clusters.filter { !expiry.isExpired(latestAdded(it, addedAt), now) }
+    }
+
+    private fun uploadersOf(photoIds: List<Long>): Map<Long, List<RecommendedUploader>> =
+        recommendations.findUploaderProfiles(photoIds.distinct())
+            .groupBy({ it.photoId }, { RecommendedUploader(it.memberId, it.nickname, it.imageUrl) })
+
+    // The members of a card, the one who uploaded the most photos of it first and the lower member number first when
+    // they uploaded as many. A photo several members uploaded counts for each of them. The specification does not say
+    // in which order the chips go; this is the order the nicknames of a title are put in.
+    private fun chipsOf(uploadersOfPhotos: List<List<RecommendedUploader>>): List<RecommendedUploader> {
+        val uploaders = uploadersOfPhotos.flatten()
+        val photoCounts = uploaders.groupingBy { it.memberId }.eachCount()
+        val mostPhotosFirst = compareByDescending<RecommendedUploader> { photoCounts.getValue(it.memberId) }
+
+        return uploaders.distinctBy { it.memberId }.sortedWith(mostPhotosFirst.thenBy { it.memberId })
     }
 
     private fun toSamples(rows: List<MaterialPhotoRow>): List<PhotoSample> =
