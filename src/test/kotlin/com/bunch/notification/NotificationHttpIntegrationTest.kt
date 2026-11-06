@@ -115,7 +115,7 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(item.path("body").asText()).isEqualTo("${fixture.joinedNickname}님이 번치에 참여했어요.")
         assertThat(item.path("readAt").isNull).isTrue()
         assertThat(fieldNames(item.path("target"))).containsExactlyInAnyOrder(
-            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId"
+            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId", "sourceBunchId"
         )
         assertThat(item.path("target").path("kind").asText()).isEqualTo(NotificationTargetKind.MEMBERS.name)
         assertThat(item.path("target").path("bunchId").asLong()).isEqualTo(fixture.bunchId)
