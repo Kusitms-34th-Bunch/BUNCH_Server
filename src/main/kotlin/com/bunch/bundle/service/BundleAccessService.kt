@@ -3,6 +3,7 @@ package com.bunch.bundle.service
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipantRepository
@@ -12,6 +13,7 @@ import com.bunch.bundle.dto.BundlePermissions
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -22,7 +24,8 @@ class BundleAccessService(
     private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
     private val participants: BundleParticipantRepository,
-    private val feedAccess: FeedAccessService
+    private val feedAccess: FeedAccessService,
+    private val entityManager: EntityManager
 ) {
     @Transactional(readOnly = true)
     fun requireMember(userId: Long, bunchId: Long) {
@@ -42,6 +45,8 @@ class BundleAccessService(
     fun lock(userId: Long, bunchId: Long, bundleId: Long): Bundle {
         lockBunch(userId, bunchId)
         val bundle = bundles.findLocked(bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        entityManager.flush()
+        entityManager.refresh(bundle)
         if (bundle.bunchId != bunchId) fail(ErrorCode.RESOURCE_NOT_FOUND)
         if (bundle.status == BundleStatus.PUBLISHED) feedAccess.readPublishedBundle(userId, bundleId)
         return bundle
@@ -50,7 +55,19 @@ class BundleAccessService(
     @Transactional
     fun lockBunch(userId: Long, bunchId: Long) {
         requireMember(userId, bunchId)
-        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        val bunch = bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        // A parent transaction may already hold these entities. Preserve its pending writes,
+        // then reload only this authorization context after waiting on the bunch lock.
+        entityManager.flush()
+        entityManager.refresh(bunch)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: run {
+            requireMember(userId, bunchId)
+            fail(ErrorCode.FORBIDDEN)
+        }
+        entityManager.refresh(membership)
+        entityManager.refresh(membership.member)
+        membership.member.requireCompleted()
+        if (membership.status != MembershipStatus.ACTIVE) fail(ErrorCode.FORBIDDEN)
         requireMember(userId, bunchId)
     }
 
