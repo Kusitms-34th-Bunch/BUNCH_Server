@@ -7,6 +7,7 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.image.ImageFingerprint
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.global.image.PhotoImageUrls
@@ -17,6 +18,8 @@ import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.photo.domain.DateSource
 import com.bunch.photo.domain.Photo
+import com.bunch.photo.domain.PhotoImageFingerprint
+import com.bunch.photo.domain.PhotoImageFingerprintRepository
 import com.bunch.photo.domain.PhotoListCursor
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUndatedCursor
@@ -60,6 +63,7 @@ class PhotoService(
     private val bunches: BunchRepository,
     private val photos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
+    private val fingerprints: PhotoImageFingerprintRepository,
     private val imageAssets: ImageAssetService,
     private val imageAssetRepository: ImageAssetRepository,
     private val storage: PhotoImageStorage,
@@ -130,9 +134,10 @@ class PhotoService(
         val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash) }
         if (shared != null) return shared
 
+        val fingerprint = ImageFingerprint.of(image.bytes)
         val file = storage.upload(image)
         val result = try {
-            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file) }!!
+            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint) }!!
         } catch (ex: Exception) {
             discardUnlessSaved(file)
             throw ex
@@ -149,7 +154,12 @@ class PhotoService(
         return null
     }
 
-    private fun saveUpload(command: PhotoUploadCommand, hash: String, file: StoredImage): PhotoUploadResult {
+    private fun saveUpload(
+        command: PhotoUploadCommand,
+        hash: String,
+        file: StoredImage,
+        fingerprint: Long?
+    ): PhotoUploadResult {
         val locked = lockForUpload(command)
         photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
@@ -165,6 +175,7 @@ class PhotoService(
                 dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF
             )
         )
+        fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
         locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))

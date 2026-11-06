@@ -126,13 +126,13 @@ comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
 ## 저장·알림·통합 조건
 
 V14는 실제 `bunch_follows,bunch_blocks,bunch_profile_reports` 세 테이블과 각 방향 번치 쌍 UNIQUE를
-추가한 이력으로 보존한다. V18 이후에도 팔로우·차단의 쌍 UNIQUE와 세 테이블의 자기 관계 금지,
+추가한 이력으로 보존한다. V20 이후에도 팔로우·차단의 쌍 UNIQUE와 세 테이블의 자기 관계 금지,
 번치 FK CASCADE·행동 회원 FK RESTRICT를 유지한다.
 팔로우는 PENDING의 approved_at 없음/APPROVED의 approved_at 필수이며 승인 회원 FK는 SET NULL이다.
 신고 상태 RECEIVED/REVIEWING/ACTIONED/DISMISSED·검토 시각은 승인 스키마 계약이다.
 운영 심사 API나 미래 알림 테이블을 추가하지 않는다.
 
-V18은 적용된 V14를 수정하지 않고 `bunch_profile_reports.window_started_at`을 `TIMESTAMPTZ NOT NULL`로
+V20은 적용된 V14를 수정하지 않고 `bunch_profile_reports.window_started_at`을 `TIMESTAMPTZ NOT NULL`로
 추가하며 기존 행은 `created_at`으로 백필한다. 신고 쌍 UNIQUE는 제거하고
 `ix_bunch_profile_report_window` (`reporter_bunch_id,target_bunch_id,window_started_at DESC,id DESC`)
 인덱스를 추가한다. 이 컬럼은 첫 접수 시각을 고정한 구간의 기준이다. 첫 신고는 자신의 접수 시각을,
@@ -144,7 +144,7 @@ V18은 적용된 V14를 수정하지 않고 `bunch_profile_reports.window_starte
 같은 트랜잭션에서 구간의 건수 확인과 저장을 처리해 동시 요청도 최대 2건을 넘기지 않는다.
 별도 Redis 카운터는 만들지 않으며 거부·실패·호출자 트랜잭션 롤백은 신고나 접수 횟수로 남기지 않는다.
 
-V18은 `window_started_at`에 DB 기본값이 없고 구 바이너리는 해당 컬럼을 쓰지 않으므로,
+V20은 `window_started_at`에 DB 기본값이 없고 구 바이너리는 해당 컬럼을 쓰지 않으므로,
 스키마와 이를 쓰는 애플리케이션을 같은 배포 단위로 올려야 한다. 구 바이너리와의 mixed-version
 운영은 마이그레이션 직후 insert 실패를 만들고, 새 window에 복수 행이 생긴 뒤에는 구 단일 행 조회
 가정도 깨뜨린다. 따라서 mixed-version 롤링 배포와 바이너리만 되돌리는 rollback은 지원하지 않는다.
@@ -152,7 +152,7 @@ V18은 `window_started_at`에 DB 기본값이 없고 구 바이너리는 해당 
 기존 팔로우 V13은 이슈 전용 테스트 DB에만 적용됐고 dev/main·배포 실행·확인한 공용 로컬 DB에
 적용되지 않았음을 확인한 뒤 별도 일반 커밋 `97d3797`로 V14로 이동했다. #28의 V13은 수정하지 않았다.
 구 V13 전용 DB를 수정/repair하지 않고 새 `bunch_issue51_v14_test`에서 V11→V12→V13→V14를 검증한다.
-V15(#48)·V16(#49)·V17(#25)의 적용 이력은 유지하며, #75는 새 V18로 추가한다.
+V15(#48)·V16(#49)·V17(#25)·V18(추천 번들)·V19(이미지 비교값)의 적용 이력은 유지하며, #75는 새 V20으로 추가한다.
 
 실제 NotificationWriter를 새 관계·수동 승인 업무 트랜잭션에서 호출한다.
 공개 즉시 팔로우 성립은17, 새 PENDING은18, 수동 승인 성립은17과19다.
@@ -176,7 +176,7 @@ V15(#48)·V16(#49)·V17(#25)의 적용 이력은 유지하며, #75는 새 V18로
 신고 quota 경계·window 만료·동시 요청·차단 우선순위·반대 방향 요청·승인/취소/차단 경합,
 역할 강등 대기 재검사, 알림 수신/중복/롤백,
 외부 전용 DTO·재참여 프로필·상세 재검사를 검증한다.
-V14까지의 기존 마이그레이션 테스트를 유지하고 별도 V17→V18 테스트로 백필·제약·재실행을 확인한다.
+V14까지의 기존 마이그레이션 테스트를 유지하고 별도 V19→V20 테스트로 백필·제약·재실행을 확인한다.
 실제 앱 기동의 JPA validate와 고정 Clock의 시간 경계·잠금 대기 후 시각 판정·롤백도 검증한다.
 최종 명령과 결과는 PR·완료 보고에 남긴다. 별도 lint·정적 분석 도구는 미구성이다.
 실제 iOS/WebView·APNs와 #52/#48/#50의 남은 통합은 자동 테스트와 구분한다.

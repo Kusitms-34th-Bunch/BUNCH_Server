@@ -29,8 +29,8 @@ class BunchReportMigrationIntegrationTest @Autowired constructor(
     private val jdbc = JdbcTemplate(dataSource)
 
     @Test
-    fun `V18 adds report windows without changing legacy report semantics`() {
-        withTarget17 { schema ->
+    fun `V20 adds report windows without changing legacy report semantics`() {
+        withTarget19 { schema ->
             val ownerId = insertMember(schema, "report-migration-owner")
             val recentActorId = insertMember(schema, "report-migration-recent-actor")
             val oldActorId = insertMember(schema, "report-migration-old-actor")
@@ -68,7 +68,7 @@ class BunchReportMigrationIntegrationTest @Autowired constructor(
             )
             val legacyReports = reportRows(schema)
 
-            val migration = configure(schema, "18")
+            val migration = configure(schema, "20")
             assertThat(migration.migrate().migrationsExecuted).isEqualTo(1)
 
             assertThat(columnNames(schema, "bunch_profile_reports")).containsExactlyInAnyOrder(
@@ -258,10 +258,10 @@ class BunchReportMigrationIntegrationTest @Autowired constructor(
         }
     }
 
-    private fun withTarget17(block: (String) -> Unit) {
+    private fun withTarget19(block: (String) -> Unit) {
         val schema = "bunch_report_migration_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            assertThat(configure(schema, "17").migrate().migrationsExecuted).isEqualTo(17)
+            assertThat(configure(schema, "19").migrate().migrationsExecuted).isEqualTo(19)
             block(schema)
         } finally {
             jdbc.execute("DROP SCHEMA IF EXISTS $schema CASCADE")
