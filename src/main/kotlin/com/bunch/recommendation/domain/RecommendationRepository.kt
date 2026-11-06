@@ -119,6 +119,44 @@ interface RecommendationRepository : Repository<Photo, Long> {
         @Param("changedAt") changedAt: Instant
     )
 
+    // Notes every date of the dated photos of the bunch. A photo that left a draft is not known by its date any more,
+    // so all the dates are calculated again. The calculation reads all the material of the bunch anyway.
+    @Modifying
+    @Query(
+        value = """INSERT INTO recommendation_dirty_dates (bunch_id, captured_date, changed_at)
+        SELECT DISTINCT p.bunch_id, p.captured_date, CAST(:changedAt AS timestamptz) FROM photos p
+        WHERE p.bunch_id = :bunchId AND p.captured_date IS NOT NULL AND p.processing_status = 'READY'
+        ON CONFLICT (bunch_id, captured_date) DO UPDATE SET changed_at = EXCLUDED.changed_at""",
+        nativeQuery = true
+    )
+    fun markAllChanged(@Param("bunchId") bunchId: Long, @Param("changedAt") changedAt: Instant)
+
+    // The photos of a candidate that a draft is made from are not recommended again until a photo that is not among
+    // them is added (4.2.9 rule 5). The candidate is deleted by the caller, so its photos are noted before.
+    @Modifying
+    @Query(
+        value = """INSERT INTO recommendation_used_photos (photo_id, bunch_id)
+        SELECT cp.photo_id, :bunchId FROM candidate_photos cp WHERE cp.candidate_id = :candidateId
+        ON CONFLICT (photo_id) DO NOTHING""",
+        nativeQuery = true
+    )
+    fun markCandidatePhotosUsed(@Param("bunchId") bunchId: Long, @Param("candidateId") candidateId: Long)
+
+    @Query(
+        value = "SELECT photo_id FROM recommendation_used_photos WHERE bunch_id = :bunchId",
+        nativeQuery = true
+    )
+    fun findUsedPhotoIds(@Param("bunchId") bunchId: Long): List<Long>
+
+    // The photos of a bundle that is deleted are material again (4.2.9 rule 1), so they are not noted as used any more.
+    @Modifying
+    @Query(
+        value = """DELETE FROM recommendation_used_photos u USING bundle_photos b
+        WHERE b.bundle_id = :bundleId AND u.photo_id = b.photo_id""",
+        nativeQuery = true
+    )
+    fun releaseUsedPhotosOfBundle(@Param("bundleId") bundleId: Long)
+
     @Query(
         value = """SELECT captured_date AS capturedDate, changed_at AS changedAt
         FROM recommendation_dirty_dates WHERE bunch_id = :bunchId""",
