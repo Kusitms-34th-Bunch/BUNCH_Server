@@ -11,4 +11,7 @@ interface MaterialPhotoRow {
     val capturedTime: LocalTime?
     val memberId: Long
     val uploadBatchId: UUID
+
+    /** The image fingerprint of the photo, or null when it has none (4.2.8 rule 1). */
+    val imageFingerprint: Long?
 }
