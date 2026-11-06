@@ -256,7 +256,8 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     fun `published standalone writes are rejected and locked editor participates without changing aggregate revision`() {
         val f = fixture()
         val first = save(f, listOf(place("a", 0)))
-        jdbc.update("UPDATE bundles SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP WHERE id = ?", f.bundleId)
+        // Use the persisted bundle clock; Docker PostgreSQL and the JVM may have clock skew.
+        jdbc.update("UPDATE bundles SET status = 'PUBLISHED', published_at = updated_at WHERE id = ?", f.bundleId)
         assertError(ErrorCode.BUNDLE_STATE_CONFLICT) { save(f, emptyList(), 1) }
         val published = bundles.findById(f.bundleId).orElseThrow()
         assertThatThrownBy { locations.replaceLocked(published, emptyList()) }
@@ -332,7 +333,8 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.error.detail.locations[0].externalId").value("a"))
         mvc.perform(get(path).header("Authorization", bearer))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.locationVersion").value(1))
-        jdbc.update("UPDATE bundles SET status = 'PUBLISHED', visibility = 'PUBLIC', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+        // This fixture bypasses publishing; keep its timestamps on the persisted bundle clock.
+        jdbc.update("UPDATE bundles SET status = 'PUBLISHED', visibility = 'PUBLIC', published_at = updated_at WHERE id = ?",
             f.bundleId)
         jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", f.bunchId)
         val viewer = BundleActor(member(), UUID.randomUUID().toString())
