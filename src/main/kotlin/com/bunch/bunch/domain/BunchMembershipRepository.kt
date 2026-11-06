@@ -5,6 +5,11 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 
 interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
+    @Query("""select membership.bunch.id from BunchMembership membership
+        where membership.member.id = :memberId
+          and membership.status = com.bunch.bunch.domain.MembershipStatus.ACTIVE""")
+    fun findActiveBunchIds(memberId: Long): List<Long>
+
     fun findByMemberIdAndBunchIdAndStatus(
         memberId: Long,
         bunchId: Long,
