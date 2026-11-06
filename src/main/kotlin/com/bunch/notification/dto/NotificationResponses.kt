@@ -9,7 +9,8 @@ data class NotificationTarget(
     val bunchId: Long,
     val bundleId: Long? = null,
     val noticeId: Long? = null,
-    val targetBunchId: Long? = null
+    val targetBunchId: Long? = null,
+    val sourceBunchId: Long? = null
 )
 
 data class NotificationItem(
