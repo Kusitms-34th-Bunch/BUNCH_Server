@@ -55,6 +55,32 @@ interface RecommendationRepository : Repository<Photo, Long> {
     @Query("delete from CandidatePhoto p where p.candidateId in :candidateIds")
     fun deleteCandidatePhotos(@Param("candidateIds") candidateIds: Collection<Long>)
 
+    // The order of the list (4.2.9 rule 6): the bundle whose last photo was added most recently first, then the one
+    // with the most members who uploaded the photos of its card, then the one with the most photos on its card. These
+    // are the numbers the card shows. The candidate number comes last, so the order is the same on every call.
+    @Query(
+        value = """SELECT c.* FROM bundle_candidates c WHERE c.bunch_id = :bunchId
+        ORDER BY c.last_photo_added_at DESC,
+            (SELECT count(DISTINCT u.member_id) FROM candidate_photos p
+                JOIN photo_uploaders u ON u.photo_id = p.photo_id
+                WHERE p.candidate_id = c.id AND p.position IS NOT NULL) DESC,
+            (SELECT count(*) FROM candidate_photos p
+                WHERE p.candidate_id = c.id AND p.position IS NOT NULL) DESC,
+            c.id""",
+        nativeQuery = true
+    )
+    fun findOrderedCandidates(@Param("bunchId") bunchId: Long): List<BundleCandidate>
+
+    // Deletes the candidates whose last photo was added before the cutoff and returns how many. A bunch with noted
+    // dates is left, because its calculation is waiting and may raise the time of the last photo added.
+    @Modifying
+    @Query(
+        value = """DELETE FROM bundle_candidates c WHERE c.last_photo_added_at < :cutoff
+        AND NOT EXISTS (SELECT 1 FROM recommendation_dirty_dates d WHERE d.bunch_id = c.bunch_id)""",
+        nativeQuery = true
+    )
+    fun deleteExpiredCandidates(@Param("cutoff") cutoff: Instant): Int
+
     // A date that changed again only gets a newer time, so a bunch has one row for each changed date.
     @Modifying
     @Query(

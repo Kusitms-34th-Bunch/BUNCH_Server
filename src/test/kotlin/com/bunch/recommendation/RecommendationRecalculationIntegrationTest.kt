@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
-import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -14,7 +13,10 @@ import java.util.concurrent.Executors
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class RecommendationRecalculationIntegrationTest : RecommendationIntegrationSupport() {
-    private val oldAddedAt = "2026-10-01T10:00:00+09:00"
+    // The times of the last photo added are relative to now, because a bundle is only made when its last photo was
+    // added less than 30 days ago.
+    private val oldAddedAt = daysAgo(10)
+    private val laterAddedAt = daysAgo(6)
 
     @Test
     fun `a gathering of two members becomes a candidate with a title and all its photos`() {
@@ -97,10 +99,10 @@ class RecommendationRecalculationIntegrationTest : RecommendationIntegrationSupp
         val other = joined(ownerId, bunchId)
         val third = joined(ownerId, bunchId)
         val first = shoot(bunchId, "2026-10-19", "19:00", 8, listOf(ownerId, other))
-        first.forEach { setAddedAt(it, oldAddedAt) }
+        first.forEach { setAddedAt(it, oldAddedAt.toString()) }
         recalculate(bunchId, "2026-10-19")
         val before = candidates(bunchId).single()
-        assertThat(before.lastPhotoAddedAt).isEqualTo(Instant.parse("2026-10-01T01:00:00Z"))
+        assertThat(before.lastPhotoAddedAt).isEqualTo(oldAddedAt)
 
         shoot(bunchId, "2026-10-19", "19:05", 5, listOf(third))
         recalculate(bunchId, "2026-10-19")
@@ -120,11 +122,11 @@ class RecommendationRecalculationIntegrationTest : RecommendationIntegrationSupp
         val (ownerId, bunchId) = bunchWithOwner()
         val other = joined(ownerId, bunchId)
         val photos = shoot(bunchId, "2026-10-19", "19:00", 8, listOf(ownerId, other))
-        photos.forEach { setAddedAt(it, oldAddedAt) }
-        setAddedAt(photos.last(), "2026-10-05T10:00:00+09:00")
+        photos.forEach { setAddedAt(it, oldAddedAt.toString()) }
+        setAddedAt(photos.last(), laterAddedAt.toString())
         recalculate(bunchId, "2026-10-19")
         val before = candidates(bunchId).single()
-        assertThat(before.lastPhotoAddedAt).isEqualTo(Instant.parse("2026-10-05T01:00:00Z"))
+        assertThat(before.lastPhotoAddedAt).isEqualTo(laterAddedAt)
 
         jdbc.update("DELETE FROM photos WHERE id = ?", photos.last())
         recalculate(bunchId, "2026-10-19")
