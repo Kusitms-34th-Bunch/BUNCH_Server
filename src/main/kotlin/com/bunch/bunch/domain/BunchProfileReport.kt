@@ -39,5 +39,8 @@ class BunchProfileReport(
     @Column(nullable = false)
     val createdAt: Instant,
 
+    @Column(nullable = false)
+    val windowStartedAt: Instant = createdAt,
+
     val reviewedAt: Instant? = null
 )
