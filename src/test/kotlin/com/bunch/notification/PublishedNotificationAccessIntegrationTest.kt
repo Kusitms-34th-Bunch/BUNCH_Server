@@ -113,6 +113,25 @@ class PublishedNotificationAccessIntegrationTest : BunchIntegrationSupport() {
         assertThat(service.open(recipient, inbox, notification.id).available).isFalse()
     }
 
+    @Test
+    fun `former inbox member can explicitly open public content with zero memberships`() {
+        val recipient = member()
+        val inbox = create(recipient).id
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", inbox)
+        val bundle = published(recipient, inbox)
+        val notification = save(recipient, inbox, bundle, inbox, inbox)
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT', ended_at = joined_at + interval '1 second' WHERE member_id = ?",
+            recipient
+        )
+
+        val opened = service.open(recipient, inbox, notification.id)
+        assertThat(opened.available).isTrue()
+        assertThat(opened.readAt).isNotNull()
+        jdbc.update("UPDATE bundles SET visibility = 'PRIVATE' WHERE id = ?", bundle)
+        assertThat(service.open(recipient, inbox, notification.id).available).isFalse()
+    }
+
     private fun published(owner: Long, bunchId: Long, visibility: Visibility = Visibility.PUBLIC): Long {
         val now = Instant.now()
         return bundles.saveAndFlush(
