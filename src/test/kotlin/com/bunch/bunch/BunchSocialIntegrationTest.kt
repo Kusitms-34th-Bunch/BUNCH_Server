@@ -285,7 +285,7 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `concurrent reports by different active members preserve one original report`() {
+    fun `concurrent reports by different active members create two independent reports`() {
         val owner = member()
         val viewer = create(owner).id
         val participant = member()
@@ -295,8 +295,13 @@ class BunchSocialIntegrationTest : BunchIntegrationSupport() {
             { social.report(owner, viewer, BunchReportRequest(target, BunchReportReason.SPAM, "first")) },
             { social.report(participant, viewer, BunchReportRequest(target, BunchReportReason.OTHER, "second")) }
         )).map { it.getOrThrow() }
-        assertThat(results.map { it.reportId }.distinct()).hasSize(1)
-        assertThat(count("bunch_profile_reports")).isEqualTo(1)
+        assertThat(results.map { it.reportId }).hasSize(2).doesNotHaveDuplicates()
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bunch_profile_reports WHERE reporter_bunch_id = ? AND target_bunch_id = ?",
+            Long::class.java,
+            viewer,
+            target
+        )).isEqualTo(2)
     }
 
     @Test

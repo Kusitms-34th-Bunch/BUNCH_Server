@@ -449,8 +449,14 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
         val targetOwner = member()
         val target = create(targetOwner).id
         makePublic(target)
+        val reportBody = """{"targetBunchId":$target,"reason":"SPAM"}"""
+        val viewer = create(targetOwner).id
+        val reportPath = "/api/v1/bunches/$viewer/reports"
 
         mvc.perform(get(followersPath(target))).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(
+            post(reportPath).contentType(MediaType.APPLICATION_JSON).content(reportBody)
+        ).expectError(ErrorCode.UNAUTHORIZED)
 
         val revokedMember = member()
         val revokedAccess = bearer(revokedMember)
@@ -459,6 +465,12 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
             get(followersPath(target))
                 .header(HttpHeaders.AUTHORIZATION, revokedAccess)
         ).expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(
+            post(reportPath)
+                .header(HttpHeaders.AUTHORIZATION, revokedAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reportBody)
+        ).expectError(ErrorCode.UNAUTHORIZED)
 
         val incompleteMember = member(completed = false)
         val incompleteAccess = bearer(incompleteMember)
@@ -466,6 +478,28 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
             get(followersPath(target))
                 .header(HttpHeaders.AUTHORIZATION, incompleteAccess)
         ).expectError(ErrorCode.SIGNUP_INCOMPLETE)
+        mvc.perform(
+            post(reportPath)
+                .header(HttpHeaders.AUTHORIZATION, incompleteAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reportBody)
+        ).expectError(ErrorCode.SIGNUP_INCOMPLETE)
+    }
+
+    @Test
+    fun `report requests cannot use another bunch membership`() {
+        val owner = member()
+        val viewer = create(owner).id
+        val target = create(member()).id
+        val outsider = member()
+        create(outsider)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, bearer(outsider))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"SPAM"}""")
+        ).expectError(ErrorCode.FORBIDDEN)
+        assertThat(count("bunch_profile_reports")).isZero()
     }
 
     @Test
@@ -482,18 +516,49 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
             .expectError(ErrorCode.FORBIDDEN)
         mvc.perform(
             post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, ownerAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$viewer,"reason":"SPAM"}""")
+        ).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":0,"reason":"SPAM"}""")
+        ).expectError(ErrorCode.INVALID_INPUT)
+        val first = mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
                 .header(HttpHeaders.AUTHORIZATION, participantAccess)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"targetBunchId":$target,"reason":"OTHER","detail":" 확인 요청 "}""")
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.reportId").isNumber)
+            .andReturn()
+        val firstId = first.data().path("reportId").asLong()
         mvc.perform(
             post("/api/v1/bunches/$viewer/reports")
                 .header(HttpHeaders.AUTHORIZATION, participantAccess)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"targetBunchId":$target,"reason":"OTHER","detail":" "}""")
         ).expectError(ErrorCode.INVALID_INPUT)
+        val second = mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, ownerAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"SPAM","detail":" 두 번째 확인 "}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.reportId").isNumber)
+            .andReturn()
+        val secondId = second.data().path("reportId").asLong()
+        assertThat(secondId).isNotEqualTo(firstId)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"SPAM","detail":" 세 번째 확인 "}""")
+        ).expectError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED)
         mvc.perform(put(blockPath).header(HttpHeaders.AUTHORIZATION, ownerAccess))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data").isEmpty)
@@ -507,6 +572,12 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.data.items[0].blockedAt").exists())
             .andReturn()
         val blockId = list.data().path("items").get(0).path("id").asLong()
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"SPAM"}""")
+        ).expectError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
         mvc.perform(put(followingPath(viewer, target)).header(HttpHeaders.AUTHORIZATION, ownerAccess))
             .expectError(ErrorCode.BUNCH_PROFILE_UNAVAILABLE)
         mvc.perform(delete(blockPath).header(HttpHeaders.AUTHORIZATION, ownerAccess))
@@ -519,6 +590,12 @@ class BunchSocialHttpIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(get("/api/v1/bunches/$viewer/blocks").header(HttpHeaders.AUTHORIZATION, ownerAccess))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.items").isEmpty)
+        mvc.perform(
+            post("/api/v1/bunches/$viewer/reports")
+                .header(HttpHeaders.AUTHORIZATION, participantAccess)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"targetBunchId":$target,"reason":"SPAM"}""")
+        ).expectError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED)
     }
 
     private fun requestFollow(access: String, viewerBunch: Long, target: Long): ResultActions = mvc.perform(
