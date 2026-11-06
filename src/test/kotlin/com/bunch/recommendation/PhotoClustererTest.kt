@@ -182,6 +182,36 @@ class PhotoClustererTest {
     }
 
     @Test
+    fun `shooting that goes on from the evening to the early morning without a break is one cluster`() {
+        val evening = listOf("20:00", "21:30", "23:00", "23:59").map { photo(it) }
+        val night = listOf("00:00", "01:30", "03:00", "04:30", "05:00").map { photo(it, nextDay) }
+
+        val cluster = clusterer.cluster(evening + night).single()
+
+        assertThat(cluster.photoIds).containsExactlyElementsOf((evening + night).map { it.photoId })
+        assertThat(cluster.startDate).isEqualTo(day)
+        assertThat(cluster.endDate).isEqualTo(nextDay)
+    }
+
+    @Test
+    fun `a day that ended before ten in the evening is not joined even when the gap is allowed`() {
+        val wideGap = PhotoClusterer(RecommendationSettings(midnightGap = Duration.ofHours(6)))
+        val evening = burst("20:00", "21:30", 3)
+        val early = burst("00:30", "01:30", 3, nextDay)
+
+        assertThat(wideGap.cluster(evening + early)).hasSize(2)
+    }
+
+    @Test
+    fun `a next day that starts after three in the morning is not joined even when the gap is allowed`() {
+        val wideGap = PhotoClusterer(RecommendationSettings(midnightGap = Duration.ofHours(6)))
+        val late = burst("22:30", "23:00", 3)
+        val morning = burst("03:30", "04:30", 3, nextDay)
+
+        assertThat(wideGap.cluster(late + morning)).hasSize(2)
+    }
+
+    @Test
     fun `joining across midnight does not merge the whole two days`() {
         val afternoon = burst("13:00", "15:00", 3)
         val late = burst("23:10", "23:50", 3)

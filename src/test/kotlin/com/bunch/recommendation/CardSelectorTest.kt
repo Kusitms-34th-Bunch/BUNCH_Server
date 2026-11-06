@@ -246,6 +246,44 @@ class CardSelectorTest {
     }
 
     @Test
+    fun `a photo uploaded together belongs to the member who uploaded it first when both have as many photos`() {
+        val narrow = CardSelector(RecommendationSettings(maxCardPhotos = 2))
+        val shared = photo(minutes(18 * 60), 2L, 1L)
+
+        val selection = narrow.select(togetherCluster(shared))
+
+        assertThat(selection.photoIds).doesNotContain(shared.photoId)
+        assertThat(selection.photoIds).hasSize(2)
+    }
+
+    @Test
+    fun `a photo uploaded together belongs to the other member when that member uploaded it first`() {
+        val narrow = CardSelector(RecommendationSettings(maxCardPhotos = 2))
+        val shared = photo(minutes(18 * 60), 1L, 2L)
+
+        val selection = narrow.select(togetherCluster(shared))
+
+        assertThat(selection.photoIds).contains(shared.photoId)
+        assertThat(selection.photoIds).hasSize(2)
+    }
+
+    @Test
+    fun `a photo uploaded together belongs to the member with fewer photos and the others cannot take it`() {
+        val narrow = CardSelector(RecommendationSettings(maxCardPhotos = 3))
+        val shared = photo(minutes(18 * 60), 1L, 2L)
+        val fewer = listOf(photo(minutes(13 * 60), 2L), shared)
+        val middle = listOf(13 * 60 + 10, 13 * 60 + 20, 13 * 60 + 30).map { photo(minutes(it), 3L) }
+        val most = listOf(9 * 60 + 30, 10 * 60 + 30, 11 * 60 + 30, 12 * 60, 12 * 60 + 15, 12 * 60 + 30)
+            .map { photo(minutes(it), 1L) }
+
+        val selection = narrow.select(most + middle + fewer)
+
+        assertThat(selection.photoIds).doesNotContain(shared.photoId)
+        assertThat(selection.photoIds).hasSize(3)
+        assertThat(selection.uploaderIds).containsExactlyInAnyOrder(1L, 2L, 3L)
+    }
+
+    @Test
     fun `when places are fewer than members the members with fewer photos go first`() {
         val many = series(5)
         val two = series(2, startMinute = 13 * 60, uploaderOf = { 2L })
@@ -296,6 +334,14 @@ class CardSelectorTest {
         startMinute: Int = 10 * 60,
         uploaderOf: (Int) -> Long = { 1L }
     ) = (0 until count).map { photo(minutes(startMinute + it * stepMinutes), uploaderOf(it)) }
+
+    // Members 1 and 2 have four photos each, the shared one counted, and member 3 has three. The shared photo is the
+    // last of the day, so the member who may take it picks it for being the farthest from the others.
+    private fun togetherCluster(shared: PhotoSample): List<PhotoSample> =
+        listOf(13 * 60 + 10, 13 * 60 + 20, 13 * 60 + 30).map { photo(minutes(it), 3L) } +
+            listOf(9 * 60 + 30, 10 * 60 + 30, 11 * 60 + 30).map { photo(minutes(it), 1L) } +
+            listOf(12 * 60, 12 * 60 + 15, 12 * 60 + 30).map { photo(minutes(it), 2L) } +
+            shared
 
     // Two members who take turns: 1, 2, 1, 2, ...
     private fun alternating(index: Int): Long = if (index % 2 == 0) 1L else 2L
