@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import java.time.LocalDate
+import java.util.UUID
 
 // The photo box list: READY photos with a date, newest date first, then the later time, then the lower ID.
 // A photo without a time comes last in its day, so a cursor with a time also reaches the photos without one.
@@ -117,16 +118,21 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     ): List<Photo>
 
     // The caller holds the photo locks, so an update by ID is enough. The time is not touched: only the date changes.
+    // The photos of one request get the same batch (4.2.7 rule 3).
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
-        "update Photo p set p.capturedDate = :date, p.dateSource = com.bunch.photo.domain.DateSource.USER " +
-            "where p.id in :ids"
+        "update Photo p set p.capturedDate = :date, p.dateSource = com.bunch.photo.domain.DateSource.USER, " +
+            "p.dateBatchId = :batchId where p.id in :ids"
     )
-    fun setCapturedDate(@Param("ids") ids: Collection<Long>, @Param("date") date: LocalDate): Int
+    fun setCapturedDate(
+        @Param("ids") ids: Collection<Long>,
+        @Param("date") date: LocalDate,
+        @Param("batchId") batchId: UUID
+    ): Int
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
-        "update Photo p set p.capturedDate = null, p.capturedTime = null, " +
+        "update Photo p set p.capturedDate = null, p.capturedTime = null, p.dateBatchId = null, " +
             "p.dateSource = com.bunch.photo.domain.DateSource.UNKNOWN where p.id in :ids"
     )
     fun clearCapturedDate(@Param("ids") ids: Collection<Long>): Int
