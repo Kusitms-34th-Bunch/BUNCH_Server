@@ -13,6 +13,7 @@ import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.service.PhotoService
 import com.bunch.notification.service.NotificationWriter
 import com.bunch.notification.service.PushJobWriter
+import com.bunch.recommendation.service.RecommendationService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
@@ -45,6 +46,7 @@ class BundleService(
     private val events: ApplicationEventPublisher,
     private val mapper: ObjectMapper,
     private val stagePolicy: BundleStagePolicy,
+    private val recommendations: RecommendationService,
     private val notifications: NotificationWriter,
     private val pushJobs: PushJobWriter,
     private val clock: Clock
@@ -60,8 +62,15 @@ class BundleService(
         }
         if (request.photoIds.size !in 1..20) fail(ErrorCode.INVALID_INPUT)
         val selected = photoService.lockReadyPhotosForConnection(bunchId, request.photoIds)
+        val recommended = request.recommendationId?.let { recommendations.useCandidate(bunchId, it) }
         val bundle = bundles.saveAndFlush(
-            Bundle(bunchId = bunchId, createdBy = actor.memberId, createdAt = clock.instant())
+            Bundle(
+                bunchId = bunchId,
+                createdBy = actor.memberId,
+                title = recommended?.title.orEmpty(),
+                recommendedDate = recommended?.startDate,
+                createdAt = clock.instant()
+            )
         )
         selected.forEachIndexed { index, photo -> addPhoto(bundle, photo, index, actor.memberId) }
         val currentMembers = memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.toSet()
@@ -552,15 +561,22 @@ class BundleService(
         if (ids.any { it <= 0 } || ids.distinct().size != ids.size) fail(ErrorCode.INVALID_INPUT)
     }
 
+    // The day of the recommended bundle the draft was made from comes first (4.3.11), then the days of the photos with
+    // the most photos first. There are three chips at most.
     private fun dateChips(bundle: Bundle): List<LocalDate> {
         if (bundle.date != null) return emptyList()
-        val ids = photoRows(bundle.id).mapNotNull { it.photoId }
-        if (ids.isEmpty()) return emptyList()
         val today = LocalDate.now(ZoneId.of("Asia/Seoul"))
-        return originalPhotos.findAllByIdInOrderByIdAsc(ids).mapNotNull { it.capturedDate }
-            .filterNot { it.isAfter(today) }.groupingBy { it }.eachCount().entries
-            .sortedWith(compareByDescending<Map.Entry<LocalDate, Int>> { it.value }.thenBy { it.key })
-            .take(3).map { it.key }
+        val recommended = bundle.recommendedDate?.takeUnless { it.isAfter(today) }
+        val ids = photoRows(bundle.id).mapNotNull { it.photoId }
+        val photoDays = if (ids.isEmpty()) {
+            emptyList()
+        } else {
+            originalPhotos.findAllByIdInOrderByIdAsc(ids).mapNotNull { it.capturedDate }
+                .filterNot { it.isAfter(today) }.groupingBy { it }.eachCount().entries
+                .sortedWith(compareByDescending<Map.Entry<LocalDate, Int>> { it.value }.thenBy { it.key })
+                .map { it.key }
+        }
+        return (listOfNotNull(recommended) + photoDays.filterNot { it == recommended }).take(3)
     }
 
     private fun notifyReady(bundle: Bundle, actorId: Long) {
