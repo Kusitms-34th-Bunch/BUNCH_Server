@@ -12,7 +12,8 @@ import java.time.LocalTime
 // The READY photos with a date and one row for each of their uploaders. This is every photo the bunch shows by date.
 private const val DATED_ROWS =
     "select p.id as photoId, p.capturedDate as capturedDate, p.capturedTime as capturedTime, " +
-        "u.member.id as memberId, u.uploadBatchId as uploadBatchId, f.fingerprint as imageFingerprint " +
+        "u.member.id as memberId, u.uploadBatchId as uploadBatchId, p.dateBatchId as dateBatchId, " +
+        "f.fingerprint as imageFingerprint " +
         "from PhotoUploader u join u.photo p left join PhotoImageFingerprint f on f.photoId = p.id " +
         "where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
         "and p.capturedDate is not null "

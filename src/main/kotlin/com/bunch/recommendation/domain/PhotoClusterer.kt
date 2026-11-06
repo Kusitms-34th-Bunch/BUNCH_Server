@@ -58,7 +58,7 @@ class PhotoClusterer(private val settings: RecommendationSettings = Recommendati
         return split(photos.subList(0, cut.first)) + split(photos.subList(cut.first, photos.size))
     }
 
-    // Decides the part of a photo without a time: its upload batch, then its uploader, then the biggest part.
+    // Decides the part of a photo without a time: its batch (upload or date), then its uploader, then the biggest part.
     private fun choose(photo: PhotoSample, parts: List<Part>): Int {
         var candidates = parts.indices.toList()
 
