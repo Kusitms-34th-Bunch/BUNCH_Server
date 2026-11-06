@@ -69,6 +69,8 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 댓글 푸시 설정을 따른다. 같은 번치 댓글은 참여자 알림이 없지만 답글 알림은 적용한다.
 각 target은 bunchId=수신 inbox, targetBunchId=실제 번들 소유 Bunch,
 sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다.
+5.12.3의 댓글 알림 제목은 `{번치 이름} 번치 {닉네임}님이 '{번들 제목}' 번들에 댓글을 남겼어요`이며,
+행동 번치와 작성자 닉네임을 함께 표시한다. 닉네임은 등록 트랜잭션에서 잠근 작성자 계정의 값이다.
 NotificationService.open/PushWorker의 late access 검사는 부모 통합 소유다.
 
 ## 검증 기준·한계

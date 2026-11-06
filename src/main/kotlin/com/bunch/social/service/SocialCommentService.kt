@@ -55,7 +55,7 @@ class SocialCommentService(
         positive(bundleId)
         request.parentId?.let(::positive)
         val content = SocialCommentText.content(request.content)
-        members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
+        val author = members.findLockedById(userId)?.requireCompleted() ?: fail(ErrorCode.USER_NOT_FOUND)
         val actorId = access.requireActor(userId).bunch.id
         val targetId = bundles.findById(bundleId).orElseThrow {
             BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
@@ -102,6 +102,7 @@ class SocialCommentService(
             sourceBunch = bunch,
             commentId = row.id,
             actorId = userId,
+            actorNickname = author.nickname ?: "작성자",
             content = content,
             parentAuthorId = parent?.authorMemberId,
             parentBunchId = parent?.actingBunchId,
