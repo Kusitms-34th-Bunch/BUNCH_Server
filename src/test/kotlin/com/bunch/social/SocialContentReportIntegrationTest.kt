@@ -485,9 +485,28 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         val bundle = published(owner, bunch)
         val actor = member()
         val reporter = publicBunch(actor)
-        val target = NotificationTarget(kind = com.bunch.notification.domain.NotificationTargetKind.BUNDLE, bunchId = reporter, bundleId = bundle.id, targetBunchId = bunch)
-        assertThat(notifications.canDeliver(reporter, target)).isTrue()
+        val root = write(owner, bundle.id)
+        val commentTarget = NotificationTarget(
+            kind = com.bunch.notification.domain.NotificationTargetKind.BUNDLE_COMMENTS,
+            bunchId = reporter,
+            bundleId = bundle.id,
+            targetBunchId = bunch,
+            commentId = root
+        )
+        assertThat(notifications.canOpen(actor, commentTarget)).isTrue()
+        assertThat(notifications.canDeliver(reporter, commentTarget)).isTrue()
         val before = count("notifications")
+        service.comment(actor, bundle.id, root, reportRequest())
+        assertThat(notifications.canOpen(actor, commentTarget)).isFalse()
+        assertThat(notifications.canDeliver(reporter, commentTarget)).isFalse()
+        assertThat(access.readPublishedBundle(actor, bundle.id).id).isEqualTo(bundle.id)
+        val target = NotificationTarget(
+            kind = com.bunch.notification.domain.NotificationTargetKind.BUNDLE,
+            bunchId = reporter,
+            bundleId = bundle.id,
+            targetBunchId = bunch
+        )
+        assertThat(notifications.canDeliver(reporter, target)).isTrue()
         service.bundle(actor, bundle.id, reportRequest())
         assertThat(notifications.canDeliver(reporter, target)).isFalse()
         assertThat(notifications.canOpen(actor, target)).isFalse()
