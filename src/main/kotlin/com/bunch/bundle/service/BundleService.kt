@@ -42,6 +42,7 @@ class BundleService(
     private val originalPhotos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
     private val leases: BundleLeaseService,
+    private val locations: BundleLocationService,
     private val images: ImageAssetService,
     private val events: ApplicationEventPublisher,
     private val mapper: ObjectMapper,
@@ -627,14 +628,17 @@ class BundleService(
                 canPublish = draft && draftManager,
                 canDelete = if (draft) draftManager else owner
             ),
-            leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt
+            leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt,
+            bundle.locationVersion, locations.listForBundles(listOf(bundle.id)).getValue(bundle.id)
         )
     }
 
     private fun content(bundle: Bundle): Map<String, Any?> = mapOf(
         "status" to bundle.status, "title" to bundle.title, "titleVersion" to bundle.titleVersion,
         "visibility" to bundle.visibility, "visibilityVersion" to bundle.visibilityVersion,
-        "date" to bundle.date, "dateVersion" to bundle.dateVersion, "publishedAt" to bundle.publishedAt
+        "date" to bundle.date, "dateVersion" to bundle.dateVersion, "publishedAt" to bundle.publishedAt,
+        "locationVersion" to bundle.locationVersion,
+        "locations" to locations.listForBundles(listOf(bundle.id)).getValue(bundle.id)
     ) + photoChanges(bundle) + participantChanges(bundle)
 
     private fun photoChanges(bundle: Bundle): Map<String, Any?> = mapOf(

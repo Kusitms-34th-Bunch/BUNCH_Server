@@ -59,7 +59,9 @@ data class BundleSnapshot(
     val leases: List<LeaseState>,
     val createdAt: Instant,
     val updatedAt: Instant,
-    val publishedAt: Instant?
+    val publishedAt: Instant?,
+    val locationVersion: Long,
+    val locations: List<BundleLocationResponse>
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
