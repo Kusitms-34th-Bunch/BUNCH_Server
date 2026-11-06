@@ -32,6 +32,28 @@ class RecommendationScheduler(
         }
     }
 
+    // Once a day (4.2.9 rule 3: checked once a day, so a bundle may stay up to a day longer). The time and the zone can
+    // be set; a run that is missed is caught up the next day.
+    @Scheduled(
+        cron = "\${recommendation.expiry.cron:0 30 4 * * *}",
+        zone = "\${recommendation.expiry.zone:Asia/Seoul}"
+    )
+    fun expire() {
+        try {
+            runExpiry()
+        } catch (ex: Exception) {
+            // Never include the exception message: it may carry URLs or credentials.
+            logger.warn("Recommendation expiry failed: {}", ex.javaClass.simpleName)
+        }
+    }
+
+    /** Deletes the expired recommended bundles and returns how many. [now] is a parameter so tests can move time. */
+    fun runExpiry(now: Instant = Instant.now()): Int {
+        val removed = recommendations.expireCandidates(now)
+        if (removed > 0) logger.info("Expired recommended bundles deleted: {}", removed)
+        return removed
+    }
+
     /**
      * Calculates the quiet bunches and returns how many it looked at. [now] is a parameter so tests can move time
      * without sleeping. A bunch that fails keeps its noted dates and is tried again at the next call.

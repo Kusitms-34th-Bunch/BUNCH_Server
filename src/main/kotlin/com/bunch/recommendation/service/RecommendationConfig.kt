@@ -2,6 +2,7 @@ package com.bunch.recommendation.service
 
 import com.bunch.recommendation.domain.BuiltInSpecialDays
 import com.bunch.recommendation.domain.BuiltInTitleSentences
+import com.bunch.recommendation.domain.CandidateExpiry
 import com.bunch.recommendation.domain.CandidateMatcher
 import com.bunch.recommendation.domain.CardSelector
 import com.bunch.recommendation.domain.PhotoClusterer
@@ -33,6 +34,9 @@ class RecommendationConfig {
 
     @Bean
     fun candidateMatcher(): CandidateMatcher = CandidateMatcher()
+
+    @Bean
+    fun candidateExpiry(settings: RecommendationSettings): CandidateExpiry = CandidateExpiry(settings)
 
     @Bean
     fun titleContextBuilder(): TitleContextBuilder = TitleContextBuilder()

@@ -3,6 +3,7 @@ package com.bunch.recommendation.service
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.recommendation.domain.BundleCandidate
+import com.bunch.recommendation.domain.CandidateExpiry
 import com.bunch.recommendation.domain.CandidateMatch
 import com.bunch.recommendation.domain.CandidateMatcher
 import com.bunch.recommendation.domain.CandidatePhoto
@@ -33,6 +34,7 @@ class RecommendationService(
     private val clusterer: PhotoClusterer,
     private val cardSelector: CardSelector,
     private val matcher: CandidateMatcher,
+    private val expiry: CandidateExpiry,
     private val titleGenerator: TitleGenerator,
     private val titleContexts: TitleContextBuilder
 ) {
@@ -51,6 +53,21 @@ class RecommendationService(
         val date = event.capturedDate ?: return
         recommendations.markChanged(event.bunchId, date, Instant.now())
     }
+
+    /**
+     * The recommended bundles of a bunch in the order of the list (4.2.9 rule 6). The list belongs to the bunch, so
+     * every member of it gets the same one.
+     */
+    @Transactional(readOnly = true)
+    fun orderedCandidates(bunchId: Long): List<BundleCandidate> = recommendations.findOrderedCandidates(bunchId)
+
+    /**
+     * Deletes the recommended bundles whose last photo was added more than 30 days ago at [now] and returns how many
+     * (4.2.9 rule 4). The photos stay in the photo box. Running it again deletes nothing more, so a run that was missed
+     * or repeated does no harm.
+     */
+    @Transactional
+    fun expireCandidates(now: Instant): Int = recommendations.deleteExpiredCandidates(expiry.cutoff(now))
 
     /** The bunches whose photos have not changed since [cutoff], the ones waiting the longest first. */
     @Transactional(readOnly = true)
@@ -100,7 +117,17 @@ class RecommendationService(
 
         if (match.deletedCandidateIds.isNotEmpty()) recommendations.deleteCandidates(match.deletedCandidateIds)
         keep(match, inRange, selections, addedAt)
-        create(bunchId, match, stored, selections, sampleById, addedAt)
+        val toCreate = match.copy(created = notExpired(match.created, addedAt))
+        create(bunchId, toCreate, stored, selections, sampleById, addedAt)
+    }
+
+    // A cluster whose last photo was added more than 30 days ago is not made a candidate. It would be deleted at the
+    // next daily check, and a bundle that expired must not come back until a new photo is added (4.2.9 rule 4). The old
+    // photos are still material, so a new photo gives the cluster a recent time and it comes back as a new candidate.
+    private fun notExpired(clusters: List<PhotoCluster>, addedAt: Map<Long, Instant>): List<PhotoCluster> {
+        val now = Instant.now()
+
+        return clusters.filter { !expiry.isExpired(latestAdded(it, addedAt), now) }
     }
 
     private fun toSamples(rows: List<MaterialPhotoRow>): List<PhotoSample> =
