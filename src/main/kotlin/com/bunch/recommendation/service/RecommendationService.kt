@@ -261,7 +261,8 @@ class RecommendationService(
                 capturedDate = uploads.first().capturedDate,
                 capturedTime = uploads.first().capturedTime,
                 uploaderIds = uploads.map { it.memberId }.toSet(),
-                batchIds = uploads.map { it.uploadBatchId }.toSet()
+                batchIds = uploads.map { it.uploadBatchId }.toSet(),
+                fingerprint = uploads.first().imageFingerprint
             )
         }
 
