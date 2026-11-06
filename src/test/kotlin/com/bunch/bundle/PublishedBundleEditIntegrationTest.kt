@@ -6,6 +6,7 @@ import com.bunch.bunch.domain.BunchBlockRepository
 import com.bunch.bunch.domain.BunchProfileReport
 import com.bunch.bunch.domain.BunchProfileReportRepository
 import com.bunch.bunch.domain.BunchReportReason
+import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bunch.service.BunchPublicService
@@ -67,6 +68,9 @@ import java.util.concurrent.TimeUnit
 @ActiveProfiles("test")
 @Import(PublishedBundleEditIntegrationTest.EventsConfiguration::class)
 class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
+    @Autowired
+    private lateinit var memberships: BunchMembershipRepository
+
     @Autowired
     private lateinit var attribution: BundleAttributionService
 
@@ -393,6 +397,83 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         } finally {
             pool.shutdownNow()
         }
+    }
+
+    @Test
+    fun `preloaded owner membership cannot edit or delete after concurrent demotion`() {
+        listOf(false, true).forEach { delete ->
+            val f = fixture()
+            val before = snapshot(f)
+            val loaded = CountDownLatch(1)
+            val pool = Executors.newSingleThreadExecutor()
+            try {
+                val future = TransactionTemplate(transactions).execute {
+                    bunchRows.findLocked(f.bunchId)
+                    val pending = pool.submit<Throwable?> {
+                        runCatching {
+                            TransactionTemplate(transactions).execute {
+                                val cached = memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!
+                                assertThat(cached.role.name).isEqualTo("OWNER")
+                                bunchRows.findById(f.bunchId).orElseThrow().name
+                                bundles.findById(f.id).orElseThrow().revision
+                                loaded.countDown()
+                                if (delete) {
+                                    service.delete(BundleActor(f.owner, "s"), f.bunchId, f.id, "late-delete")
+                                } else {
+                                    save(f, edit(before).copy(title = "preloaded owner write"))
+                                }
+                            }
+                        }.exceptionOrNull()
+                    }
+                    check(loaded.await(5, TimeUnit.SECONDS))
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                    while (true) {
+                        jdbc.execute("SELECT pg_stat_clear_snapshot()")
+                        val waiting = jdbc.queryForObject(
+                            "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() " +
+                                "AND wait_event_type='Lock'", Long::class.java
+                        )!!
+                        if (waiting > 0) break
+                        check(System.nanoTime() < deadline)
+                        Thread.sleep(10)
+                    }
+                    jdbc.update(
+                        "UPDATE bunch_memberships SET role='MEMBER' WHERE bunch_id=? AND member_id=?",
+                        f.bunchId, f.owner
+                    )
+                    jdbc.update(
+                        "UPDATE bunch_memberships SET role='OWNER' WHERE bunch_id=? AND member_id=?",
+                        f.bunchId, f.guest
+                    )
+                    pending
+                }!!
+                assertThat((future.get(10, TimeUnit.SECONDS) as? BusinessException)?.errorCode)
+                    .isEqualTo(ErrorCode.FORBIDDEN)
+                assertThat(bundles.existsById(f.id)).isTrue()
+                assertThat(snapshot(f).title).isEqualTo(before.title)
+                assertThat(snapshot(f).revision).isEqualTo(before.revision)
+            } finally {
+                pool.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `targeted lock refresh preserves unrelated pending parent transaction changes`() {
+        val f = fixture()
+        val before = snapshot(f)
+        val activity = Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.MICROS)
+        TransactionTemplate(transactions).execute {
+            val bunch = bunchRows.findById(f.bunchId).orElseThrow()
+            val membership = memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!
+            bunch.introduction = "pending parent introduction"
+            membership.lastActivityAt = activity
+            save(f, edit(before).copy(title = "parent transaction save"))
+        }
+        assertThat(bunchRows.findById(f.bunchId).orElseThrow().introduction)
+            .isEqualTo("pending parent introduction")
+        assertThat(memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!.lastActivityAt)
+            .isEqualTo(activity.truncatedTo(java.time.temporal.ChronoUnit.MICROS))
     }
 
     @Test

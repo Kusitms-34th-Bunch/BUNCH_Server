@@ -37,7 +37,10 @@
 서버는 번치→번들을 잠근 뒤 expectedRevision과 전체 입력을 검증한다. 불일치는
 409 `BUNDLE_003`, detail `{revision: 현재값, version: 현재값}`이다. 잘못된 입력은 400 `COMMON_001`,
 초안 요청은 409 `BUNDLE_002`, 역할 부족은 403 `AUTH_002`, 경로 불일치는 404다.
-동일 revision으로 경합한 서로 다른 수정은 하나만 성공한다. 성공 응답은 BundleSnapshot이다.
+동일 revision으로 경합한 서로 다른 수정은 하나만 성공한다.
+번치 락을 기다리기 전에 상위 트랜잭션이 회원·소속·번치·번들을 읽었어도 잠금 획득 후
+대상 엔티티를 다시 읽어 현재 ACTIVE·OWNER·revision을 검사한다. 영속성 컨텍스트 전체를
+clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다른 상위 변경을 보존한다. 성공 응답은 BundleSnapshot이다.
 성공했으나 응답을 잃은 요청은 최신 상세를 재조회한다. stale revision은 no-op도 거부한다.
 
 저장 전 내용은 앱 로컬 상태다. 서버에 임시 수정본을 저장하는 API는 없다. 전체 저장은 한
