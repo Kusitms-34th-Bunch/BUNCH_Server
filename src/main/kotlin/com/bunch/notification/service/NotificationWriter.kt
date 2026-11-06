@@ -289,6 +289,35 @@ class NotificationWriter(
         })
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun bundleLiked(bundle: Bundle, sourceBunch: Bunch, actorId: Long) {
+        if (sourceBunch.id == bundle.bunchId) return
+        val participantIds = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+            .map { it.memberId }.toSet()
+        val now = clock.instant()
+        saveNotifications(memberships.findActiveMembers(bundle.bunchId)
+            .filter { it.member.id != actorId && it.member.id in participantIds }
+            .sortedBy { it.member.id }
+            .map {
+                Notification(
+                    recipientMemberId = it.member.id,
+                    bunchId = bundle.bunchId,
+                    type = NotificationType.BUNDLE_LIKED,
+                    dedupeKey = "BUNDLE_LIKED:${sourceBunch.id}:${bundle.id}",
+                    title = "${sourceBunch.name} 번치가 우리 번들을 좋아해요",
+                    body = bundle.title.ifBlank { "제목 미정" },
+                    target = NotificationTarget(
+                        kind = NotificationTargetKind.BUNDLE,
+                        bunchId = bundle.bunchId,
+                        bundleId = bundle.id,
+                        targetBunchId = bundle.bunchId,
+                        sourceBunchId = sourceBunch.id
+                    ),
+                    createdAt = now
+                )
+            })
+    }
+
     private fun saveNotifications(rows: List<Notification>) {
         val saved = notifications.saveAll(rows)
         pushJobs.enqueue(saved, clock.instant())
