@@ -12,6 +12,9 @@ interface MaterialPhotoRow {
     val memberId: Long
     val uploadBatchId: UUID
 
+    /** The batch of the photos that were given a date in one request, or null (4.2.7 rule 3). */
+    val dateBatchId: UUID?
+
     /** The image fingerprint of the photo, or null when it has none (4.2.8 rule 1). */
     val imageFingerprint: Long?
 }
