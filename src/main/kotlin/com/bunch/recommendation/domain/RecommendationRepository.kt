@@ -7,6 +7,7 @@ import org.springframework.data.repository.Repository
 import org.springframework.data.repository.query.Param
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 
 // The READY photos with a date and one row for each of their uploaders. This is every photo the bunch shows by date.
 private const val DATED_ROWS =
@@ -54,6 +55,29 @@ interface RecommendationRepository : Repository<Photo, Long> {
     @Modifying
     @Query("delete from CandidatePhoto p where p.candidateId in :candidateIds")
     fun deleteCandidatePhotos(@Param("candidateIds") candidateIds: Collection<Long>)
+
+    // One candidate of the bunch, or none when it was deleted or belongs to another bunch.
+    @Query("select c from BundleCandidate c where c.id = :id and c.bunchId = :bunchId")
+    fun findCandidate(@Param("bunchId") bunchId: Long, @Param("id") id: Long): BundleCandidate?
+
+    // The photos of the cards in the order they are shown in. A photo that was deleted is already gone from
+    // candidate_photos, and a photo whose date was cleared is left out here until the next calculation.
+    @Query(
+        "select cp.candidateId as candidateId, p.id as photoId, a.url as imageUrl, p.capturedDate as capturedDate, " +
+            "p.capturedTime as capturedTime from CandidatePhoto cp join Photo p on p.id = cp.photoId " +
+            "join p.imageAsset a where cp.candidateId in :candidateIds and cp.position is not null " +
+            "and p.capturedDate is not null and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
+            "order by cp.candidateId asc, cp.position asc"
+    )
+    fun findCardPhotoRows(@Param("candidateIds") candidateIds: Collection<Long>): List<CardPhotoRow>
+
+    // The badge shows the member as they are now, so the nickname and profile image are read from the member.
+    @Query(
+        "select u.photo.id as photoId, m.id as memberId, m.nickname as nickname, a.url as imageUrl " +
+            "from PhotoUploader u join u.member m left join m.profileImageAsset a " +
+            "where u.photo.id in :photoIds order by u.photo.id asc, u.id asc"
+    )
+    fun findUploaderProfiles(@Param("photoIds") photoIds: Collection<Long>): List<UploaderProfileRow>
 
     // The order of the list (4.2.9 rule 6): the bundle whose last photo was added most recently first, then the one
     // with the most members who uploaded the photos of its card, then the one with the most photos on its card. These
@@ -125,6 +149,23 @@ interface RecommendationRepository : Repository<Photo, Long> {
     interface MemberNicknameRow {
         val memberId: Long
         val nickname: String?
+    }
+
+    /** A photo of a card with the image and the date it is shown with. */
+    interface CardPhotoRow {
+        val candidateId: Long
+        val photoId: Long
+        val imageUrl: String
+        val capturedDate: LocalDate
+        val capturedTime: LocalTime?
+    }
+
+    /** A member who uploaded a photo, as the badge shows them. */
+    interface UploaderProfileRow {
+        val photoId: Long
+        val memberId: Long
+        val nickname: String?
+        val imageUrl: String?
     }
 
     /** A date whose photos changed and when they changed last (4.2.9 rule 2). */
