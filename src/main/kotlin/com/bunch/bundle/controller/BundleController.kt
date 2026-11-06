@@ -145,6 +145,15 @@ class BundleController(private val bundles: BundleService) {
         @RequestBody request: PublishBundleRequest
     ) = ApiResponse.ok(bundles.publish(actor(authentication), bunchId, id, key, request))
 
+    @PutMapping("/{id}/published")
+    fun editPublished(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable id: Long,
+        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
+        @RequestBody request: EditPublishedBundleRequest
+    ) = ApiResponse.ok(bundles.editPublished(actor(authentication), bunchId, id, request, correlation(requestId)))
+
     @DeleteMapping("/{id}")
     fun delete(
         authentication: Authentication,

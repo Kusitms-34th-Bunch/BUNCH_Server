@@ -8,6 +8,8 @@ import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.dto.BundlePermissions
+import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import org.springframework.stereotype.Service
@@ -19,7 +21,8 @@ class BundleAccessService(
     private val memberships: BunchMembershipRepository,
     private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
-    private val participants: BundleParticipantRepository
+    private val participants: BundleParticipantRepository,
+    private val feedAccess: FeedAccessService
 ) {
     @Transactional(readOnly = true)
     fun requireMember(userId: Long, bunchId: Long) {
@@ -31,6 +34,7 @@ class BundleAccessService(
         requireMember(userId, bunchId)
         val bundle = bundles.findById(bundleId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
         if (bundle.bunchId != bunchId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (bundle.status == BundleStatus.PUBLISHED) feedAccess.readPublishedBundle(userId, bundleId)
         return bundle
     }
 
@@ -39,6 +43,7 @@ class BundleAccessService(
         lockBunch(userId, bunchId)
         val bundle = bundles.findLocked(bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         if (bundle.bunchId != bunchId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (bundle.status == BundleStatus.PUBLISHED) feedAccess.readPublishedBundle(userId, bundleId)
         return bundle
     }
 
@@ -46,6 +51,26 @@ class BundleAccessService(
     fun lockBunch(userId: Long, bunchId: Long) {
         requireMember(userId, bunchId)
         bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        requireMember(userId, bunchId)
+    }
+
+    fun permissions(userId: Long, bundle: Bundle): BundlePermissions {
+        val administrator = isAdministrator(userId, bundle.bunchId)
+        val creator = bundle.createdBy == userId
+        val participant = isParticipant(userId, bundle.id)
+        val draft = bundle.status == BundleStatus.DRAFT
+        val current = if (draft) null else feedAccess.viewer(userId).currentBunchId
+        val owner = !draft && current == bundle.bunchId && isOwner(userId, bundle.bunchId)
+        val draftManager = participant && (creator || administrator)
+        return BundlePermissions(
+            administrator, creator, participant,
+            canEdit = if (draft) participant else owner,
+            canPublish = draft && draftManager,
+            canDelete = if (draft) draftManager else owner,
+            canReport = !draft && current != null && !owner,
+            canLike = !draft && current != null,
+            canComment = !draft && current != null
+        )
     }
 
     fun isOwner(userId: Long, bunchId: Long): Boolean =
@@ -66,7 +91,7 @@ class BundleAccessService(
     }
 
     fun requireCommentAuthor(userId: Long, bundle: Bundle) {
-        if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
+        requireParticipant(userId, bundle)
     }
 
     fun requireDraftManager(userId: Long, bundle: Bundle) {
