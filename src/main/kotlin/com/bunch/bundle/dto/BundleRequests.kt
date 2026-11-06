@@ -45,3 +45,19 @@ data class MoveBundlePhotoRequest(
 )
 
 data class PublishBundleRequest(val expectedRevision: Long)
+
+
+data class EditPublishedBundleRequest(
+    val expectedRevision: Long,
+    val title: String,
+    val visibility: Visibility,
+    val date: LocalDate?,
+    val photos: List<PublishedBundlePhotoInput>,
+    val locations: List<BundleLocationInput>
+)
+
+data class PublishedBundlePhotoInput(
+    val bundlePhotoId: Long? = null,
+    val photoId: Long? = null,
+    val caption: String
+)

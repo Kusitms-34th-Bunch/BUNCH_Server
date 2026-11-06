@@ -54,6 +54,15 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         status: MembershipStatus = MembershipStatus.ACTIVE
     ): List<BunchMembership>
 
+    @Query("""select membership from BunchMembership membership
+        join fetch membership.member member
+        left join fetch member.profileImageAsset
+        where membership.bunch.id in :bunchIds
+          and membership.status = com.bunch.bunch.domain.MembershipStatus.ACTIVE
+          and member.accountStatus = com.bunch.member.domain.AccountStatus.ACTIVE
+          and member.signupStatus = com.bunch.member.domain.SignupStatus.COMPLETED""")
+    fun findActiveProfilesForBunches(bunchIds: Collection<Long>): List<BunchMembership>
+
     // One query loads each member and the profile image, so the list does not cost a query per member.
     // The main admin comes first; the nickname uses the database's code point order.
     @Query("""select m from BunchMembership m

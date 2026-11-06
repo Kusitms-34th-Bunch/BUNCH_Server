@@ -19,14 +19,24 @@ data class BundlePhotoResponse(
     val captionUpdatedAt: Instant?
 )
 
-data class BundleParticipantResponse(val memberId: Long, val joinedAt: Instant)
+data class BundleParticipantResponse(
+    val memberId: Long,
+    val joinedAt: Instant,
+    val nickname: String? = null,
+    val imageUrl: String? = null,
+    val profileAvailable: Boolean = false
+)
 
 data class BundleCommentResponse(
     val memberId: Long,
     val content: String,
     val version: Long,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    val nickname: String? = null,
+    val imageUrl: String? = null,
+    val profileAvailable: Boolean = false,
+    val id: Long = 0
 )
 
 data class BundlePermissions(
@@ -35,7 +45,10 @@ data class BundlePermissions(
     val participant: Boolean,
     val canEdit: Boolean,
     val canPublish: Boolean,
-    val canDelete: Boolean
+    val canDelete: Boolean,
+    val canReport: Boolean = false,
+    val canLike: Boolean = false,
+    val canComment: Boolean = false
 )
 
 data class BundleSnapshot(
@@ -61,9 +74,18 @@ data class BundleSnapshot(
     val updatedAt: Instant,
     val publishedAt: Instant?,
     val locationVersion: Long,
-    val locations: List<BundleLocationResponse>
+    val locations: List<BundleLocationResponse>,
+    val likeCount: Long = 0,
+    val likedByCurrentBunch: Boolean = false,
+    val commentCount: Long = 0
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
 
 data class BundleSummary(val draftCount: Long, val publishedCount: Long, val stage: Int)
+
+
+data class BundleAttribution(
+    val participants: List<BundleParticipantResponse>,
+    val comments: List<BundleCommentResponse>
+)
