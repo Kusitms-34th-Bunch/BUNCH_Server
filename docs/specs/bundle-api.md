@@ -1,5 +1,13 @@
 # 번들 REST·STOMP 클라이언트 계약
 
+2026-11-07 승인한 [발행본 일괄 저장](published-bundle-edit.md)을 우선한다.
+`PUT /{bundleId}/published`로만 발행본을 저장하며 아래 개별 저장 API는 DRAFT 전용이다.
+발행 후 참여자·멤버별 코멘트는 변경할 수 없다. 기존 comments 필드는 참여자 코멘트로 유지한다.
+
+장소 목록의 REST·LOCATION lease·이벤트·snapshot·내부 일괄 편집/콕 연계는
+[장소 목록 계약](bundle-locations.md)을 따른다. `BundleSnapshot`에 `locations`와
+`locationVersion`이 추가되며 기존 발행 조건에 장소 필수 조건은 추가하지 않는다.
+
 번들 생성·공동 편집·발행 클라이언트가 사용하는 HTTP REST와 WebSocket/STOMP
 프로토콜을 정의한다. 번들 제품 정책은 [번들 Spec](bundle.md)을 따르고, 이 문서는
 서버에 실제 등록된 경로·DTO·상태·오류·실시간 메시지 형태를 고정한다.
@@ -109,6 +117,7 @@ client 식별자를 추가하지 않는다.
 | `titleVersion` | 제목 |
 | `visibilityVersion` | 공개 범위 |
 | `dateVersion` | 번들 날짜 |
+| `locationVersion` | 장소 목록 전체 |
 | `captionVersion` | 한 `BundlePhoto`의 캡션 |
 | `BundleCommentResponse.version` | 한 회원의 코멘트 |
 
@@ -192,15 +201,15 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 ```
 
 `leaseToken`은 제목·날짜·캡션의 `DRAFT` 저장에만 필요하다. 코멘트에는 보내지 않으며,
-`PUBLISHED` 제목·날짜·캡션 수정에도 편집권이 필요하지 않다. `mode`는 모든 text
+`PUBLISHED`는 이 경로로 저장할 수 없다. `mode`는 모든 text
 요청에 포함하며 실제 bundle 상태와 일치해야 한다.
 
 - 제목은 NFC 정규화 후 trim하며 줄바꿈을 허용하지 않고 최대 40 grapheme이다.
-- 코멘트는 NFC 정규화하며 최대 400 grapheme이다. `PUBLISHED`에서는 빈 코멘트를
-  저장할 수 없다.
+- 코멘트는 NFC 정규화하며 최대 400 grapheme이다. 발행 후에는 수정할 수 없다.
 - 캡션은 NFC 정규화하며 최대 200 grapheme이다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
 
+장소 목록 lease target은 `LOCATION`이며 전용 저장 요청은 [장소 계약](bundle-locations.md)을 따른다.
 제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`, 캡션 lease target은
 `PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
 받지 않고 현재 회원·session·target·`leaseToken`·미만료 상태·`expectedVersion`을 같은
@@ -237,7 +246,7 @@ null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 
 
 초안의 text·date·visibility·caption 저장은 참여자만 할 수 있다. 발행본의 제목·날짜·
 공개 범위·사진·캡션 수정은 현재 메인 관리자 OWNER만 할 수 있다. 발행본 코멘트는
-해당 번들의 참여자 본인만 수정한다.
+발행 후 누구도 수정하지 않는다. 발행본 공용 수정은 전체 일괄 저장 경로만 사용한다.
 
 ### 참여자·나가기·삭제
 
@@ -378,6 +387,8 @@ error.message = error.idempotency_conflict
 | `visibilityVersion` | `Long` | 공개 범위 버전 |
 | `date` | `LocalDate \| null` | 선택 날짜 |
 | `dateVersion` | `Long` | 날짜 버전 |
+| `locationVersion` | `Long` | 장소 목록 버전 |
+| `locations` | `BundleLocationResponse[]` | position 오름차순 최대 3개 장소 |
 | `revision` | `Long` | 저장된 내용 revision |
 | `photos` | `BundlePhotoResponse[]` | position 오름차순 사진 |
 | `participants` | `BundleParticipantResponse[]` | joinedAt 오름차순 참여자 |
@@ -389,6 +400,9 @@ error.message = error.idempotency_conflict
 | `createdAt` | `Instant` | 생성 시각 |
 | `updatedAt` | `Instant` | 마지막 내용 변경 시각 |
 | `publishedAt` | `Instant \| null` | 발행 시각 |
+| `likeCount` | `Long` | 공통 접근 필터를 적용한 소셜 좋아요 수 |
+| `likedByCurrentBunch` | `Boolean` | 현재 번치 공동 좋아요 상태 |
+| `commentCount` | `Long` | 삭제 자리를 포함한 소셜 댓글·답글 수. comments 배열 크기와 다름 |
 
 `dateChips`는 지정 날짜가 null인 경우에만 같은 번들 사진의 현지 촬영일을 그대로
 모아 빈도 내림차순·날짜 오름차순으로 최대 세 개 반환한다. 미래 촬영일은 제외한다.
@@ -421,7 +435,9 @@ error.message = error.idempotency_conflict
 }
 ```
 
-`BundleParticipantResponse`는 참여자 member ID와 참여 시각을 가진다.
+`BundleParticipantResponse`는 참여자 member ID와 참여 시각을 가진다. 발행본에는
+`nickname/imageUrl/profileAvailable`이 추가된다. 나간/탈퇴 멤버는 작성자·기본 이미지이며
+profileAvailable은 false다. 참조 ID는 기존 값으로 유지하고 원문 코멘트는 응답에서 숨긴다.
 
 ```json
 {
@@ -436,7 +452,9 @@ error.message = error.idempotency_conflict
 `BundleCommentResponse`는 번들마다 회원 한 명당 하나다. 초기 참여자처럼 row가 아직
 없는 회원은 `comments` 배열에서 생략되며, 그 경우에만 빈 content와 version 0의
 암묵 상태를 적용한다. 참여자 추가 응답에는 빈 comment row가 포함되므로 응답의
-version을 사용해야 한다.
+version을 사용해야 한다. `id`는 코멘트 row ID다. 발행본 comments는 참여자 순서이며
+nickname/imageUrl/profileAvailable을 제공한다. 비활성 작성자는 content를 「삭제된 코멘트입니다」로
+표시한다. 초안에서 추가한 표시 필드의 기본값은 null/false다.
 
 ```json
 {
@@ -453,7 +471,9 @@ version을 사용해야 한다.
 `participant`는 참여 여부를 각각 나타낸다. `canEdit`은 초안 참여자 또는 발행본 OWNER에게,
 `canPublish`는 초안 참여자이면서 생성자·관리자일 때 true다. `canDelete`는 초안에서
 참여 중인 생성자·OWNER/CO_OWNER, 발행본에서 OWNER에게만 true다. 미참여 관리자는
-초안 편집·발행·폐기 권한이 없다. `canEdit`은 공용 내용 권한이며 본인 코멘트 작성자 권한은 별도로 유지한다.
+초안 편집·발행·폐기 권한이 없다. `canEdit`은 공용 내용 권한이다. 발행 후 코멘트는 누구도 변경할 수 없다.
+발행본의 관리 메뉴는 현재 선택 번치의 OWNER에게만 제공한다. 추가된
+`canReport/canLike/canComment`와 소속 0개 읽기 전용 정책은 [발행본 계약](published-bundle-edit.md)을 따른다.
 
 ```json
 {
@@ -562,8 +582,7 @@ client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 enve
 /app/bunches/{bunchId}/bundles/{bundleId}/activity
 ```
 
-편집권 명령은 초안 참여자만 사용할 수 있다. `COMMENT` 활동은 초안 참여자와
-발행본 본인 코멘트 작성자에게 허용한다. `VIEW` 활동은 초안·발행본의 현재 번치 멤버가 사용할 수 있다.
+편집권 명령은 초안 참여자만 사용할 수 있다. `COMMENT` 활동은 초안 참여자에게만 허용한다. 발행본 코멘트 변경은 금지한다. `VIEW` 활동은 초안·발행본의 현재 번치 멤버가 사용할 수 있다.
 모든 명령에서 현재 소속·참여 상태를 재검사하며 역할만으로 편집권을 우회할 수 없다.
 활동 표시·VIEW·lease 획득·heartbeat는 `lastActivityAt`과 `updatedAt`을 바꾸지 않는다.
 
@@ -624,15 +643,17 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 
 | `type` | `data` |
 | --- | --- |
-| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, publishedAt, photos, dateChips, participants, comments |
+| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, locations/locationVersion, publishedAt, photos, dateChips, participants, comments |
 | `TITLE` | `{value, version}` |
 | `VISIBILITY` | `{value, version}` |
 | `DATE` | `{value, version, dateChips}` |
+| `LOCATION` | `{locations: BundleLocationResponse[], version: locationVersion}` |
 | `COMMENT` | `BundleCommentResponse` |
 | `CAPTION` | `BundlePhotoResponse` |
 | `PARTICIPANTS` | `{participants, comments, removedCommentMemberIds?}` |
 | `PHOTOS` | `{photos, dateChips}` |
 | `PUBLISHED` | `CREATED`와 같은 전체 내용. status=PUBLISHED |
+| `EDITED` | 발행본 전체 일괄 저장. `CREATED`와 같은 전체 내용 |
 | `DELETED` | null |
 
 다음 이벤트는 내용 revision을 증가시키지 않는다.
@@ -665,7 +686,7 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 }
 ```
 
-`target`은 `TITLE`, `DATE`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
+`target`은 `TITLE`, `DATE`, `LOCATION`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
 `connectionId`와 인증 principal의 `memberId`·`sessionId`를 사용한다. lease가 없거나
 만료·release된 경우 획득할 수 있다. 활성 lease를 재획득할 수 있는 경우는 같은
 `memberId`·`sessionId`·`connectionId`일 때뿐이며, 이때도 매번 새 token과 새

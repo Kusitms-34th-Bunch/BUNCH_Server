@@ -8,7 +8,7 @@ import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchFollowStatus
 import com.bunch.bunch.domain.BunchProfileReport
 import com.bunch.bunch.domain.BunchProfileReportRepository
-import com.bunch.bunch.domain.BunchReportReason
+import com.bunch.bunch.domain.BunchReportPolicy
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.Visibility
@@ -33,7 +33,6 @@ import jakarta.persistence.EntityManager
 import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
-import java.util.regex.Pattern
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -226,10 +225,7 @@ class BunchSocialService(
 
     @Transactional
     fun report(userId: Long, viewerId: Long, request: BunchReportRequest): BunchReportResult {
-        val detail = request.detail?.trim()?.takeIf { it.isNotEmpty() }
-        if ((detail != null && Pattern.compile("\\X").matcher(detail).results().count() > 200) ||
-            (request.reason == BunchReportReason.OTHER && detail.isNullOrBlank())
-        ) fail(ErrorCode.INVALID_INPUT)
+        val detail = BunchReportPolicy.detail(request.reason, request.detail)
         prepareMutation(userId, viewerId, request.targetBunchId)
         val locked = lockPair(viewerId, request.targetBunchId)
         access.viewer(userId, viewerId)
@@ -241,15 +237,13 @@ class BunchSocialService(
             viewerId,
             request.targetBunchId
         )
-        val windowStartedAt = latest?.windowStartedAt
-            ?.takeIf { now.isBefore(it.plus(24, ChronoUnit.HOURS)) }
-            ?: now
+        val windowStartedAt = BunchReportPolicy.windowStartedAt(now, latest?.windowStartedAt)
         val acceptedCount = reports.countByReporterBunchIdAndTargetBunchIdAndWindowStartedAt(
             viewerId,
             request.targetBunchId,
             windowStartedAt
         )
-        if (acceptedCount >= 2) fail(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED)
+        BunchReportPolicy.requireAvailable(acceptedCount)
 
         val saved = reports.save(
             BunchProfileReport(

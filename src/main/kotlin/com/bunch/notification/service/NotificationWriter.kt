@@ -244,6 +244,82 @@ class NotificationWriter(
         )
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun socialCommentCreated(
+        bundle: Bundle,
+        sourceBunch: Bunch,
+        commentId: Long,
+        actorId: Long,
+        actorNickname: String,
+        content: String,
+        parentAuthorId: Long?,
+        parentBunchId: Long?,
+        now: Instant
+    ) {
+        val recipients = linkedMapOf<Long, Pair<Long, Boolean>>()
+        if (sourceBunch.id != bundle.bunchId) {
+            val participantIds = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+                .map { it.memberId }.toSet()
+            memberships.findActiveMembers(bundle.bunchId)
+                .filter { it.member.id in participantIds && it.member.id != actorId }
+                .forEach { recipients[it.member.id] = bundle.bunchId to false }
+        }
+        if (parentAuthorId != null && parentBunchId != null && parentAuthorId != actorId) {
+            val parentStillActive = memberships.findActiveMembers(parentBunchId)
+                .any { it.member.id == parentAuthorId }
+            if (parentStillActive) recipients[parentAuthorId] = parentBunchId to true
+        }
+        saveNotifications(recipients.toSortedMap().map { (recipientId, inbox) ->
+            Notification(
+                recipientMemberId = recipientId,
+                bunchId = inbox.first,
+                type = NotificationType.SOCIAL_COMMENT_CREATED,
+                dedupeKey = "SOCIAL_COMMENT_CREATED:$commentId",
+                title = if (inbox.second) "내 댓글에 답글이 달렸어요"
+                    else "${sourceBunch.name} 번치 ${actorNickname}님이 '${bundle.title}' 번들에 댓글을 남겼어요",
+                body = content,
+                target = NotificationTarget(
+                    kind = NotificationTargetKind.BUNDLE_COMMENTS,
+                    bunchId = inbox.first,
+                    bundleId = bundle.id,
+                    targetBunchId = bundle.bunchId,
+                    sourceBunchId = sourceBunch.id,
+                    commentId = commentId
+                ),
+                createdAt = now
+            )
+        })
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun bundleLiked(bundle: Bundle, sourceBunch: Bunch, actorId: Long) {
+        if (sourceBunch.id == bundle.bunchId) return
+        val participantIds = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+            .map { it.memberId }.toSet()
+        val now = clock.instant()
+        saveNotifications(memberships.findActiveMembers(bundle.bunchId)
+            .filter { it.member.id != actorId && it.member.id in participantIds }
+            .sortedBy { it.member.id }
+            .map {
+                Notification(
+                    recipientMemberId = it.member.id,
+                    bunchId = bundle.bunchId,
+                    type = NotificationType.BUNDLE_LIKED,
+                    dedupeKey = "BUNDLE_LIKED:${sourceBunch.id}:${bundle.id}",
+                    title = "${sourceBunch.name} 번치가 우리 번들을 좋아해요",
+                    body = bundle.title.ifBlank { "제목 미정" },
+                    target = NotificationTarget(
+                        kind = NotificationTargetKind.BUNDLE,
+                        bunchId = bundle.bunchId,
+                        bundleId = bundle.id,
+                        targetBunchId = bundle.bunchId,
+                        sourceBunchId = sourceBunch.id
+                    ),
+                    createdAt = now
+                )
+            })
+    }
+
     private fun saveNotifications(rows: List<Notification>) {
         val saved = notifications.saveAll(rows)
         pushJobs.enqueue(saved, clock.instant())
