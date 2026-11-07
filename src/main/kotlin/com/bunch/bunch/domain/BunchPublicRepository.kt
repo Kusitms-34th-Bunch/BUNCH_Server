@@ -3,43 +3,11 @@ package com.bunch.bunch.domain
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bunch.dto.BunchPublicBundleCover
 import com.bunch.bunch.dto.BunchPublicBundlePhoto
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
 import org.springframework.data.repository.query.Param
 
 interface BunchPublicRepository : Repository<Bundle, Long> {
-    @Query(
-        """
-        select bundle from Bundle bundle
-        where bundle.bunchId = :bunchId
-          and bundle.status = com.bunch.bundle.domain.BundleStatus.PUBLISHED
-          and (:includePrivate = true or bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC)
-        order by bundle.publishedAt desc, bundle.id desc
-        """
-    )
-    fun findPublishedBundles(
-        @Param("bunchId") bunchId: Long,
-        @Param("includePrivate") includePrivate: Boolean,
-        pageable: Pageable
-    ): Page<Bundle>
-
-    @Query(
-        """
-        select bundle from Bundle bundle
-        where bundle.bunchId = :bunchId
-          and bundle.id = :bundleId
-          and bundle.status = com.bunch.bundle.domain.BundleStatus.PUBLISHED
-          and (:includePrivate = true or bundle.visibility = com.bunch.bunch.domain.Visibility.PUBLIC)
-        """
-    )
-    fun findPublishedBundle(
-        @Param("bunchId") bunchId: Long,
-        @Param("bundleId") bundleId: Long,
-        @Param("includePrivate") includePrivate: Boolean
-    ): Bundle?
-
     @Query(
         """
         select new com.bunch.bunch.dto.BunchPublicBundleCover(photo.bundleId, asset.url)

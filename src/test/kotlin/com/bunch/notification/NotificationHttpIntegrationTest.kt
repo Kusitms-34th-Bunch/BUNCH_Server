@@ -115,13 +115,14 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(item.path("body").asText()).isEqualTo("${fixture.joinedNickname}님이 번치에 참여했어요.")
         assertThat(item.path("readAt").isNull).isTrue()
         assertThat(fieldNames(item.path("target"))).containsExactlyInAnyOrder(
-            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId"
+            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId", "sourceBunchId"
         )
         assertThat(item.path("target").path("kind").asText()).isEqualTo(NotificationTargetKind.MEMBERS.name)
         assertThat(item.path("target").path("bunchId").asLong()).isEqualTo(fixture.bunchId)
         assertThat(item.path("target").path("bundleId").isNull).isTrue()
         assertThat(item.path("target").path("noticeId").isNull).isTrue()
         assertThat(item.path("target").path("targetBunchId").isNull).isTrue()
+        assertThat(item.path("target").path("sourceBunchId").isNull).isTrue()
 
         val notificationId = item.path("id").asLong()
         val firstRead = readRequest(fixture.owner, fixture.bunchId, notificationId)

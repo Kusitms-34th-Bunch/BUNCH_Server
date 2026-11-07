@@ -14,7 +14,13 @@
 - 형식 오류는 `COMMON_001`(400), 본인 소유가 아니거나 없는 notification은 `RESOURCE_001`(404), session·가입 완료 오류는 기존 AUTH 오류를 사용한다.
 - 읽음·open에는 새 Idempotency-Key나 읽음 token을 요구하지 않는다. 업무 producer의 원래 request replay는 알림을 다시 만들지 않는다.
 
-`NotificationTarget`은 `kind,bunchId,bundleId?,noticeId?,targetBunchId?`를 가진다.
+`NotificationTarget`은 `kind,bunchId,bundleId?,noticeId?,targetBunchId?,sourceBunchId?`를 가진다.
+소셜 번들·댓글 알림의 `bunchId`는 수신 inbox 번치, `targetBunchId`는 실제 번들 소유 번치,
+`sourceBunchId`는 좋아요·댓글·답글 행동 번치다. 과거 JSON에서 없는 필드는 null로 읽는다.
+답글 수신 inbox가 번들 소유 번치와 달라도 공개 범위를 충족하면 이동할 수 있다.
+open은 서버 current 번치, 푸시 전송은 저장된 수신 inbox 번치 문맥으로 번들 공개 범위와
+차단·신고·운영 숨김을 재검사한다. 행동 번치의 차단·신고·숨김도 반영하며, open 불가여도 읽음은 유지한다.
+푸시를 받을 때 사용자가 다른 번치를 선택하고 있다는 이유만으로 적격한 inbox 알림을 취소하지 않는다.
 kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_LIST`, `BUNDLE`, `BUNDLE_COMMENTS`,
 `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다. 저장된 target 자체는 접근 권한의 증거가 아니다.
 저장된 `bunchId`는 inbox 행의 소유·읽음 범위를 식별할 뿐, 프로필을 여는 current 명의나
@@ -67,6 +73,13 @@ open은 먼저 수신 회원이 소유한 해당 inbox 행의 읽음을 저장�
 목록 target은 현재 번치 소속을 확인하고, ROLE_PERMISSIONS는 별도 조회 API 없이 여는 static
 target이다.
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
+`BUNDLE`·`BUNDLE_COMMENTS` 발행 알림의 open은 대상 번들 소유 번치에 대해 수신 회원의
+활성 미확인 AccessNotice를 먼저 확인한다. 소유 번치는 `target.targetBunchId`를 우선하고,
+값이 없으면 수신 inbox의 `target.bunchId`를 fallback으로 사용한다. 해당 notice가 있으면
+`available:false,target:null`을 반환하지만 먼저 저장한 `readAt`은 커밋한다. 만료되었거나
+삭제된 notice는 active notice로 보지 않으며, 수신 회원이 해당 번치에 다시 ACTIVE로 참여한
+경우에도 open을 막지 않는다. 푸시 `canDeliver`는 수신자별 AccessNotice 검사를 하지 않고
+저장된 inbox 번치 문맥으로만 발행 번들 접근을 재검사한다.
 `OTHER_BUNCH_PROFILE`은 원래 inbox `bunchId`의 Membership이 이미 종료됐어도 open을 막지 않는다.
 서버가 계산한 현재 번치(남은 ACTIVE 소속의 fallback 포함)를 명의로 사용하고, ACTIVE 소속이
 0개면 `currentBunchId:null`인 EXTERNAL 문맥으로 대상 프로필의 공개 정책을 적용한다. 원래

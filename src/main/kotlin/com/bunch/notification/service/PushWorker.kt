@@ -19,6 +19,7 @@ import com.bunch.notification.domain.push.PushJobRepository
 import com.bunch.notification.domain.push.PushJobStatus
 import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.ApnsResponse
+import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.dto.PushAttempt
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
@@ -45,6 +46,7 @@ class PushWorker(
     private val cipher: DeviceTokenCipher,
     private val apns: ApnsClient,
     private val clock: Clock,
+    private val publishedAccess: PublishedNotificationAccess,
     transactionManager: PlatformTransactionManager
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -152,8 +154,16 @@ class PushWorker(
             }
             NotificationTargetKind.BUNDLE.name, NotificationTargetKind.BUNDLE_COMMENTS.name -> {
                 val bundleId = (target["bundleId"] as? Number)?.toLong() ?: return false
-                val bundle = bundles.findById(bundleId).orElse(null)
-                bundle?.bunchId == job.bunchId && bundle.status == BundleStatus.PUBLISHED
+                publishedAccess.canDeliver(
+                    job.bunchId,
+                    NotificationTarget(
+                        kind = NotificationTargetKind.valueOf(kind),
+                        bunchId = job.bunchId,
+                        bundleId = bundleId,
+                        targetBunchId = (target["targetBunchId"] as? Number)?.toLong(),
+                        sourceBunchId = (target["sourceBunchId"] as? Number)?.toLong()
+                    )
+                )
             }
             NotificationTargetKind.OTHER_BUNCH_PROFILE.name -> {
                 val targetId = (target["targetBunchId"] as? Number)?.toLong() ?: return false
