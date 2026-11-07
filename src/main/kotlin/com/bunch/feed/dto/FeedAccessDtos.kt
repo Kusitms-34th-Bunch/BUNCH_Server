@@ -5,8 +5,7 @@ import com.bunch.bundle.domain.Bundle
 
 data class FeedViewer(
     val memberId: Long,
-    val currentBunchId: Long?,
-    val activeBunchIds: Set<Long>
+    val currentBunchId: Long?
 )
 
 data class FeedBundleInteraction(

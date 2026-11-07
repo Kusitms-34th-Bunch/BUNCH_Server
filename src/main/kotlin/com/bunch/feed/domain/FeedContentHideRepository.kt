@@ -19,13 +19,4 @@ interface FeedContentHideRepository : Repository<FeedContentHide, Long> {
         nativeQuery = true
     )
     fun hideForReporter(kind: FeedContentKind, targetId: Long, reporterBunchId: Long): Int
-
-    @Query(
-        """
-        select hide.targetId from FeedContentHide hide
-        where hide.targetKind = :kind and hide.targetId in :targetIds
-          and (hide.reporterBunchId is null or hide.reporterBunchId = :currentBunchId)
-        """
-    )
-    fun hiddenTargetIds(kind: FeedContentKind, targetIds: Collection<Long>, currentBunchId: Long?): Set<Long>
 }
