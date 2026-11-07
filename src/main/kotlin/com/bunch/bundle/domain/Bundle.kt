@@ -60,6 +60,9 @@ class Bundle(
     @Column(name = "date_version", nullable = false)
     var dateVersion: Long = 0,
 
+    @Column(name = "location_version", nullable = false)
+    var locationVersion: Long = 0,
+
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
 

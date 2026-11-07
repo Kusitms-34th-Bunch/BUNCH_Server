@@ -84,6 +84,8 @@ class PushPayloadFactory(
         target.bundleId?.let { put("bundleId", it) }
         target.noticeId?.let { put("noticeId", it) }
         target.targetBunchId?.let { put("targetBunchId", it) }
+        target.sourceBunchId?.let { put("sourceBunchId", it) }
+        target.commentId?.let { put("commentId", it) }
     }
 
     private fun shorten(value: String): String {

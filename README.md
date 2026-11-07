@@ -177,7 +177,8 @@ STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
 번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
 상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션의 `DRAFT` 저장은
 단독 사용자도 먼저 해당 target lease를 STOMP로 획득한 뒤, 현재 `leaseToken`과 최신
-`expectedVersion`을 REST 요청에 함께 보내야 한다. 편집권 target은 `TITLE`, `DATE`,
+`expectedVersion`을 REST 요청에 함께 보내야 한다. 장소 목록은 [장소 계약](docs/specs/bundle-locations.md)의
+전용 요청을 사용하며 같은 편집권 정책을 따른다. 편집권 target은 `TITLE`, `DATE`, `LOCATION`,
 `PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
 private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
 서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
