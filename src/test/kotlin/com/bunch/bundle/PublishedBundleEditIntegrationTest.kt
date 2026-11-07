@@ -43,6 +43,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
 import org.springframework.context.event.EventListener
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
@@ -54,6 +55,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.event.TransactionalEventListener
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -200,9 +203,12 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertThat(photos.existsById(before.photos.first().photoId!!)).isTrue()
         assertThat(recorder.edits).hasSize(1)
         assertThat(recorder.edits.single().revision).isEqualTo(saved.revision)
+        // Compare committed values: PostgreSQL rounds the response's nanoseconds to microseconds.
+        val persisted = snapshot(f)
         val same = save(f, edit(saved))
         assertThat(same.revision).isEqualTo(saved.revision)
-        assertThat(same.updatedAt).isEqualTo(saved.updatedAt)
+        assertThat(same).isEqualTo(persisted)
+        assertThat(snapshot(f)).isEqualTo(persisted)
         assertThat(recorder.edits).hasSize(1)
         assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, request) }
     }
@@ -274,6 +280,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     fun `late photo insert failure rolls back location changes removed photos and edited fields`() {
         val f = fixture(2)
         val initial = save(f, edit(snapshot(f)).copy(locations = listOf(place("original", 0))))
+        val persisted = snapshot(f)
         val addition = photo(f.bunchId)
         recorder.edits.clear()
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
@@ -281,8 +288,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             save(f, edit(initial).copy(title = "should roll back", photos = listOf(
                 PublishedBundlePhotoInput(photoId = addition.id, caption = "added")),
                 locations = listOf(place("replacement", 0))))
-        }.isNotNull()
-        assertThat(snapshot(f)).isEqualTo(initial)
+        }.rootCause().hasMessageContaining("injected bunch write failure")
+        assertThat(snapshot(f)).isEqualTo(persisted)
         assertThat(recorder.edits).isEmpty()
         assertThat(assets.existsById(initial.photos.first().imageAssetId)).isTrue()
         assertThat(photos.existsById(initial.photos.first().photoId!!)).isTrue()
@@ -293,12 +300,13 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val f = fixture()
         val initial = save(f, edit(snapshot(f)).copy(locations = listOf(place("a", 0), place("b", 1))))
         val reordered = save(f, edit(initial).copy(locations = listOf(place("b", 0), place("a", 1))))
+        val persisted = snapshot(f)
         assertThat(reordered.locations.map { it.id }).containsExactly(initial.locations[1].id, initial.locations[0].id)
         assertThat(recorder.removals).isEmpty()
         recorder.rejectRemoval = true
         assertThatThrownBy { save(f, edit(reordered).copy(title = "rollback", locations = emptyList())) }
             .hasMessageContaining("source listener failure")
-        assertThat(snapshot(f)).isEqualTo(reordered)
+        assertThat(snapshot(f)).isEqualTo(persisted)
         recorder.rejectRemoval = false
         val saved = save(f, edit(reordered).copy(locations = listOf(place("a", 0))))
         assertThat(saved.locations.single().id).isEqualTo(initial.locations[0].id)
@@ -717,14 +725,15 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     fun `actual pin removal rolls back with a subsequent failed photo insert in atomic published edit`() {
         val f = fixture()
         val initial = save(f, edit(snapshot(f)).copy(locations = listOf(place("source", 0))))
+        val persisted = snapshot(f)
         val pin = pins.pinBundleLocation(f.owner, f.id, initial.locations.single().id)
         val addition = photo(f.bunchId)
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
         assertThatThrownBy {
             save(f, edit(initial).copy(title = "failed edit", locations = emptyList(),
                 photos = listOf(PublishedBundlePhotoInput(photoId = addition.id, caption = ""))))
-        }.isNotNull()
-        assertThat(snapshot(f)).isEqualTo(initial)
+        }.rootCause().hasMessageContaining("injected bunch write failure")
+        assertThat(snapshot(f)).isEqualTo(persisted)
         val preserved = pinRows.findById(pin.id).orElseThrow()
         assertThat(preserved.sourceBundleId).isEqualTo(f.id)
         assertThat(preserved.sourceLocationId).isEqualTo(initial.locations.single().id)
@@ -826,6 +835,14 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     class EventsConfiguration {
         @Bean
         fun editRecorder() = EditRecorder()
+
+        @Bean
+        @Primary
+        // Reproduce Linux clock precision even when the host clock only supplies microseconds.
+        fun nanosecondClock(): Clock = Clock.offset(
+            Clock.tick(Clock.systemUTC(), Duration.ofNanos(1_000)),
+            Duration.ofNanos(789)
+        )
     }
 
     class EditRecorder {
