@@ -5,6 +5,7 @@ enum class BundleEventType {
     TITLE,
     VISIBILITY,
     DATE,
+    LOCATION,
     COMMENT,
     CAPTION,
     PARTICIPANTS,

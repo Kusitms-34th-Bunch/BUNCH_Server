@@ -276,7 +276,7 @@ class BundleLeaseService(
 
     private fun normalizeTarget(target: String): String {
         val value = target.trim()
-        if (value == TITLE || value == DATE) return value
+        if (value == TITLE || value == DATE || value == LOCATION) return value
         if (value.startsWith(PHOTO_PREFIX)) {
             val photoId = value.removePrefix(PHOTO_PREFIX).toLongOrNull()
             if (photoId != null && photoId > 0) return photoTarget(photoId)
@@ -318,6 +318,7 @@ class BundleLeaseService(
     private companion object {
         const val TITLE = "TITLE"
         const val DATE = "DATE"
+        const val LOCATION = "LOCATION"
         const val PHOTO_PREFIX = "PHOTO:"
     }
 }
