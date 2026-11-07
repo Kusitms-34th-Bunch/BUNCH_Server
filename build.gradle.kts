@@ -41,7 +41,10 @@ kotlin {
     jvmToolchain(21)
     compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") }
 }
-tasks.withType<Test> { useJUnitPlatform() }
+tasks.withType<Test> {
+    useJUnitPlatform()
+    systemProperty("spring.test.context.cache.maxSize", "16")
+}
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveFileName.set("app.jar")
 }
