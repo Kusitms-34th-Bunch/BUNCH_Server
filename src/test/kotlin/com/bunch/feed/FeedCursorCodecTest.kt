@@ -15,7 +15,7 @@ import java.time.Instant
 class FeedCursorCodecTest {
     private val codec = FeedCursorCodec(jacksonObjectMapper().findAndRegisterModules())
     private val now = Instant.parse("2026-11-07T12:34:56.123456Z")
-    private val viewer = FeedViewer(1, 2, setOf(2, 3))
+    private val viewer = FeedViewer(1, 2)
     private val membership = "a".repeat(64)
     private val following = "b".repeat(64)
     private val cursor = FeedCursor(

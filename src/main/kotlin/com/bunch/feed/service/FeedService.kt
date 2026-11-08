@@ -3,7 +3,6 @@ package com.bunch.feed.service
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.service.BundleAttributionService
 import com.bunch.bundle.service.BundleLocationService
-import com.bunch.feed.domain.FeedCardRepository
 import com.bunch.feed.domain.FeedQueryRepository
 import com.bunch.feed.domain.FeedSegment
 import com.bunch.feed.dto.FeedAdvertisementItem
@@ -31,7 +30,6 @@ import java.time.temporal.ChronoUnit
 class FeedService(
     private val access: FeedAccessService,
     private val query: FeedQueryRepository,
-    private val cardRows: FeedCardRepository,
     private val cursors: FeedCursorCodec,
     private val attribution: BundleAttributionService,
     private val locations: BundleLocationService,
@@ -131,8 +129,8 @@ class FeedService(
     private fun cards(userId: Long, bundles: List<Bundle>): Map<Long, FeedBundleCard> {
         if (bundles.isEmpty()) return emptyMap()
         val ids = bundles.map { it.id }
-        val photos = cardRows.photos(ids).groupBy { it.bundleId }
-        val bunches = cardRows.bunches(bundles.map { it.bunchId }.distinct()).associateBy { it.id }
+        val photos = query.photos(ids).groupBy { it.bundleId }
+        val bunches = query.bunches(bundles.map { it.bunchId }.distinct()).associateBy { it.id }
         val people = attribution.publishedAll(bundles)
         val places = locations.listForBundles(ids)
         val likeCounts = likes.summaries(userId, ids)
