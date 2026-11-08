@@ -15,6 +15,7 @@ import com.bunch.bundle.domain.BundleComment
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleCommentRepository
 import com.bunch.bundle.domain.BundleParticipantRepository
+import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.AccountStatus
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 class BunchPublicService(
     private val access: BunchSocialAccessService,
+    private val feedAccess: FeedAccessService,
     private val publicRepository: BunchPublicRepository,
     private val memberships: BunchMembershipRepository,
     private val participants: BundleParticipantRepository,
@@ -49,9 +51,7 @@ class BunchPublicService(
         size: Int
     ): BunchSocialPage<BunchPublicBundleCard> {
         val pageable = pageable(page, size)
-        val target = access.target(userId, targetId, requireContent = true)
-        val internal = access.current(userId)?.bunch?.id == target.id
-        val result = publicRepository.findPublishedBundles(target.id, internal, pageable)
+        val result = feedAccess.publishedBundles(userId, targetId, pageable)
         val coverImageUrls = if (result.content.isEmpty()) {
             emptyMap()
         } else {
@@ -78,9 +78,8 @@ class BunchPublicService(
     ): BunchPublicBundleDetail {
         positive(bundleId)
         val target = access.target(userId, targetId, requireContent = true)
-        val internal = access.current(userId)?.bunch?.id == target.id
-        val bundle = publicRepository.findPublishedBundle(target.id, bundleId, internal)
-            ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
+        val bundle = feedAccess.readPublishedBundle(userId, bundleId)
+        if (bundle.bunchId != target.id) throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
         val photos = publicRepository.findBundlePhotos(bundle.id)
         val participantRows = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
         val commentRows = comments.findAllByBundleIdOrderByIdAsc(bundle.id)
