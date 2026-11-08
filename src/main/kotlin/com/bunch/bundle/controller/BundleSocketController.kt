@@ -114,7 +114,7 @@ class BundleSocketController(
             fail(ErrorCode.INVALID_INPUT)
         }
         when (type) {
-            BundleActivityType.COMMENT -> access.requireCommentAuthor(actor.memberId, bundle)
+            BundleActivityType.COMMENT -> access.requireParticipant(actor.memberId, bundle)
             BundleActivityType.VIEW -> Unit
         }
         val event = BundleActivityEvent(

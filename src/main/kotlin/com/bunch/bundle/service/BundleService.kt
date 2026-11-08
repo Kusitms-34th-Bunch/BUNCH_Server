@@ -135,10 +135,9 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
-        if (bundle.status == BundleStatus.DRAFT) leases.requireLease(bundle, actor, "TITLE", request.leaseToken)
+        leases.requireLease(bundle, actor, "TITLE", request.leaseToken)
         version(bundle.titleVersion, request.expectedVersion, mapOf("value" to bundle.title))
         val value = validateText { BundleText.title(request.value) }
-        if (bundle.status == BundleStatus.PUBLISHED && value.isBlank()) fail(ErrorCode.INVALID_INPUT)
         if (bundle.title != value) {
             bundle.title = value
             bundle.titleVersion++
@@ -181,7 +180,7 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
-        if (bundle.status == BundleStatus.DRAFT) leases.requireLease(bundle, actor, "DATE", request.leaseToken)
+        leases.requireLease(bundle, actor, "DATE", request.leaseToken)
         version(bundle.dateVersion, request.expectedVersion, mapOf("value" to bundle.date))
         if (request.value?.isAfter(LocalDate.now(ZoneId.of("Asia/Seoul"))) == true) fail(ErrorCode.INVALID_INPUT)
         if (bundle.date != request.value) {
@@ -205,11 +204,10 @@ class BundleService(
     ): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, request.mode)
-        access.requireCommentAuthor(actor.memberId, bundle)
+        access.requireParticipant(actor.memberId, bundle)
         val existing = comments.findByBundleIdAndMemberId(id, actor.memberId)
         version(existing?.version ?: 0, request.expectedVersion, mapOf("value" to (existing?.content ?: "")))
         val value = validateText { BundleText.comment(request.value) }
-        if (bundle.status == BundleStatus.PUBLISHED && value.isBlank()) fail(ErrorCode.INVALID_INPUT)
         if (value != (existing?.content ?: "")) {
             val row = existing ?: comments.save(BundleComment(bundleId = id, memberId = actor.memberId))
             row.content = value
@@ -217,7 +215,7 @@ class BundleService(
             row.updatedAt = Instant.now()
             changed(bundle, requestId, BundleEventType.COMMENT, commentResponse(row))
             recordActivity(bundle, actor.memberId, comment = true)
-            if (bundle.status == BundleStatus.DRAFT && value.isNotBlank()) {
+            if (value.isNotBlank()) {
                 participants.findByBundleIdAndMemberId(id, actor.memberId)?.let {
                     if (it.remindersCancelledAt == null) it.remindersCancelledAt = clock.instant()
                     pushJobs.cancelCommentReminderForMember(id, actor.memberId)
@@ -239,9 +237,7 @@ class BundleService(
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
         val photo = bundlePhoto(id, photoId)
-        if (bundle.status == BundleStatus.DRAFT) {
-            leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
-        }
+        leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
         version(photo.captionVersion, request.expectedVersion, mapOf(
             "value" to photo.caption,
             "bundlePhotoId" to photoId
@@ -327,9 +323,7 @@ class BundleService(
         }
         val removed = current.filter { it.id in request.removeBundlePhotoIds }
         if (removed.any { it.photoId in request.addPhotoIds }) fail(ErrorCode.INVALID_INPUT)
-        if (bundle.status == BundleStatus.DRAFT) {
-            removed.forEach { leases.rejectForeignPhoto(id, it.id, actor) }
-        }
+        removed.forEach { leases.rejectForeignPhoto(id, it.id, actor) }
         val kept = current.filterNot { it.id in request.removeBundlePhotoIds }
         val additions = request.addPhotoIds.filterNot { photoId -> kept.any { it.photoId == photoId } }
         if (kept.size + additions.size !in 1..20) fail(ErrorCode.BUNDLE_PHOTO_CONFLICT, content(bundle))
@@ -346,7 +340,7 @@ class BundleService(
         final.forEachIndexed { index, photo -> photo.position = index }
         if (removed.isNotEmpty() || selected.isNotEmpty()) {
             changed(bundle, key.toString(), BundleEventType.PHOTOS, photoChanges(bundle))
-            if (bundle.status == BundleStatus.DRAFT && selected.isNotEmpty()) {
+            if (selected.isNotEmpty()) {
                 notifications.draftActivity(actor.memberId, bundle, key.toString(), selected.size)
             }
             notifyReady(bundle, actor.memberId)
@@ -368,7 +362,7 @@ class BundleService(
         val bundle = editable(actor, bunchId, id, request.mode)
         val current = photoRows(id)
         val target = current.firstOrNull { it.id == photoId } ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-        if (bundle.status == BundleStatus.DRAFT) leases.rejectForeignPhoto(id, photoId, actor)
+        leases.rejectForeignPhoto(id, photoId, actor)
         if (request.previousBundlePhotoId == photoId || request.nextBundlePhotoId == photoId) {
             fail(ErrorCode.BUNDLE_PHOTO_CONFLICT, photoChanges(bundle))
         }

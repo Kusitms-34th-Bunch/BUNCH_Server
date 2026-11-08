@@ -107,10 +107,6 @@ class BundleAccessService(
         if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
     }
 
-    fun requireCommentAuthor(userId: Long, bundle: Bundle) {
-        requireParticipant(userId, bundle)
-    }
-
     fun requireDraftManager(userId: Long, bundle: Bundle) {
         requireParticipant(userId, bundle)
         if (bundle.createdBy != userId && !isAdministrator(userId, bundle.bunchId)) fail(ErrorCode.FORBIDDEN)
