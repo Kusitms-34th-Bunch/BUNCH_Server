@@ -1,5 +1,9 @@
 # 번들 REST·STOMP 클라이언트 계약
 
+장소 목록의 REST·LOCATION lease·이벤트·snapshot·내부 일괄 편집/콕 연계는
+[장소 목록 계약](bundle-locations.md)을 따른다. `BundleSnapshot`에 `locations`와
+`locationVersion`이 추가되며 기존 발행 조건에 장소 필수 조건은 추가하지 않는다.
+
 번들 생성·공동 편집·발행 클라이언트가 사용하는 HTTP REST와 WebSocket/STOMP
 프로토콜을 정의한다. 번들 제품 정책은 [번들 Spec](bundle.md)을 따르고, 이 문서는
 서버에 실제 등록된 경로·DTO·상태·오류·실시간 메시지 형태를 고정한다.
@@ -109,6 +113,7 @@ client 식별자를 추가하지 않는다.
 | `titleVersion` | 제목 |
 | `visibilityVersion` | 공개 범위 |
 | `dateVersion` | 번들 날짜 |
+| `locationVersion` | 장소 목록 전체 |
 | `captionVersion` | 한 `BundlePhoto`의 캡션 |
 | `BundleCommentResponse.version` | 한 회원의 코멘트 |
 
@@ -201,6 +206,7 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 - 캡션은 NFC 정규화하며 최대 200 grapheme이다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
 
+장소 목록 lease target은 `LOCATION`이며 전용 저장 요청은 [장소 계약](bundle-locations.md)을 따른다.
 제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`, 캡션 lease target은
 `PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
 받지 않고 현재 회원·session·target·`leaseToken`·미만료 상태·`expectedVersion`을 같은
@@ -378,6 +384,8 @@ error.message = error.idempotency_conflict
 | `visibilityVersion` | `Long` | 공개 범위 버전 |
 | `date` | `LocalDate \| null` | 선택 날짜 |
 | `dateVersion` | `Long` | 날짜 버전 |
+| `locationVersion` | `Long` | 장소 목록 버전 |
+| `locations` | `BundleLocationResponse[]` | position 오름차순 최대 3개 장소 |
 | `revision` | `Long` | 저장된 내용 revision |
 | `photos` | `BundlePhotoResponse[]` | position 오름차순 사진 |
 | `participants` | `BundleParticipantResponse[]` | joinedAt 오름차순 참여자 |
@@ -624,10 +632,11 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 
 | `type` | `data` |
 | --- | --- |
-| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, publishedAt, photos, dateChips, participants, comments |
+| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, locations/locationVersion, publishedAt, photos, dateChips, participants, comments |
 | `TITLE` | `{value, version}` |
 | `VISIBILITY` | `{value, version}` |
 | `DATE` | `{value, version, dateChips}` |
+| `LOCATION` | `{locations: BundleLocationResponse[], version: locationVersion}` |
 | `COMMENT` | `BundleCommentResponse` |
 | `CAPTION` | `BundlePhotoResponse` |
 | `PARTICIPANTS` | `{participants, comments, removedCommentMemberIds?}` |
@@ -665,7 +674,7 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 }
 ```
 
-`target`은 `TITLE`, `DATE`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
+`target`은 `TITLE`, `DATE`, `LOCATION`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
 `connectionId`와 인증 principal의 `memberId`·`sessionId`를 사용한다. lease가 없거나
 만료·release된 경우 획득할 수 있다. 활성 lease를 재획득할 수 있는 경우는 같은
 `memberId`·`sessionId`·`connectionId`일 때뿐이며, 이때도 매번 새 token과 새

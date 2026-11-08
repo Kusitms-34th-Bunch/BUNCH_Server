@@ -29,6 +29,27 @@ data class BundleCommentResponse(
     val updatedAt: Instant
 )
 
+data class BundleLocationResponse(
+    val id: Long,
+    val provider: String,
+    val externalId: String,
+    val name: String,
+    val address: String,
+    val position: Int
+)
+
+data class BundleLocationState(
+    val bundleId: Long,
+    val revision: Long,
+    val locationVersion: Long,
+    val locations: List<BundleLocationResponse>
+)
+
+data class BundleLocationChange(
+    val changed: Boolean,
+    val locations: List<BundleLocationResponse>
+)
+
 data class BundlePermissions(
     val administrator: Boolean,
     val creator: Boolean,
@@ -59,7 +80,9 @@ data class BundleSnapshot(
     val leases: List<LeaseState>,
     val createdAt: Instant,
     val updatedAt: Instant,
-    val publishedAt: Instant?
+    val publishedAt: Instant?,
+    val locationVersion: Long,
+    val locations: List<BundleLocationResponse>
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
