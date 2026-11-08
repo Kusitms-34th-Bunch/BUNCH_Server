@@ -6,6 +6,7 @@ import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.social.domain.SocialCommentRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional
 class PublishedNotificationAccess(
     private val feedAccess: FeedAccessService,
     private val repository: FeedAccessRepository,
+    private val comments: SocialCommentRepository,
     private val accessNotices: BunchAccessNoticeService
 ) {
     fun canOpen(memberId: Long, target: NotificationTarget): Boolean {
@@ -35,6 +37,10 @@ class PublishedNotificationAccess(
         val bundle = repository.findVisibleBundle(viewerBunchId, bundleId) ?: return false
         val ownerBunchId = target.targetBunchId ?: target.bunchId
         if (bundle.bunchId != ownerBunchId) return false
+        if (target.commentId != null) {
+            val comment = comments.visible(bundleId, target.commentId, viewerBunchId) ?: return false
+            if (comment.deletedAt != null) return false
+        }
         val sourceBunchId = target.sourceBunchId ?: return true
         return sourceBunchId in repository.visibleBunchIds(viewerBunchId, listOf(sourceBunchId))
     }

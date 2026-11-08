@@ -7,6 +7,7 @@ import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.notification.domain.NotificationTargetKind
+import com.bunch.social.domain.SocialCommentRepository
 import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.service.PublishedNotificationAccess
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -22,7 +23,7 @@ class PublishedNotificationAccessTest {
         val feedAccess = mock(FeedAccessService::class.java)
         val repository = mock(FeedAccessRepository::class.java)
         val notices = mock(BunchAccessNoticeService::class.java)
-        val access = PublishedNotificationAccess(feedAccess, repository, notices)
+        val access = PublishedNotificationAccess(feedAccess, repository, mock(SocialCommentRepository::class.java), notices)
         val target = NotificationTarget(NotificationTargetKind.BUNDLE, bunchId = 2, targetBunchId = 3)
         `when`(feedAccess.viewer(1)).thenReturn(FeedViewer(1, 2))
 
