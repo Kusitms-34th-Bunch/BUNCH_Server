@@ -10,6 +10,9 @@ import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.PublishBundleRequest
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.CreateBundleRequest
+import com.bunch.bundle.dto.BundleLocationInput
+import com.bunch.bundle.dto.BundleLocationsRequest
+import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -54,6 +57,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     private var port: Int = 0
 
     @Autowired private lateinit var bundles: BundleService
+    @Autowired private lateinit var locations: BundleLocationService
     @Autowired private lateinit var tokenProvider: TokenProvider
     @Autowired private lateinit var sessions: RefreshTokenRepository
     @Autowired private lateinit var mapper: ObjectMapper
@@ -412,6 +416,55 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val snapshot = getSnapshot(fixture, fixture.guest)
         assertThat(snapshot.path("visibility").asText()).isEqualTo("PRIVATE")
         assertThat(snapshot.path("revision").asLong()).isEqualTo(fixture.revision + 1)
+    }
+
+    @Test
+    fun `LOCATION lease delivers committed ordered locations and reconnect snapshot with stable IDs`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        owner.send(command(fixture, "lease/acquire"), mapOf("target" to "LOCATION"))
+        val grant = owner.json { it.path("type").asText() == "LEASE_GRANTED" }
+        val token = grant.path("data").path("token").asText()
+        val publicLease = guest.json { it.path("type").asText() == "LEASES" }
+        assertThat(publicLease.toString()).doesNotContain("token", "sessionId", "connectionId")
+        assertThat(publicLease.path("data").path("states").single().path("target").asText()).isEqualTo("LOCATION")
+        guest.send(command(fixture, "lease/acquire"), mapOf("target" to "LOCATION"))
+        assertThat(guest.json { it.path("type").asText() == "COMMAND_REJECTED" }
+            .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
+        val requestId = UUID.randomUUID().toString()
+        val transaction = TransactionTemplate(transactionManager)
+        val saved = transaction.execute {
+            val value = locations.saveDraft(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+                BundleLocationsRequest(listOf(
+                    BundleLocationInput("kakao", "a", "애월", "제주", 0),
+                    BundleLocationInput("kakao", "b", "한담", "제주", 1)
+                ), 0, UUID.fromString(token)), requestId)
+            guest.assertNoEvent("LOCATION")
+            value
+        }!!
+        val event = guest.json { it.path("type").asText() == "LOCATION" }
+        assertThat(event.path("revision").asLong()).isEqualTo(saved.revision)
+        assertThat(event.path("requestId").asText()).isEqualTo(requestId)
+        assertThat(event.path("data").path("version").asLong()).isEqualTo(1)
+        assertThat(event.path("data").path("locations").map { it.path("externalId").asText() })
+            .containsExactly("a", "b")
+        transaction.executeWithoutResult { tx ->
+            locations.saveDraft(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+                BundleLocationsRequest(emptyList(), 1, UUID.fromString(token)), "rollback-location")
+            tx.setRollbackOnly()
+        }
+        guest.assertNoEvent("LOCATION")
+        guest.close()
+        val reconnected = connect(fixture.guest)
+        subscribe(reconnected, fixture)
+        val snapshot = getSnapshot(fixture, fixture.guest)
+        assertThat(snapshot.path("locations").map { it.path("id").asLong() })
+            .containsExactlyElementsOf(saved.locations.map { it.id })
+        assertThat(snapshot.path("locationVersion").asLong()).isEqualTo(1)
+        assertThat(snapshot.path("revision").asLong()).isEqualTo(saved.revision)
     }
 
     private fun fixture(): Fixture {
