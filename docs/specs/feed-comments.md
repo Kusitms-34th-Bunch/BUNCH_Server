@@ -56,10 +56,10 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 
 `SocialCommentService.counts(userId, bundleIds): Map<Long, Long>`은 최대500개를 받아
 상세 접근 가능한 번들만 집계하고 0도 반환한다. 피드 전용 ACTIVE 소속 제외는 하지 않는다.
-`SocialCommentService.reportTarget(userId, bundleId, commentId)`는 F 전용으로 자기댓글을
+`SocialCommentService.requireReportable(userId, bundleId, commentId)`는 F 전용으로 자기댓글을
 거부하고 댓글의 reporter 숨김만 무시해 재신고를 허용한다. 번들 접근·작성 번치 차단/프로필신고·
-전역 운영 숨김과 원댓글 숨김은 계속 확인한다. 반환은 id/bundleId/authorMemberId/actingBunchId/parentId.
-신고 저장·quota는 F 소유이며 이 메서드는 본문 조회에 사용하지 않는다.
+전역 운영 숨김과 원댓글 숨김은 계속 확인한다. 성공 시 Unit을 반환하며 호출자는 검증된 입력 commentId로
+신고를 저장한다. 신고 저장·quota는 F 소유이며 이 메서드는 본문 조회에 사용하지 않는다.
 
 ## 알림
 
