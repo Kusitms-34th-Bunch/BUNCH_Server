@@ -122,6 +122,7 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(item.path("target").path("bundleId").isNull).isTrue()
         assertThat(item.path("target").path("noticeId").isNull).isTrue()
         assertThat(item.path("target").path("targetBunchId").isNull).isTrue()
+        assertThat(item.path("target").path("sourceBunchId").isNull).isTrue()
 
         val notificationId = item.path("id").asLong()
         val firstRead = readRequest(fixture.owner, fixture.bunchId, notificationId)
