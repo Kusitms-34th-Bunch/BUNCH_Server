@@ -13,6 +13,7 @@ import com.bunch.bundle.dto.BundleLocationChange
 import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.dto.BundleLocationResponse
 import com.bunch.bundle.dto.BundleLocationState
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.dto.BundleLocationsRequest
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException

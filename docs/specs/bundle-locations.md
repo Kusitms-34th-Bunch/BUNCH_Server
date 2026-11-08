@@ -104,7 +104,7 @@ CREATED/PUBLISHED 공통 content에도 locations/locationVersion을 포함한다
 새 키에는 새 ID를 발급하며 제거한 키를 다시 추가해도 이전 출처 ID를 재사용하지 않는다.
 
 편집으로 제거/교체할 장소가 있으면 **행 삭제 전**, 같은 트랜잭션에서
-`com.bunch.bundle.service.BundleLocationsRemovedEvent(bundleId, locationIds)`를 동기 발행한다.
+`com.bunch.bundle.dto.BundleLocationsRemovedEvent(bundleId, locationIds)`를 동기 발행한다.
 G(#92)는 동기 `@EventListener`와 MANDATORY 트랜잭션으로 이 ID를 source로 가진 콕만 삭제해야 한다.
 AFTER_COMMIT·비동기 listener는 사용하지 않는다. 다른 번들·광고 출처의 같은 장소 콕은 유지한다.
 listener 실패는 장소와 나머지 번들 편집을 함께 롤백시킨다.
