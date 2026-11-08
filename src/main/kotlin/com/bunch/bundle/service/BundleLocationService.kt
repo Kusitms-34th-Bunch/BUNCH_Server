@@ -13,6 +13,7 @@ import com.bunch.bundle.dto.BundleLocationChange
 import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.dto.BundleLocationResponse
 import com.bunch.bundle.dto.BundleLocationState
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.dto.BundleLocationsRequest
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
@@ -20,6 +21,7 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.place.domain.PlaceDetails
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
@@ -66,7 +68,7 @@ class BundleLocationService(
         return BundleLocationState(bundle.id, bundle.revision, bundle.locationVersion, result.locations)
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun get(userId: Long, bunchId: Long, bundleId: Long): BundleLocationState {
         // Internal draft access and public published access have separate policies.
         val bundle = bundles.findById(bundleId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }

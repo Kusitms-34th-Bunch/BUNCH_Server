@@ -32,6 +32,8 @@
 - `GET`: DRAFT는 가입 완료 ACTIVE 번치 멤버만 조회한다. PUBLISHED는
   `FeedAccessService.readPublishedBundle`의 공개·팔로우·차단·신고·운영 숨김을 매번 검사한다.
   가입 완료자는 소속 0개여도 공개 발행본을 조회할 수 있다. 경로 번치 불일치는 404다.
+  읽기 트랜잭션은 REPEATABLE_READ로 버전과 장소 목록을 같은 스냅샷에서 읽는다.
+  두 조회 사이에 일괄 편집이 커밋되어도 이전 버전과 새 장소를 섞어 반환하지 않는다.
 - `PUT`: **DRAFT 참여자만** 전체 목록을 교체한다. 삭제할 장소를 제외하고 전송하며 전체 삭제는 빈 목록이다.
   단독 편집도 STOMP의 `LOCATION` lease가 필요하다. `X-Request-Id`는 선택 UUID다.
   PUBLISHED는 OWNER라도 이 경로로 저장할 수 없고 `BUNDLE_002`로 거부한다.
@@ -102,7 +104,7 @@ CREATED/PUBLISHED 공통 content에도 locations/locationVersion을 포함한다
 새 키에는 새 ID를 발급하며 제거한 키를 다시 추가해도 이전 출처 ID를 재사용하지 않는다.
 
 편집으로 제거/교체할 장소가 있으면 **행 삭제 전**, 같은 트랜잭션에서
-`com.bunch.bundle.service.BundleLocationsRemovedEvent(bundleId, locationIds)`를 동기 발행한다.
+`com.bunch.bundle.dto.BundleLocationsRemovedEvent(bundleId, locationIds)`를 동기 발행한다.
 G(#92)는 동기 `@EventListener`와 MANDATORY 트랜잭션으로 이 ID를 source로 가진 콕만 삭제해야 한다.
 AFTER_COMMIT·비동기 listener는 사용하지 않는다. 다른 번들·광고 출처의 같은 장소 콕은 유지한다.
 listener 실패는 장소와 나머지 번들 편집을 함께 롤백시킨다.
