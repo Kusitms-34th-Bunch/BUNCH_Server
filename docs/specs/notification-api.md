@@ -73,6 +73,13 @@ open은 먼저 수신 회원이 소유한 해당 inbox 행의 읽음을 저장�
 목록 target은 현재 번치 소속을 확인하고, ROLE_PERMISSIONS는 별도 조회 API 없이 여는 static
 target이다.
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
+`BUNDLE`·`BUNDLE_COMMENTS` 발행 알림의 open은 대상 번들 소유 번치에 대해 수신 회원의
+활성 미확인 AccessNotice를 먼저 확인한다. 소유 번치는 `target.targetBunchId`를 우선하고,
+값이 없으면 수신 inbox의 `target.bunchId`를 fallback으로 사용한다. 해당 notice가 있으면
+`available:false,target:null`을 반환하지만 먼저 저장한 `readAt`은 커밋한다. 만료되었거나
+삭제된 notice는 active notice로 보지 않으며, 수신 회원이 해당 번치에 다시 ACTIVE로 참여한
+경우에도 open을 막지 않는다. 푸시 `canDeliver`는 수신자별 AccessNotice 검사를 하지 않고
+저장된 inbox 번치 문맥으로만 발행 번들 접근을 재검사한다.
 `OTHER_BUNCH_PROFILE`은 원래 inbox `bunchId`의 Membership이 이미 종료됐어도 open을 막지 않는다.
 서버가 계산한 현재 번치(남은 ACTIVE 소속의 fallback 포함)를 명의로 사용하고, ACTIVE 소속이
 0개면 `currentBunchId:null`인 EXTERNAL 문맥으로 대상 프로필의 공개 정책을 적용한다. 원래

@@ -10,7 +10,7 @@ import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.service.BundleLocationService
-import com.bunch.bundle.service.BundleLocationsRemovedEvent
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
 import com.bunch.feed.domain.FeedContentHideRepository
 import com.bunch.feed.domain.FeedContentKind

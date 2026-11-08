@@ -11,7 +11,7 @@
 
 | 메서드 | 반환·의미 |
 | --- | --- |
-| `viewer(userId: Long)` | `FeedViewer(memberId: Long, currentBunchId: Long?, activeBunchIds: Set<Long>)`. 활성·가입 완료 검증과 서버 현재 번치·전체 ACTIVE 소속 조회. 소속 0개는 null/빈 집합 |
+| `viewer(userId: Long)` | `FeedViewer(memberId: Long, currentBunchId: Long?)`. 활성·가입 완료 검증과 서버 현재 번치 조회. 피드의 모든 ACTIVE 소속 제외는 viewer에 소속 목록을 싣지 않고 DB `NOT EXISTS`로 적용하며, 소속 0개는 `currentBunchId:null` |
 | `requireActor(userId: Long)` | 현재 ACTIVE `BunchMembership`. 소속 0개는 `CURRENT_BUNCH_REQUIRED` |
 | `readPublishedBundle(userId: Long, bundleId: Long)` | 현재 번치·공개/팔로우·차단·신고/운영 숨김을 통과한 실제 `Bundle`. 피드 전용 소속 제외는 적용하지 않음 |
 | `requireInteraction(userId: Long, bundleId: Long)` | `FeedBundleInteraction(bundle: Bundle, actor: BunchMembership)`. 현재 ACTIVE 소속과 상세 접근을 함께 검증. 좋아요·댓글·장소 콕 등에서 사용 |
@@ -53,7 +53,7 @@ C는 발행 상세를 조립할 때 위 공통 검사를 연결하고 A의 `Bunc
 - `PUBLISHED_VISIBILITY`: 위 조건 + 별칭 `bundle`의 PUBLISHED 상태·현재 번치 내부/
   외부 PUBLIC 및 공개 번치/APPROVED 팔로우 검사. reporter-scoped 번들 숨김만 빠져 있으므로 일반 조회에 단독 사용 금지.
 - `PUBLISHED_ACCESS`: 위 조건 + 번들 운영/현재 번치 숨김 검사.
-- `FEED_EXCLUSIONS`: 별칭 `bunch`, 파라미터 `memberId: Long`의 모든 ACTIVE 소속 제외.
+- `FEED_EXCLUSIONS`: 별칭 `bunch`, 파라미터 `memberId: Long`의 모든 ACTIVE 소속을 DB `NOT EXISTS`로 제외.
 
 피드 페이지 조회는 실제 `Bundle bundle, Bunch bunch`에서 `bunch.id = bundle.bunchId`와
 `PUBLISHED_ACCESS AND FEED_EXCLUSIONS`를 **LIMIT/커서/count 이전**에 적용한다.
@@ -86,10 +86,7 @@ C는 발행 상세를 조립할 때 위 공통 검사를 연결하고 A의 `Bunc
 트랜잭션에서 호출한다. 재신고는 새 신고 ID를 만들지만 숨김 row는 중복하지 않는다. 실패 시 함께 롤백한다.
 이 writer는 신고 대상의 존재·권한·24시간 한도를 판정하지 않으며 신고 대신 단독 호출하지 않는다.
 
-`hiddenTargetIds(kind: FeedContentKind, targetIds: Collection<Long>, currentBunchId: Long?): Set<Long>`는
-전역 + 해당 신고 번치 숨김 ID를 반환하는 저장소 조회다. null current는 전역만 적용한다.
-대상 존재·작성자·부모 접근 검사가 아니며 빈 입력은 호출자가 바로 빈 집합으로 처리한다.
-페이지·집계는 같은 NOT EXISTS 조건을 자기 도메인의 실제 DB 쿼리에 넣어야 한다.
+페이지·집계는 전역·현재 신고 번치의 숨김을 제외하는 `NOT EXISTS` 조건을 자기 도메인의 실제 DB 쿼리에 넣어야 한다.
 
 ### 삭제·보존·참조 경계
 
