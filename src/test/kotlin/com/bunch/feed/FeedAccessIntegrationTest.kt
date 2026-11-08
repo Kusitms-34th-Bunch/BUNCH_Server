@@ -55,7 +55,6 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         val bundle = published(target, owner)
         val visitor = member()
         assertThat(access.viewer(visitor).currentBunchId).isNull()
-        assertThat(access.viewer(visitor).activeBunchIds).isEmpty()
         assertThat(access.visibleBundleIds(visitor, listOf(bundle))).containsExactly(bundle)
         assertThat(access.readPublishedBundle(visitor, bundle).id).isEqualTo(bundle)
         assertError(ErrorCode.CURRENT_BUNCH_REQUIRED) { access.requireInteraction(visitor, bundle) }
@@ -79,7 +78,6 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         selectCurrent(actor, second)
         val viewer = access.viewer(actor)
         assertThat(viewer.currentBunchId).isEqualTo(second)
-        assertThat(viewer.activeBunchIds).containsExactlyInAnyOrder(first, second)
         assertThat(access.visibleBundleIds(actor, listOf(firstBundle, secondBundle, otherBundle)))
             .containsExactly(otherBundle)
         assertThat(access.visibleBundleIds(actor, listOf(firstBundle, secondBundle), forFeed = false))
@@ -255,7 +253,10 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         hideGlobally(FeedContentKind.BUNDLE, draft)
         jdbc.update("DELETE FROM bundles WHERE id = ?", draft)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { access.readPublishedBundle(owner, draft) }
-        assertThat(hides.hiddenTargetIds(FeedContentKind.BUNDLE, listOf(draft), null)).containsExactly(draft)
+        assertThat(jdbc.queryForList(
+            "SELECT target_id FROM feed_content_hides WHERE target_kind = 'BUNDLE' AND reporter_bunch_id IS NULL",
+            Long::class.java
+        )).containsExactly(draft)
         assertError(ErrorCode.INVALID_INPUT) { access.readPublishedBundle(owner, 0) }
         assertError(ErrorCode.INVALID_INPUT) { access.visibleBundleIds(owner, listOf(-1)) }
         assertError(ErrorCode.INVALID_INPUT) { access.visibleBundleIds(owner, List(501) { 1L }) }
@@ -294,7 +295,10 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
                 error("report failed")
             }
         }.isInstanceOf(IllegalStateException::class.java)
-        assertThat(hides.hiddenTargetIds(FeedContentKind.COMMENT, listOf(100), viewer)).isEmpty()
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM feed_content_hides WHERE target_kind = 'COMMENT' AND target_id = 100",
+            Long::class.java
+        )).isZero()
         assertThatThrownBy { hides.hideForReporter(FeedContentKind.COMMENT, 100, viewer) }
             .isInstanceOf(IllegalTransactionStateException::class.java)
     }
@@ -310,17 +314,30 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         TransactionTemplate(transactionManager).executeWithoutResult {
             hides.hideForReporter(FeedContentKind.COMMENT, 101, viewer)
             hides.hideForReporter(FeedContentKind.COMMENT, 101, other)
+            hides.hideForReporter(FeedContentKind.BUNDLE, 101, viewer)
         }
-        assertThat(hides.hiddenTargetIds(FeedContentKind.COMMENT, listOf(100, 101), null)).containsExactly(100)
-        assertThat(hides.hiddenTargetIds(FeedContentKind.COMMENT, listOf(100, 101), viewer))
-            .containsExactlyInAnyOrder(100, 101)
-        assertThat(hides.hiddenTargetIds(FeedContentKind.BUNDLE, listOf(100, 101), viewer)).isEmpty()
+        assertThat(jdbc.queryForList(
+            "SELECT target_id FROM feed_content_hides WHERE target_kind = 'COMMENT' AND reporter_bunch_id IS NULL",
+            Long::class.java
+        )).containsExactly(100L)
+        assertThat(jdbc.queryForList(
+            "SELECT reporter_bunch_id FROM feed_content_hides WHERE target_kind = 'COMMENT' AND target_id = 101",
+            Long::class.java
+        )).containsExactlyInAnyOrder(viewer, other)
+        assertThat(jdbc.queryForList(
+            "SELECT reporter_bunch_id FROM feed_content_hides WHERE target_kind = 'BUNDLE' AND target_id = 101",
+            Long::class.java
+        )).containsExactly(viewer)
         assertThatThrownBy { hideGlobally(FeedContentKind.BUNDLE, 0) }
             .isInstanceOf(DataIntegrityViolationException::class.java)
         jdbc.update("DELETE FROM bunches WHERE id = ?", viewer)
         assertThat(count("feed_content_hides")).isEqualTo(2)
-        assertThat(hides.hiddenTargetIds(FeedContentKind.COMMENT, listOf(100, 101), other))
-            .containsExactlyInAnyOrder(100, 101)
+        assertThat(jdbc.queryForList(
+            "SELECT target_id, reporter_bunch_id FROM feed_content_hides ORDER BY target_id"
+        )).containsExactly(
+            mapOf("target_id" to 100L, "reporter_bunch_id" to null),
+            mapOf("target_id" to 101L, "reporter_bunch_id" to other)
+        )
     }
 
     private fun publicBunch(actor: Long): Long = create(actor).id.also {

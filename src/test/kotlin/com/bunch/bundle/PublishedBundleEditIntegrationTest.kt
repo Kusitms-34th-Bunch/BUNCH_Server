@@ -12,7 +12,7 @@ import com.bunch.bunch.domain.Visibility
 import com.bunch.bunch.service.BunchPublicService
 import com.bunch.bundle.domain.*
 import com.bunch.bundle.dto.*
-import com.bunch.bundle.service.BundleLocationsRemovedEvent
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
 import com.bunch.bundle.service.BundleAttributionService
 import com.bunch.place.domain.PinnedPlaceRepository

@@ -12,6 +12,7 @@ import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.dto.BundleLocationState
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.dto.BundleLocationsRequest
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.BundleVisibilityRequest
@@ -19,7 +20,6 @@ import com.bunch.bundle.dto.PublishBundleRequest
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleLocationService
-import com.bunch.bundle.service.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
