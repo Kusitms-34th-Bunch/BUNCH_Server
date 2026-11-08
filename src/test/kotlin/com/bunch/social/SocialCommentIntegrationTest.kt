@@ -28,6 +28,7 @@ import com.bunch.social.dto.SocialCommentItem
 import com.bunch.social.service.SocialCommentService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.AfterEach
@@ -537,14 +538,14 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val actor = member()
         publicBunch(actor)
         val root = write(actor, bundle.id)
-        assertError(ErrorCode.FORBIDDEN) { service.reportTarget(actor, bundle.id, root.id) }
+        assertError(ErrorCode.FORBIDDEN) { service.requireReportable(actor, bundle.id, root.id) }
         hide("COMMENT", root.id, target)
-        assertThat(service.reportTarget(owner, bundle.id, root.id).authorMemberId).isEqualTo(actor)
+        assertThatCode { service.requireReportable(owner, bundle.id, root.id) }.doesNotThrowAnyException()
         hide("COMMENT", root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.reportTarget(owner, bundle.id, root.id) }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
         jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
         service.delete(actor, bundle.id, root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.reportTarget(owner, bundle.id, root.id) }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
     }
 
     @Test
