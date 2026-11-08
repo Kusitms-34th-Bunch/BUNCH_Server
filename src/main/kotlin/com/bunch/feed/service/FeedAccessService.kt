@@ -1,7 +1,6 @@
 package com.bunch.feed.service
 
 import com.bunch.bunch.domain.BunchMembership
-import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.bunch.service.BunchSocialAccessService
@@ -21,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional
 @Transactional(readOnly = true)
 class FeedAccessService(
     private val socialAccess: BunchSocialAccessService,
-    private val memberships: BunchMembershipRepository,
     private val bunches: BunchRepository,
     private val notices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
@@ -29,7 +27,7 @@ class FeedAccessService(
 ) {
     fun viewer(userId: Long): FeedViewer {
         val current = socialAccess.current(userId)
-        return FeedViewer(userId, current?.bunch?.id, memberships.findActiveBunchIds(userId).toSet())
+        return FeedViewer(userId, current?.bunch?.id)
     }
 
     fun requireActor(userId: Long): BunchMembership =
