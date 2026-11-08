@@ -39,6 +39,27 @@ data class BundleCommentResponse(
     val id: Long = 0
 )
 
+data class BundleLocationResponse(
+    val id: Long,
+    val provider: String,
+    val externalId: String,
+    val name: String,
+    val address: String,
+    val position: Int
+)
+
+data class BundleLocationState(
+    val bundleId: Long,
+    val revision: Long,
+    val locationVersion: Long,
+    val locations: List<BundleLocationResponse>
+)
+
+data class BundleLocationChange(
+    val changed: Boolean,
+    val locations: List<BundleLocationResponse>
+)
+
 data class BundlePermissions(
     val administrator: Boolean,
     val creator: Boolean,

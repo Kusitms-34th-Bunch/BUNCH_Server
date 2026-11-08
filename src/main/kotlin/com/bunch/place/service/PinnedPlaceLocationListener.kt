@@ -1,6 +1,6 @@
 package com.bunch.place.service
 
-import com.bunch.bundle.service.BundleLocationsRemovedEvent
+import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.place.domain.PinnedPlaceRepository
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
