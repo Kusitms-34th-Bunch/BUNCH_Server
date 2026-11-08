@@ -3,6 +3,7 @@ package com.bunch.notification
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchBlock
 import com.bunch.bunch.domain.BunchBlockRepository
+import com.bunch.bunch.domain.Visibility
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleComment
@@ -10,6 +11,7 @@ import com.bunch.bundle.domain.BundleCommentRepository
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
+import com.bunch.bundle.domain.BundleStatus
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.push.PushAuthorizationStatus
@@ -265,6 +267,68 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
                 "bundleId" to bundle.id
             )
         }
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `external reply delivery uses inbox context even after current bunch changes`() {
+        val job = fixture(type = NotificationType.SOCIAL_COMMENT_CREATED) { recipient, inbox ->
+            val owner = member()
+            val ownerBunch = create(owner).id
+            jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", ownerBunch)
+            val bundle = bundles.saveAndFlush(
+                Bundle(
+                    bunchId = ownerBunch,
+                    createdBy = owner,
+                    status = BundleStatus.PUBLISHED,
+                    visibility = Visibility.PUBLIC
+                )
+            )
+            create(recipient)
+            mapOf(
+                "kind" to NotificationTargetKind.BUNDLE_COMMENTS.name,
+                "bunchId" to inbox,
+                "bundleId" to bundle.id,
+                "targetBunchId" to ownerBunch,
+                "sourceBunchId" to ownerBunch
+            )
+        }
+        respond(job, ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+        assertThat(jobs.findById(job.id).orElseThrow().status).isEqualTo(PushJobStatus.SENT)
+    }
+
+    @Test
+    fun `source block after like enqueue cancels pending delivery`() {
+        val sourceOwner = member()
+        val source = create(sourceOwner).id
+        val job = fixture(type = NotificationType.BUNDLE_LIKED) { recipient, inbox ->
+            val bundle = bundles.saveAndFlush(
+                Bundle(
+                    bunchId = inbox,
+                    createdBy = recipient,
+                    status = BundleStatus.PUBLISHED,
+                    visibility = Visibility.PUBLIC
+                )
+            )
+            mapOf(
+                "kind" to NotificationTargetKind.BUNDLE.name,
+                "bunchId" to inbox,
+                "bundleId" to bundle.id,
+                "sourceBunchId" to source
+            )
+        }
+        blocks.saveAndFlush(
+            BunchBlock(
+                blockerBunchId = source,
+                blockedBunchId = job.bunchId,
+                createdByMemberId = sourceOwner,
+                createdAt = now
+            )
+        )
 
         assertThat(worker.runOnce()).isZero()
         assertCancelledWithoutProvider(job, "RecipientUnavailable")
