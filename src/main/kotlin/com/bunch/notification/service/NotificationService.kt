@@ -95,7 +95,6 @@ class NotificationService(
             }
             NotificationTargetKind.BUNDLE,
             NotificationTargetKind.BUNDLE_COMMENTS -> {
-                if (!hasMembership(memberId, target.bunchId)) return false
                 publishedAccess.canOpen(memberId, target)
             }
             NotificationTargetKind.OTHER_BUNCH_PROFILE -> {

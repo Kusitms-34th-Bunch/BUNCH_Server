@@ -9,7 +9,6 @@ import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
 import com.bunch.social.domain.SocialComment
-import com.bunch.social.domain.SocialCommentAuthorRepository
 import com.bunch.social.domain.SocialCommentRepository
 import com.bunch.social.domain.SocialCommentText
 import com.bunch.social.dto.CreateSocialCommentRequest
@@ -18,7 +17,6 @@ import com.bunch.social.dto.SocialCommentBadge
 import com.bunch.social.dto.SocialCommentCursor
 import com.bunch.social.dto.SocialCommentItem
 import com.bunch.social.dto.SocialCommentPage
-import com.bunch.social.dto.SocialCommentReportTarget
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.persistence.EntityManager
 import org.springframework.data.domain.PageRequest
@@ -36,7 +34,6 @@ import java.util.UUID
 class SocialCommentService(
     private val access: FeedAccessService,
     private val comments: SocialCommentRepository,
-    private val authors: SocialCommentAuthorRepository,
     private val members: MemberRepository,
     private val bunches: BunchRepository,
     private val bundles: BundleRepository,
@@ -171,19 +168,18 @@ class SocialCommentService(
     }
 
     @Transactional(readOnly = true)
-    fun reportTarget(userId: Long, bundleId: Long, commentId: Long): SocialCommentReportTarget {
+    fun requireReportable(userId: Long, bundleId: Long, commentId: Long) {
         positive(commentId)
         val interaction = access.requireInteraction(userId, bundleId)
         val row = comments.reportable(bundleId, commentId, interaction.actor.bunch.id)
             ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         if (row.authorMemberId == userId) fail(ErrorCode.FORBIDDEN)
         if (row.deletedAt != null) fail(ErrorCode.RESOURCE_NOT_FOUND)
-        return SocialCommentReportTarget(row.id, row.bundleId, row.authorMemberId, row.actingBunchId, row.parentId)
     }
 
     private fun items(userId: Long, current: Long?, rows: List<SocialComment>): List<SocialCommentItem> {
         if (rows.isEmpty()) return emptyList()
-        val profiles = authors.profiles(rows.map { it.authorMemberId }.distinct()).associateBy { it.id }
+        val profiles = members.profiles(rows.map { it.authorMemberId }.distinct()).associateBy { it.id }
         val roots = rows.filter { it.parentId == null }.map { it.id }
         val replies = if (roots.isEmpty()) emptyMap() else
             comments.replyCounts(roots, current).associate { it.parentId to it.total }

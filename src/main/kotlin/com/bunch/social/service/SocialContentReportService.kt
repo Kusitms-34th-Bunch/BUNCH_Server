@@ -59,8 +59,8 @@ class SocialContentReportService(
         val interaction = access.requireInteraction(userId, bundleId)
         requireSameActor(actorId, interaction)
         // E rejects own/deleted/blocked/global-hidden targets, allowing only the target reporter hide.
-        val target = commentService.reportTarget(userId, bundleId, commentId)
-        return accept(userId, actorId, FeedContentKind.COMMENT, target.id, request, detail)
+        commentService.requireReportable(userId, bundleId, commentId)
+        return accept(userId, actorId, FeedContentKind.COMMENT, commentId, request, detail)
     }
 
     private fun lockTargets(userId: Long, bundleId: Long, commentId: Long? = null): Long {

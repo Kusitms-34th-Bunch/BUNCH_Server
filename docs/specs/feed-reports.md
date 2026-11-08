@@ -63,7 +63,8 @@
 양방향 차단/접근 거부는 quota 검사 전에 판정한다. 차단/해제로 이력·사용 횟수를 초기화하지 않는다.
 
 번들은 `FeedAccessService.requireBundleReportTarget`을 사용해 그 번들의 reporter 숨김만 무시한다.
-댓글은 실제 `SocialCommentService.reportTarget`을 사용해 해당 댓글의 reporter 숨김만 무시한다.
+댓글은 실제 `SocialCommentService.requireReportable`을 사용해 해당 댓글의 reporter 숨김만 무시하고,
+검증 성공 후 입력 commentId로 신고를 저장한다.
 부모 숨김·번들 숨김·프로필 신고·전역 숨김·차단·공개범위를 우회하지 않는다.
 일반 조회·댓글 작성 등에 이 신고 전용 접근을 사용하지 않는다.
 

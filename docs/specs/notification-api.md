@@ -24,6 +24,9 @@ open은 서버 current 번치, 푸시 전송은 저장된 수신 inbox 번치 �
 소셜 댓글·답글의 `commentId`는 `social_comments`의 실제 ID다. 열기와 푸시 전송 전에 해당 댓글과
 원댓글의 차단·신고·운영 숨김을 다시 검사하며, 삭제된 해당 댓글은 사용할 수 없다.
 원댓글이 삭제되어도 정상 답글의 접근은 유지한다. 과거 commentId 없는 알림은 기존 번들 검사로 처리한다.
+명시적 open은 알림 소유자를 확인한 뒤 현재 공개 조회 자격으로 판정한다. 과거 inbox 번치에서
+나갔더라도 가입 완료자의 공개 번들 접근을 막지 않는다. 소속 0개도 같은 규칙이며 PRIVATE는 허용하지 않는다.
+푸시 전송의 유효한 inbox Membership 조건은 유지한다.
 kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_LIST`, `BUNDLE`, `BUNDLE_COMMENTS`,
 `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다. 저장된 target 자체는 접근 권한의 증거가 아니다.
 저장된 `bunchId`는 inbox 행의 소유·읽음 범위를 식별할 뿐, 프로필을 여는 current 명의나
