@@ -384,6 +384,40 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `comment and reply notifications flatten line breaks while preserving full comment content`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        val actor = member()
+        val source = publicBunch(actor)
+        device(owner)
+        device(actor)
+        val content = "첫줄\r\n둘째줄\r셋째줄\n" + "가".repeat(60)
+        val expectedBody = "첫줄 둘째줄 셋째줄 " + "가".repeat(60)
+
+        val root = service.create(actor, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest(content))
+        val reply = service.create(owner, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest(content, root.id))
+
+        assertThat(listOf(root.content, reply.content)).containsExactly(content, content)
+        assertThat(service.list(owner, bundle.id).items.single().content).isEqualTo(content)
+        assertThat(service.list(owner, bundle.id, root.id).items.single().content).isEqualTo(content)
+        assertThat(socialNotifications()).hasSize(2).allSatisfy { event ->
+            assertThat(event.body).isEqualTo(expectedBody)
+            val payload = jdbc.queryForObject(
+                "SELECT payload::text FROM push_jobs WHERE notification_id = ?",
+                String::class.java,
+                event.id
+            )!!
+            assertThat(mapper.readTree(payload).path("aps").path("alert").path("body").asText())
+                .doesNotContain("\r", "\n")
+                .endsWith("…")
+        }
+        assertThat(notificationService.list(owner, target, 0, 20).items.single().body).isEqualTo(expectedBody)
+        assertThat(notificationService.list(actor, source, 0, 20).items.single().body).isEqualTo(expectedBody)
+    }
+
+    @Test
     fun `comment specific hide and deletion suppress actual queued notification access`() {
         val owner = member()
         val target = publicBunch(owner)
