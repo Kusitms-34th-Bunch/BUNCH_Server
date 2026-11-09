@@ -15,6 +15,11 @@ object AuthRequests {
         val idToken: String
     )
 
+    data class DevTokenRequest(
+        @field:NotBlank
+        val nickname: String
+    )
+
     data class ReissueRequest(
         @field:NotBlank
         val refreshToken: String

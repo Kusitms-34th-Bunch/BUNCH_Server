@@ -43,6 +43,7 @@ kotlin {
 }
 tasks.withType<Test> {
     useJUnitPlatform()
+    maxHeapSize = "2g"
     systemProperty("spring.test.context.cache.maxSize", "16")
 }
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {

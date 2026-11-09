@@ -17,6 +17,26 @@
 [로그인·온보딩 API 계약](login-onboarding-api.md)을 따른다. 아래의 미결정·현재 구현 설명은
 원문 추적을 위한 기존 상태이며, 계약에서 확정한 항목은 해당 계약이 우선한다.
 
+## 개발용 access token — 이슈 #112
+
+온보딩 테스트를 위한 임시 API다. `prod` 포함 모든 환경에서 인증 없이 허용하며 테스트 종료 후 삭제한다.
+
+- `POST /api/v1/auth/dev/token` — `{"nickname":"tester1"}`로 호출한다.
+- `ProfileText.name`의 기존 닉네임 규칙으로 정규화한 뒤 `MemberRepository.findByNickname`으로 조회한다.
+  없으면 `Member(nickname=name)`을 저장한다. 별도 개발 계정 표시·이름 매핑·스키마 변경은 없다.
+- 응답은 공통 형식의 `data: {"memberId":1,"accessToken":"<발급된 access token>"}`이다.
+  refresh token은 반환하지 않는다. 이후에는 현재 닉네임으로 다시 발급한다.
+- 새 회원은 `ROLE_USER`, `ACTIVE`, `IN_PROGRESS`이고 닉네임만 요청값으로 채운다.
+  나머지 프로필·완료 시각은 null, 약관 동의·번치 소속은 없다. 기존 회원 상태는 변경하지 않는다.
+- 비활성 회원은 `AUTH_001`(401)이다. 빈 값·잘못된 닉네임은 `COMMON_001`,
+  nickname 누락/null·잘못된 JSON은 `COMMON_002`(400)다.
+- 기존 JWT/Redis 세션·로그아웃을 사용한다. 별도 잠금/재시도·계정 관리 API는 없다.
+- 닉네임 변경 후에는 변경된 값으로 호출한다. 온보딩의 기존 닉네임 중복 검증도 유지하므로
+  이미 채운 닉네임이 아닌 다른 닉네임으로 가입 완료를 테스트한다.
+
+검증 기준: 닉네임 신규 생성·기존 상태 유지·공백 정규화·닉네임 변경 후 조회·입력 오류·비활성 회원 거부,
+발급 토큰의 온보딩 조회·가입 중 제한·로그아웃을 자동 검증한다. 실제 iOS/WebView 수동 검증은 별도다.
+
 <a id="auth-responsibilities"></a>
 ## 프런트엔드와 백엔드 책임
 
