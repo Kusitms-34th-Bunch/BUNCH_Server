@@ -206,7 +206,8 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(result.path("hasNext").asBoolean()).isTrue()
         assertThat(result.path("items").single().path("id").asLong()).isEqualTo(last)
         assertThat(result.path("items").single().fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
-            "id", "bunchId", "title", "coverImageUrl", "date", "location", "publishedAt"
+            "id", "bunchId", "title", "coverImageUrl", "date", "location", "publishedAt",
+            "locations", "likeCount", "likedByCurrentBunch", "commentCount"
         )
         val detail = data(read(viewerOwner, target, "published-bundles/$last", target))
         assertThat(detail.path("photos").single().path("id").asLong()).isEqualTo(photoId)
@@ -214,7 +215,9 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
             "id", "imageUrl", "position", "caption"
         )
         assertThat(detail.path("location").isNull).isTrue()
-        assertThat(detail.has("permissions")).isFalse()
+        assertThat(detail.path("permissions").path("canEdit").asBoolean()).isFalse()
+        assertThat(detail.path("permissions").path("canDelete").asBoolean()).isFalse()
+        assertThat(detail.path("permissions").path("canReport").asBoolean()).isTrue()
         assertThat(detail.has("leases")).isFalse()
         val internalPage = data(mvc.perform(
             get("/api/v1/bunches/$target/published-bundles")
@@ -272,9 +275,9 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         )
         assertThat(data(read(visitor, target, "home")).path("memberCount").asLong()).isEqualTo(2)
         val old = data(read(visitor, target, "published-bundles/$bundleId"))
-        assertThat(old.path("comments").first().path("nickname").asText()).isEqualTo("나간 멤버")
-        assertThat(old.path("comments").first().path("content").asText()).isEqualTo("kept comment")
-        assertThat(old.path("comments")[1].path("content").isNull).isTrue()
+        assertThat(old.path("comments").first().path("nickname").asText()).isEqualTo("작성자")
+        assertThat(old.path("comments").first().path("content").asText()).isEqualTo("삭제된 코멘트입니다")
+        assertThat(old.path("comments")[1].path("content").asText()).isEqualTo("삭제된 코멘트입니다")
         jdbc.update("UPDATE members SET nickname = ? WHERE id = ?", "복귀${returning}", returning)
         join(returning, issue(owner, target))
         val restored = data(read(visitor, target, "published-bundles/$bundleId"))

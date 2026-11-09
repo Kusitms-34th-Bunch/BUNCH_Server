@@ -7,6 +7,10 @@ import com.bunch.bundle.dto.*
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.image.service.ImageAssetService
+import com.bunch.feed.service.FeedAccessService
+import com.bunch.social.dto.SocialLikeSummary
+import com.bunch.social.service.SocialLikeService
+import com.bunch.social.service.SocialCommentService
 import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUploaderRepository
@@ -31,6 +35,10 @@ import java.util.UUID
 @Service
 class BundleService(
     private val access: BundleAccessService,
+    private val feedAccess: FeedAccessService,
+    private val attribution: BundleAttributionService,
+    private val likes: SocialLikeService,
+    private val socialComments: SocialCommentService,
     private val bunches: BunchRepository,
     private val bundles: BundleRepository,
     private val photos: BundlePhotoRepository,
@@ -42,6 +50,7 @@ class BundleService(
     private val originalPhotos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
     private val leases: BundleLeaseService,
+    private val locations: BundleLocationService,
     private val images: ImageAssetService,
     private val events: ApplicationEventPublisher,
     private val mapper: ObjectMapper,
@@ -97,15 +106,24 @@ class BundleService(
         access.lockBunch(userId, bunchId)
         if (page < 0 || size !in 1..50) fail(ErrorCode.INVALID_INPUT)
         val sort = Sort.by(Sort.Direction.DESC, if (status == BundleStatus.DRAFT) "updatedAt" else "publishedAt", "id")
-        val result = bundles.findAllByBunchIdAndStatus(bunchId, status, PageRequest.of(page, size, sort))
-        return BundlePage(result.content.map { snapshot(it, userId) }, page, size, result.totalElements)
+        val pageable = PageRequest.of(page, size, sort)
+        val result = if (status == BundleStatus.PUBLISHED) feedAccess.publishedBundles(userId, bunchId, pageable)
+            else bundles.findAllByBunchIdAndStatus(bunchId, status, pageable)
+        val ids = result.content.filter { it.status == BundleStatus.PUBLISHED }.map { it.id }
+        val likeTotals = likes.summaries(userId, ids)
+        val commentTotals = socialComments.counts(userId, ids)
+        return BundlePage(result.content.map {
+            snapshot(it, userId, likeTotals[it.id] ?: SocialLikeSummary(), commentTotals[it.id] ?: 0)
+        }, page, size, result.totalElements)
     }
 
     @Transactional(readOnly = true)
     fun summary(userId: Long, bunchId: Long): BundleSummary {
         access.requireMember(userId, bunchId)
         val published = bundles.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
-        return BundleSummary(bundles.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT), published, stagePolicy.stage(published))
+        return BundleSummary(
+            bundles.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT), published, stagePolicy.stage(published)
+        )
     }
 
     @Transactional
@@ -117,10 +135,9 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
-        if (bundle.status == BundleStatus.DRAFT) leases.requireLease(bundle, actor, "TITLE", request.leaseToken)
+        leases.requireLease(bundle, actor, "TITLE", request.leaseToken)
         version(bundle.titleVersion, request.expectedVersion, mapOf("value" to bundle.title))
         val value = validateText { BundleText.title(request.value) }
-        if (bundle.status == BundleStatus.PUBLISHED && value.isBlank()) fail(ErrorCode.INVALID_INPUT)
         if (bundle.title != value) {
             bundle.title = value
             bundle.titleVersion++
@@ -163,7 +180,7 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
-        if (bundle.status == BundleStatus.DRAFT) leases.requireLease(bundle, actor, "DATE", request.leaseToken)
+        leases.requireLease(bundle, actor, "DATE", request.leaseToken)
         version(bundle.dateVersion, request.expectedVersion, mapOf("value" to bundle.date))
         if (request.value?.isAfter(LocalDate.now(ZoneId.of("Asia/Seoul"))) == true) fail(ErrorCode.INVALID_INPUT)
         if (bundle.date != request.value) {
@@ -187,11 +204,10 @@ class BundleService(
     ): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, request.mode)
-        access.requireCommentAuthor(actor.memberId, bundle)
+        access.requireParticipant(actor.memberId, bundle)
         val existing = comments.findByBundleIdAndMemberId(id, actor.memberId)
         version(existing?.version ?: 0, request.expectedVersion, mapOf("value" to (existing?.content ?: "")))
         val value = validateText { BundleText.comment(request.value) }
-        if (bundle.status == BundleStatus.PUBLISHED && value.isBlank()) fail(ErrorCode.INVALID_INPUT)
         if (value != (existing?.content ?: "")) {
             val row = existing ?: comments.save(BundleComment(bundleId = id, memberId = actor.memberId))
             row.content = value
@@ -199,7 +215,7 @@ class BundleService(
             row.updatedAt = Instant.now()
             changed(bundle, requestId, BundleEventType.COMMENT, commentResponse(row))
             recordActivity(bundle, actor.memberId, comment = true)
-            if (bundle.status == BundleStatus.DRAFT && value.isNotBlank()) {
+            if (value.isNotBlank()) {
                 participants.findByBundleIdAndMemberId(id, actor.memberId)?.let {
                     if (it.remindersCancelledAt == null) it.remindersCancelledAt = clock.instant()
                     pushJobs.cancelCommentReminderForMember(id, actor.memberId)
@@ -221,9 +237,7 @@ class BundleService(
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
         val photo = bundlePhoto(id, photoId)
-        if (bundle.status == BundleStatus.DRAFT) {
-            leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
-        }
+        leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
         version(photo.captionVersion, request.expectedVersion, mapOf(
             "value" to photo.caption,
             "bundlePhotoId" to photoId
@@ -309,9 +323,7 @@ class BundleService(
         }
         val removed = current.filter { it.id in request.removeBundlePhotoIds }
         if (removed.any { it.photoId in request.addPhotoIds }) fail(ErrorCode.INVALID_INPUT)
-        if (bundle.status == BundleStatus.DRAFT) {
-            removed.forEach { leases.rejectForeignPhoto(id, it.id, actor) }
-        }
+        removed.forEach { leases.rejectForeignPhoto(id, it.id, actor) }
         val kept = current.filterNot { it.id in request.removeBundlePhotoIds }
         val additions = request.addPhotoIds.filterNot { photoId -> kept.any { it.photoId == photoId } }
         if (kept.size + additions.size !in 1..20) fail(ErrorCode.BUNDLE_PHOTO_CONFLICT, content(bundle))
@@ -328,7 +340,7 @@ class BundleService(
         final.forEachIndexed { index, photo -> photo.position = index }
         if (removed.isNotEmpty() || selected.isNotEmpty()) {
             changed(bundle, key.toString(), BundleEventType.PHOTOS, photoChanges(bundle))
-            if (bundle.status == BundleStatus.DRAFT && selected.isNotEmpty()) {
+            if (selected.isNotEmpty()) {
                 notifications.draftActivity(actor.memberId, bundle, key.toString(), selected.size)
             }
             notifyReady(bundle, actor.memberId)
@@ -350,7 +362,7 @@ class BundleService(
         val bundle = editable(actor, bunchId, id, request.mode)
         val current = photoRows(id)
         val target = current.firstOrNull { it.id == photoId } ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-        if (bundle.status == BundleStatus.DRAFT) leases.rejectForeignPhoto(id, photoId, actor)
+        leases.rejectForeignPhoto(id, photoId, actor)
         if (request.previousBundlePhotoId == photoId || request.nextBundlePhotoId == photoId) {
             fail(ErrorCode.BUNDLE_PHOTO_CONFLICT, photoChanges(bundle))
         }
@@ -411,6 +423,80 @@ class BundleService(
     }
 
     @Transactional
+    fun editPublished(
+        actor: BundleActor,
+        bunchId: Long,
+        id: Long,
+        request: EditPublishedBundleRequest,
+        requestId: String
+    ): BundleSnapshot {
+        val bundle = access.lock(actor.memberId, bunchId, id)
+        access.requireOwner(actor.memberId, bunchId)
+        mode(bundle, BundleStatus.PUBLISHED)
+        version(bundle.revision, request.expectedRevision, mapOf("revision" to bundle.revision))
+        val title = validateText { BundleText.title(request.title) }
+        if (title.isBlank() || request.photos.size !in 1..20 ||
+            request.date?.isAfter(LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))) == true) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        val captions = request.photos.map { validateText { BundleText.caption(it.caption) } }
+        request.photos.forEach {
+            if ((it.bundlePhotoId == null) == (it.photoId == null)) fail(ErrorCode.INVALID_INPUT)
+        }
+        val retainedIds = request.photos.mapNotNull { it.bundlePhotoId }
+        val addedIds = request.photos.mapNotNull { it.photoId }
+        validIds(retainedIds)
+        validIds(addedIds)
+        val current = photoRows(id)
+        val byId = current.associateBy { it.id }
+        if (retainedIds.any { it !in byId }) fail(ErrorCode.INVALID_INPUT)
+        val sourceIds = retainedIds.mapNotNull { byId.getValue(it).photoId } + addedIds
+        validIds(sourceIds)
+        // Reuse a retained bundle row rather than replace its provenance through a new-photo input.
+        if (addedIds.any { sourceId -> current.any { it.photoId == sourceId } }) fail(ErrorCode.INVALID_INPUT)
+        val additions = if (addedIds.isEmpty()) emptyMap() else
+            photoService.lockReadyPhotosForConnection(bunchId, addedIds).associateBy { it.id }
+        val locationChange = locations.replaceLocked(bundle, request.locations)
+        val removed = current.filterNot { it.id in retainedIds }
+        var edited = locationChange.changed || removed.isNotEmpty() || addedIds.isNotEmpty()
+        photos.deleteAll(removed)
+        photos.flush()
+        removed.forEach { images.releaseAfterCommit(it.imageAsset.id) }
+        request.photos.forEachIndexed { index, input ->
+            val row = input.bundlePhotoId?.let { byId.getValue(it) }
+                ?: addPhoto(bundle, additions.getValue(input.photoId!!), index, actor.memberId)
+            if (row.position != index) {
+                row.position = index
+                edited = true
+            }
+            if (row.caption != captions[index]) {
+                row.caption = captions[index]
+                row.captionVersion++
+                row.captionUpdatedBy = actor.memberId
+                row.captionUpdatedAt = clock.instant()
+                edited = true
+            }
+        }
+        if (bundle.title != title) {
+            bundle.title = title
+            bundle.titleVersion++
+            edited = true
+        }
+        if (bundle.visibility != request.visibility) {
+            bundle.visibility = request.visibility
+            bundle.visibilityVersion++
+            edited = true
+        }
+        if (bundle.date != request.date) {
+            bundle.date = request.date
+            bundle.dateVersion++
+            edited = true
+        }
+        if (edited) changed(bundle, requestId, BundleEventType.EDITED, content(bundle))
+        return snapshot(bundle, actor.memberId)
+    }
+
+    @Transactional
     fun delete(actor: BundleActor, bunchId: Long, id: Long, requestId: String) {
         val bundle = access.lock(actor.memberId, bunchId, id)
         if (bundle.status == BundleStatus.DRAFT) access.requireDraftManager(actor.memberId, bundle)
@@ -457,7 +543,10 @@ class BundleService(
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, expected)
         if (bundle.status == BundleStatus.DRAFT) access.requireParticipant(actor.memberId, bundle)
-        else access.requireOwner(actor.memberId, bunchId)
+        else {
+            access.requireOwner(actor.memberId, bunchId)
+            fail(ErrorCode.BUNDLE_STATE_CONFLICT, mapOf("status" to bundle.status))
+        }
         return bundle
     }
 
@@ -604,48 +693,54 @@ class BundleService(
         return result
     }
 
-    private fun snapshot(bundle: Bundle, userId: Long): BundleSnapshot {
-        val administrator = access.isAdministrator(userId, bundle.bunchId)
-        val creator = bundle.createdBy == userId
-        val participant = access.isParticipant(userId, bundle.id)
+    private fun snapshot(
+        bundle: Bundle,
+        userId: Long,
+        likeSummary: SocialLikeSummary? = null,
+        commentTotal: Long? = null
+    ): BundleSnapshot {
         val draft = bundle.status == BundleStatus.DRAFT
-        val owner = access.isOwner(userId, bundle.bunchId)
-        val draftManager = participant && (creator || administrator)
+        val publishedPeople = if (draft) null else attribution.published(bundle)
+        val social = if (draft) SocialLikeSummary() else
+            likeSummary ?: likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
+        val count = if (draft) 0 else commentTotal ?: socialComments.counts(userId, listOf(bundle.id))[bundle.id] ?: 0
         return BundleSnapshot(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
             photoRows(bundle.id).map(::photoResponse),
-            participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+            publishedPeople?.participants ?: participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
                 .map { BundleParticipantResponse(it.memberId, it.joinedAt) },
-            comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),
+            publishedPeople?.comments ?: comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
-            BundlePermissions(
-                administrator = administrator,
-                creator = creator,
-                participant = participant,
-                canEdit = if (draft) participant else owner,
-                canPublish = draft && draftManager,
-                canDelete = if (draft) draftManager else owner
-            ),
-            leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt
+            access.permissions(userId, bundle),
+            leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt,
+            bundle.locationVersion, locations.listForBundles(listOf(bundle.id)).getValue(bundle.id),
+            social.likeCount, social.likedByCurrentBunch, count
         )
     }
 
     private fun content(bundle: Bundle): Map<String, Any?> = mapOf(
         "status" to bundle.status, "title" to bundle.title, "titleVersion" to bundle.titleVersion,
         "visibility" to bundle.visibility, "visibilityVersion" to bundle.visibilityVersion,
-        "date" to bundle.date, "dateVersion" to bundle.dateVersion, "publishedAt" to bundle.publishedAt
+        "date" to bundle.date, "dateVersion" to bundle.dateVersion, "publishedAt" to bundle.publishedAt,
+        "locationVersion" to bundle.locationVersion,
+        "locations" to locations.listForBundles(listOf(bundle.id)).getValue(bundle.id)
     ) + photoChanges(bundle) + participantChanges(bundle)
 
     private fun photoChanges(bundle: Bundle): Map<String, Any?> = mapOf(
         "photos" to photoRows(bundle.id).map(::photoResponse), "dateChips" to dateChips(bundle)
     )
 
-    private fun participantChanges(bundle: Bundle): Map<String, Any?> = mapOf(
-        "participants" to participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
-            .map { BundleParticipantResponse(it.memberId, it.joinedAt) },
-        "comments" to comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse)
-    )
+    private fun participantChanges(bundle: Bundle): Map<String, Any?> {
+        val publishedPeople = if (bundle.status == BundleStatus.PUBLISHED) attribution.published(bundle) else null
+        return mapOf(
+            "participants" to (publishedPeople?.participants ?: participants
+                .findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+                .map { BundleParticipantResponse(it.memberId, it.joinedAt) }),
+            "comments" to (publishedPeople?.comments ?: comments.findAllByBundleIdOrderByIdAsc(bundle.id)
+                .map(::commentResponse))
+        )
+    }
 
     private fun photoResponse(row: BundlePhoto) = BundlePhotoResponse(
         row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt,
@@ -653,7 +748,7 @@ class BundleService(
     )
 
     private fun commentResponse(row: BundleComment) = BundleCommentResponse(
-        row.memberId, row.content, row.version, row.createdAt, row.updatedAt
+        row.memberId, row.content, row.version, row.createdAt, row.updatedAt, id = row.id
     )
 
     private fun fingerprint(value: Any): String = MessageDigest.getInstance("SHA-256")

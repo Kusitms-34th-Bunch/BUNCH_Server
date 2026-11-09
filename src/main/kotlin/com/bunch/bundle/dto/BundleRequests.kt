@@ -2,6 +2,9 @@ package com.bunch.bundle.dto
 
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonSetter
+import com.fasterxml.jackson.annotation.Nulls
 import java.time.LocalDate
 import java.util.UUID
 
@@ -30,6 +33,26 @@ data class BundleDateRequest(
     val leaseToken: UUID? = null
 )
 
+data class BundleLocationInput(
+    val provider: String,
+    val externalId: String,
+    val name: String,
+    val address: String,
+
+    @param:JsonProperty(value = "position", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val position: Int
+)
+
+data class BundleLocationsRequest(
+    val locations: List<BundleLocationInput>,
+
+    @param:JsonProperty(value = "expectedVersion", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val expectedVersion: Long,
+    val leaseToken: UUID? = null
+)
+
 data class BundleParticipantRequest(val memberId: Long)
 
 data class BundlePhotoChangesRequest(
@@ -45,3 +68,19 @@ data class MoveBundlePhotoRequest(
 )
 
 data class PublishBundleRequest(val expectedRevision: Long)
+
+
+data class EditPublishedBundleRequest(
+    val expectedRevision: Long,
+    val title: String,
+    val visibility: Visibility,
+    val date: LocalDate?,
+    val photos: List<PublishedBundlePhotoInput>,
+    val locations: List<BundleLocationInput>
+)
+
+data class PublishedBundlePhotoInput(
+    val bundlePhotoId: Long? = null,
+    val photoId: Long? = null,
+    val caption: String
+)

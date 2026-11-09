@@ -33,7 +33,8 @@ class NotificationService(
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
     private val clock: Clock,
-    private val socialAccess: BunchSocialAccessService
+    private val socialAccess: BunchSocialAccessService,
+    private val publishedAccess: PublishedNotificationAccess
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun list(memberId: Long, bunchId: Long, page: Int, size: Int): NotificationPage {
@@ -94,9 +95,7 @@ class NotificationService(
             }
             NotificationTargetKind.BUNDLE,
             NotificationTargetKind.BUNDLE_COMMENTS -> {
-                if (!hasMembership(memberId, target.bunchId)) return false
-                val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
-                bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.PUBLISHED
+                publishedAccess.canOpen(memberId, target)
             }
             NotificationTargetKind.OTHER_BUNCH_PROFILE -> {
                 val targetId = target.targetBunchId ?: return false

@@ -3,13 +3,17 @@ package com.bunch.bundle.service
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.dto.BundlePermissions
+import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -19,7 +23,9 @@ class BundleAccessService(
     private val memberships: BunchMembershipRepository,
     private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
-    private val participants: BundleParticipantRepository
+    private val participants: BundleParticipantRepository,
+    private val feedAccess: FeedAccessService,
+    private val entityManager: EntityManager
 ) {
     @Transactional(readOnly = true)
     fun requireMember(userId: Long, bunchId: Long) {
@@ -31,6 +37,7 @@ class BundleAccessService(
         requireMember(userId, bunchId)
         val bundle = bundles.findById(bundleId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
         if (bundle.bunchId != bunchId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (bundle.status == BundleStatus.PUBLISHED) feedAccess.readPublishedBundle(userId, bundleId)
         return bundle
     }
 
@@ -38,14 +45,49 @@ class BundleAccessService(
     fun lock(userId: Long, bunchId: Long, bundleId: Long): Bundle {
         lockBunch(userId, bunchId)
         val bundle = bundles.findLocked(bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        entityManager.flush()
+        entityManager.refresh(bundle)
         if (bundle.bunchId != bunchId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (bundle.status == BundleStatus.PUBLISHED) feedAccess.readPublishedBundle(userId, bundleId)
         return bundle
     }
 
     @Transactional
     fun lockBunch(userId: Long, bunchId: Long) {
         requireMember(userId, bunchId)
-        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        val bunch = bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        // A parent transaction may already hold these entities. Preserve its pending writes,
+        // then reload only this authorization context after waiting on the bunch lock.
+        entityManager.flush()
+        entityManager.refresh(bunch)
+        val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: run {
+            requireMember(userId, bunchId)
+            fail(ErrorCode.FORBIDDEN)
+        }
+        entityManager.refresh(membership)
+        entityManager.refresh(membership.member)
+        membership.member.requireCompleted()
+        if (membership.status != MembershipStatus.ACTIVE) fail(ErrorCode.FORBIDDEN)
+        requireMember(userId, bunchId)
+    }
+
+    fun permissions(userId: Long, bundle: Bundle): BundlePermissions {
+        val administrator = isAdministrator(userId, bundle.bunchId)
+        val creator = bundle.createdBy == userId
+        val participant = isParticipant(userId, bundle.id)
+        val draft = bundle.status == BundleStatus.DRAFT
+        val current = if (draft) null else feedAccess.viewer(userId).currentBunchId
+        val owner = !draft && current == bundle.bunchId && isOwner(userId, bundle.bunchId)
+        val draftManager = participant && (creator || administrator)
+        return BundlePermissions(
+            administrator, creator, participant,
+            canEdit = if (draft) participant else owner,
+            canPublish = draft && draftManager,
+            canDelete = if (draft) draftManager else owner,
+            canReport = !draft && current != null && !owner,
+            canLike = !draft && current != null,
+            canComment = !draft && current != null
+        )
     }
 
     fun isOwner(userId: Long, bunchId: Long): Boolean =
@@ -62,10 +104,6 @@ class BundleAccessService(
 
     fun requireParticipant(userId: Long, bundle: Bundle) {
         if (bundle.status != BundleStatus.DRAFT) fail(ErrorCode.BUNDLE_STATE_CONFLICT)
-        if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
-    }
-
-    fun requireCommentAuthor(userId: Long, bundle: Bundle) {
         if (!isParticipant(userId, bundle.id)) fail(ErrorCode.FORBIDDEN)
     }
 
