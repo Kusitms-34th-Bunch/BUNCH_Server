@@ -49,6 +49,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.HexFormat
+import java.util.UUID
 
 /**
  * The photos of a bunch: what the photo box screens call (upload, list, delete) and what other domains call
@@ -496,7 +497,7 @@ class PhotoService(
         val ids = selection.photos.map { it.id }
         // Read before the update: the dates the photos leave are the dates whose recommendations must be recalculated.
         val leftDates = selection.photos.mapNotNull { it.capturedDate }.toSet()
-        if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate)
+        if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate, UUID.randomUUID())
         (leftDates + listOfNotNull(newDate)).forEach { announceChange(bunchId, it) }
         return PhotoDateChangeResponse(ids.size)
     }

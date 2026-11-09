@@ -16,6 +16,7 @@ import jakarta.persistence.Table
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.util.UUID
 
 @Entity
 @Table(name = "photos")
@@ -50,7 +51,10 @@ class Photo(
     val dateSource: DateSource = DateSource.UNKNOWN,
 
     @Column(name = "created_at", nullable = false)
-    val createdAt: Instant = Instant.now()
+    val createdAt: Instant = Instant.now(),
+
+    @Column(name = "date_batch_id")
+    val dateBatchId: UUID? = null
 ) {
     init {
         require(SHA256_HEX.matches(fileHash)) {
@@ -67,6 +71,9 @@ class Photo(
             }
         ) {
             "dateSource and captured date do not match"
+        }
+        require(dateBatchId == null || dateSource == DateSource.USER) {
+            "only a photo the user dated has a date batch"
         }
     }
 

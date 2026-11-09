@@ -8,9 +8,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.AfterEach
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.ResultActions
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.util.UUID
@@ -48,6 +51,23 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         sessionIds += sessionId to memberId
         return "Bearer ${pair.accessToken}"
     }
+
+    /** The date change of the photo box (3.4.1) as the member of the app sends it: [body] sets or clears the date. */
+    protected fun changePhotoDate(memberId: Long, bunchId: Long, body: String): ResultActions =
+        mvc.perform(
+            post("/api/v1/bunches/$bunchId/photos/date")
+                .header(HttpHeaders.AUTHORIZATION, bearer(memberId))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+        )
+
+    protected fun setPhotoDate(memberId: Long, bunchId: Long, photoIds: List<Long>, date: String): ResultActions =
+        changePhotoDate(memberId, bunchId, """{"photoIds":${idList(photoIds)},"capturedDate":"$date"}""")
+
+    protected fun clearPhotoDate(memberId: Long, bunchId: Long, photoIds: List<Long>): ResultActions =
+        changePhotoDate(memberId, bunchId, """{"photoIds":${idList(photoIds)},"clearDate":true}""")
+
+    private fun idList(photoIds: List<Long>) = photoIds.joinToString(prefix = "[", postfix = "]")
 
     /** The owner's member ID and the ID of the bunch the owner created. */
     protected fun bunchWithOwner(): Pair<Long, Long> {
