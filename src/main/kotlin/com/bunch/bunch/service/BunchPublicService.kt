@@ -2,7 +2,6 @@ package com.bunch.bunch.service
 
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchPublicRepository
-import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.dto.BunchPublicBundleCard
 import com.bunch.bunch.dto.BunchPublicBundleComment
 import com.bunch.bunch.dto.BunchPublicBundleContributor
@@ -11,16 +10,16 @@ import com.bunch.bunch.dto.BunchPublicBundlePhoto
 import com.bunch.bunch.dto.BunchMemberResponse
 import com.bunch.bunch.dto.BunchSocialPage
 import com.bunch.bundle.domain.Bundle
-import com.bunch.bundle.domain.BundleComment
-import com.bunch.bundle.domain.BundleParticipant
-import com.bunch.bundle.domain.BundleCommentRepository
-import com.bunch.bundle.domain.BundleParticipantRepository
+import com.bunch.bundle.dto.BundleLocationResponse
+import com.bunch.bundle.service.BundleAccessService
+import com.bunch.bundle.service.BundleAttributionService
+import com.bunch.bundle.service.BundleLocationService
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.bunch.member.domain.AccountStatus
-import com.bunch.member.domain.Member
-import com.bunch.member.domain.MemberRepository
+import com.bunch.social.dto.SocialLikeSummary
+import com.bunch.social.service.SocialLikeService
+import com.bunch.social.service.SocialCommentService
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -33,9 +32,11 @@ class BunchPublicService(
     private val feedAccess: FeedAccessService,
     private val publicRepository: BunchPublicRepository,
     private val memberships: BunchMembershipRepository,
-    private val participants: BundleParticipantRepository,
-    private val comments: BundleCommentRepository,
-    private val members: MemberRepository
+    private val bundleAccess: BundleAccessService,
+    private val attribution: BundleAttributionService,
+    private val locations: BundleLocationService,
+    private val likes: SocialLikeService,
+    private val socialComments: SocialCommentService
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun members(userId: Long, targetId: Long): List<BunchMemberResponse> {
@@ -58,8 +59,15 @@ class BunchPublicService(
             publicRepository.findFirstCoverImages(result.content.map { it.id })
                 .associate { it.bundleId to it.imageUrl }
         }
+        val ids = result.content.map { it.id }
+        val places = locations.listForBundles(ids)
+        val likeTotals = likes.summaries(userId, ids)
+        val commentTotals = socialComments.counts(userId, ids)
         val items = result.content.map { bundle ->
-            bundleCard(bundle, coverImageUrls[bundle.id])
+            bundleCard(
+                bundle, coverImageUrls[bundle.id], places.getValue(bundle.id),
+                likeTotals[bundle.id] ?: SocialLikeSummary(), commentTotals[bundle.id] ?: 0
+            )
         }
         return BunchSocialPage(
             items = items,
@@ -81,35 +89,37 @@ class BunchPublicService(
         val bundle = feedAccess.readPublishedBundle(userId, bundleId)
         if (bundle.bunchId != target.id) throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
         val photos = publicRepository.findBundlePhotos(bundle.id)
-        val participantRows = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
-        val commentRows = comments.findAllByBundleIdOrderByIdAsc(bundle.id)
-        return bundleDetail(bundle, photos, participantRows, commentRows)
+        return bundleDetail(userId, bundle, photos)
     }
 
-    private fun bundleCard(bundle: Bundle, coverImageUrl: String?): BunchPublicBundleCard {
+    private fun bundleCard(
+        bundle: Bundle,
+        coverImageUrl: String?,
+        places: List<BundleLocationResponse>,
+        social: SocialLikeSummary,
+        commentCount: Long
+    ): BunchPublicBundleCard {
         return BunchPublicBundleCard(
             id = bundle.id,
             bunchId = bundle.bunchId,
             title = bundle.title,
             coverImageUrl = coverImageUrl,
             date = bundle.date,
-            publishedAt = bundle.publishedAt
+            publishedAt = bundle.publishedAt,
+            locations = places,
+            likeCount = social.likeCount,
+            likedByCurrentBunch = social.likedByCurrentBunch,
+            commentCount = commentCount
         )
     }
 
     private fun bundleDetail(
+        userId: Long,
         bundle: Bundle,
-        photoRows: List<BunchPublicBundlePhoto>,
-        participantRows: List<BundleParticipant>,
-        commentRows: List<BundleComment>
+        photoRows: List<BunchPublicBundlePhoto>
     ): BunchPublicBundleDetail {
-        val memberIds = (participantRows.map { it.memberId } + commentRows.map { it.memberId }).distinct()
-        val memberById = members.findAllById(memberIds).associateBy(Member::id)
-        val activeMemberIds = memberships.findAllByBunchIdAndStatus(bundle.bunchId, MembershipStatus.ACTIVE)
-            .filter { it.member.accountStatus == AccountStatus.ACTIVE }
-            .map { it.member.id }
-            .toSet()
-
+        val people = attribution.published(bundle)
+        val social = likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
         return BunchPublicBundleDetail(
             id = bundle.id,
             bunchId = bundle.bunchId,
@@ -118,55 +128,21 @@ class BunchPublicService(
             date = bundle.date,
             publishedAt = bundle.publishedAt,
             photos = photoRows,
-            contributors = participantRows.map { participant ->
-                contributor(participant.memberId, memberById[participant.memberId], activeMemberIds)
+            contributors = people.participants.map {
+                BunchPublicBundleContributor(it.memberId, it.nickname, it.imageUrl, it.profileAvailable)
             },
-            comments = commentRows.map { comment ->
-                comment(comment, memberById[comment.memberId], activeMemberIds)
-            }
-        )
-    }
-
-    private fun contributor(
-        memberId: Long,
-        member: Member?,
-        activeMemberIds: Set<Long>
-    ): BunchPublicBundleContributor {
-        val current = member
-        if (current == null || current.accountStatus == AccountStatus.WITHDRAWN) {
-            return BunchPublicBundleContributor(memberId, "탈퇴한 멤버", null)
-        }
-        if (current.accountStatus == AccountStatus.ACTIVE && memberId in activeMemberIds) {
-            return BunchPublicBundleContributor(memberId, current.nickname, current.imageUrl)
-        }
-        return BunchPublicBundleContributor(memberId, "나간 멤버", null)
-    }
-
-    private fun comment(
-        comment: BundleComment,
-        member: Member?,
-        activeMemberIds: Set<Long>
-    ): BunchPublicBundleComment {
-        val current = member
-        if (current == null || current.accountStatus == AccountStatus.WITHDRAWN) {
-            return BunchPublicBundleComment(
-                id = comment.id,
-                memberId = comment.memberId,
-                nickname = "탈퇴한 멤버",
-                imageUrl = null,
-                content = null,
-                updatedAt = comment.updatedAt
-            )
-        }
-
-        val active = current.accountStatus == AccountStatus.ACTIVE && comment.memberId in activeMemberIds
-        return BunchPublicBundleComment(
-            id = comment.id,
-            memberId = comment.memberId,
-            nickname = if (active) current.nickname else "나간 멤버",
-            imageUrl = if (active) current.imageUrl else null,
-            content = comment.content,
-            updatedAt = comment.updatedAt
+            comments = people.comments.map {
+                BunchPublicBundleComment(
+                    it.id, it.memberId, it.nickname, it.imageUrl, it.content, it.updatedAt, it.profileAvailable
+                )
+            },
+            locations = locations.listForBundles(listOf(bundle.id)).getValue(bundle.id),
+            revision = bundle.revision,
+            visibility = bundle.visibility,
+            permissions = bundleAccess.permissions(userId, bundle),
+            likeCount = social.likeCount,
+            likedByCurrentBunch = social.likedByCurrentBunch,
+            commentCount = socialComments.counts(userId, listOf(bundle.id))[bundle.id] ?: 0
         )
     }
 

@@ -1,9 +1,12 @@
 package com.bunch.bunch.dto
 
+import com.bunch.bunch.domain.Visibility
+import com.bunch.bundle.dto.BundleLocationResponse
+import com.bunch.bundle.dto.BundlePermissions
 import java.time.Instant
 import java.time.LocalDate
 
-// The wire contract allows an object here. Bundle has no stored location yet, so values remain null.
+// Legacy single-location field remains null. Typed locations carry the actual ordered places.
 data class BunchPublicLocation(val name: String, val latitude: Double, val longitude: Double)
 
 data class BunchPublicBundleCard(
@@ -12,9 +15,12 @@ data class BunchPublicBundleCard(
     val title: String,
     val coverImageUrl: String?,
     val date: LocalDate?,
-    // Bundle has no persisted location storage; the current wire contract is explicitly null.
     val location: BunchPublicLocation? = null,
-    val publishedAt: Instant?
+    val publishedAt: Instant?,
+    val locations: List<BundleLocationResponse> = emptyList(),
+    val likeCount: Long = 0,
+    val likedByCurrentBunch: Boolean = false,
+    val commentCount: Long = 0
 )
 
 data class BunchPublicBundlePhoto(
@@ -27,7 +33,8 @@ data class BunchPublicBundlePhoto(
 data class BunchPublicBundleContributor(
     val memberId: Long,
     val nickname: String?,
-    val imageUrl: String?
+    val imageUrl: String?,
+    val profileAvailable: Boolean = false
 )
 
 data class BunchPublicBundleComment(
@@ -36,7 +43,8 @@ data class BunchPublicBundleComment(
     val nickname: String?,
     val imageUrl: String?,
     val content: String?,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    val profileAvailable: Boolean = false
 )
 
 data class BunchPublicBundleDetail(
@@ -45,12 +53,18 @@ data class BunchPublicBundleDetail(
     val title: String,
     val coverImageUrl: String?,
     val date: LocalDate?,
-    // Bundle has no persisted location storage; the current wire contract is explicitly null.
     val location: BunchPublicLocation? = null,
     val publishedAt: Instant?,
     val photos: List<BunchPublicBundlePhoto>,
     val contributors: List<BunchPublicBundleContributor>,
-    val comments: List<BunchPublicBundleComment>
+    val comments: List<BunchPublicBundleComment>,
+    val locations: List<BundleLocationResponse>,
+    val revision: Long,
+    val visibility: Visibility?,
+    val permissions: BundlePermissions,
+    val likeCount: Long,
+    val likedByCurrentBunch: Boolean,
+    val commentCount: Long
 )
 
 data class BunchPublicBundleCover(val bundleId: Long, val imageUrl: String)

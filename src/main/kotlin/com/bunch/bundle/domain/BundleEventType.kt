@@ -11,6 +11,7 @@ enum class BundleEventType {
     PARTICIPANTS,
     PHOTOS,
     PUBLISHED,
+    EDITED,
     DELETED,
     LEASES,
     LEASE_GRANTED,

@@ -211,7 +211,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `co owner participant keeps draft lease and read rights and published author can send comment activity`() {
+    fun `co owner participant keeps draft rights but published comment activity is rejected`() {
         val fixture = fixture()
         jdbc.update(
             "UPDATE bunch_memberships SET role = 'CO_OWNER' WHERE bunch_id = ? AND member_id = ?",
@@ -277,11 +277,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
 
         // A real SEND must pass the inbound interceptor as well as the controller check.
         coOwner.send(command(fixture, "activity"), mapOf("type" to "COMMENT"))
-        val activity = owner.json {
-            it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "COMMENT"
-        }
-        assertThat(activity.path("data").path("memberId").asLong()).isEqualTo(fixture.guest.memberId)
-        coOwner.json { it.path("type").asText() == "ACTIVITY" }
+        coOwner.assertNoEvent("ACTIVITY")
+        owner.assertNoEvent("ACTIVITY")
         coOwner.clear()
         coOwner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
         coOwner.assertNoEvent("LEASE_GRANTED")
