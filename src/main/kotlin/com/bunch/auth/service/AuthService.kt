@@ -1,6 +1,7 @@
 package com.bunch.auth.service
 
 import com.bunch.auth.dto.AuthResponses
+import com.bunch.global.common.ProfileText
 import com.bunch.global.oidc.SocialTokenVerifier
 import com.bunch.global.redis.IdTokenReplayRepository
 import com.bunch.global.redis.RefreshTokenRepository
@@ -58,8 +59,9 @@ class AuthService(
         return pair
     }
 
-    fun issueDevToken(memberId: Long?): AuthResponses.DevTokenResponse {
-        val member = (memberId?.let { members.findById(it).orElse(null) } ?: members.save(Member()))
+    fun issueDevToken(nickname: String): AuthResponses.DevTokenResponse {
+        val name = ProfileText.name(nickname)
+        val member = (members.findByNickname(name) ?: members.save(Member(nickname = name)))
             .requireActive()
         val sessionId = UUID.randomUUID().toString()
         val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)

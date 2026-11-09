@@ -47,12 +47,13 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
 
     @Test
     fun `new member starts before onboarding and access authenticates existing APIs`() {
-        val issued = issue()
+        val nickname = "t${UUID.randomUUID().toString().take(8)}"
+        val issued = issue(nickname)
         val member = members.findById(issued.memberId).get()
         assertThat(member.role).isEqualTo(MemberRole.ROLE_USER)
         assertThat(member.accountStatus).isEqualTo(AccountStatus.ACTIVE)
         assertThat(member.signupStatus).isEqualTo(SignupStatus.IN_PROGRESS)
-        assertThat(member.nickname).isNull()
+        assertThat(member.nickname).isEqualTo(nickname)
         assertThat(member.birthYear).isNull()
         assertThat(member.gender).isNull()
         assertThat(member.profileImageAsset).isNull()
@@ -74,10 +75,9 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
     fun `existing member keeps profile and registration state with a new session`() {
         val first = issue()
         val member = members.findById(first.memberId).get()
-        member.nickname = "별명${UUID.randomUUID().toString().take(6)}"
         member.signupStatus = SignupStatus.COMPLETED
         members.saveAndFlush(member)
-        val again = issue(member.id)
+        val again = issue(" ${member.nickname} ")
         assertThat(again.memberId).isEqualTo(member.id)
         assertThat(tokens.getSessionId(again.accessToken)).isNotEqualTo(tokens.getSessionId(first.accessToken))
         val stored = members.findById(member.id).get()
@@ -86,10 +86,14 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `omitted or nonexistent member id creates a new regular member`() {
-        val ids = listOf(issue().memberId, issue().memberId, issue(Long.MAX_VALUE).memberId)
-        assertThat(ids.toSet()).hasSize(3)
-        assertThat(ids).doesNotContain(Long.MAX_VALUE)
+    fun `lookup follows the current nickname without keeping an alias`() {
+        val original = members.findById(issue().memberId).get()
+        val oldName = original.nickname!!
+        val newName = "n${UUID.randomUUID().toString().take(8)}"
+        original.nickname = newName
+        members.saveAndFlush(original)
+        assertThat(issue(newName).memberId).isEqualTo(original.id)
+        assertThat(issue(oldName).memberId).isNotEqualTo(original.id)
     }
 
     @Test
@@ -108,22 +112,30 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
         member.accountStatus = AccountStatus.valueOf(accountStatus)
         members.saveAndFlush(member)
         mvc.perform(post("/api/v1/auth/dev/token").contentType(MediaType.APPLICATION_JSON)
-            .content(json.writeValueAsBytes(mapOf("memberId" to member.id))))
+            .content(json.writeValueAsBytes(mapOf("nickname" to member.nickname))))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value(ErrorCode.UNAUTHORIZED.code))
     }
 
     @ParameterizedTest
-    @ValueSource(longs = [0, -1])
-    fun `nonpositive member ids are rejected`(memberId: Long) {
+    @ValueSource(strings = ["", " ", "tester_1", "테스터😀", "abcdefghijklm"])
+    fun `invalid nicknames are rejected`(nickname: String) {
         mvc.perform(post("/api/v1/auth/dev/token").contentType(MediaType.APPLICATION_JSON)
-            .content(json.writeValueAsBytes(mapOf("memberId" to memberId))))
+            .content(json.writeValueAsBytes(mapOf("nickname" to nickname))))
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value(ErrorCode.INVALID_INPUT.code))
     }
 
-    private fun issue(memberId: Long? = null): AuthResponses.DevTokenResponse {
-        val request = if (memberId == null) emptyMap() else mapOf("memberId" to memberId)
+    @ParameterizedTest
+    @ValueSource(strings = ["{}", "{\"nickname\":null}"])
+    fun `nickname is required`(body: String) {
+        mvc.perform(post("/api/v1/auth/dev/token").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error.code").value(ErrorCode.INVALID_JSON.code))
+    }
+
+    private fun issue(nickname: String = "테스터${UUID.randomUUID().toString().take(8)}"): AuthResponses.DevTokenResponse {
+        val request = mapOf("nickname" to nickname)
         val body = mvc.perform(post("/api/v1/auth/dev/token").contentType(MediaType.APPLICATION_JSON)
             .content(json.writeValueAsBytes(request)))
             .andExpect(status().isOk)

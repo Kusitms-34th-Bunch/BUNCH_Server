@@ -43,7 +43,7 @@ class AuthController(private val authService: AuthService) {
         @Valid
         @RequestBody
         request: AuthRequests.DevTokenRequest
-    ) = ResponseEntity.ok(ApiResponse.ok(authService.issueDevToken(request.memberId)))
+    ) = ResponseEntity.ok(ApiResponse.ok(authService.issueDevToken(request.nickname)))
 
     @PostMapping("/reissue")
     fun reissue(
