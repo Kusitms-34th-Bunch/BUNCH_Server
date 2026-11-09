@@ -37,11 +37,3 @@ data class SocialCommentCursor(
     val createdAt: Instant,
     val id: Long
 )
-
-data class SocialCommentReportTarget(
-    val id: Long,
-    val bundleId: Long,
-    val authorMemberId: Long,
-    val actingBunchId: Long?,
-    val parentId: Long?
-)
