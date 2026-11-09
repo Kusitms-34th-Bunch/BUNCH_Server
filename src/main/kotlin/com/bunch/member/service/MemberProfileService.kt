@@ -52,7 +52,7 @@ class MemberProfileService(
             val stored = uploaded
             attached = transactions.execute { save(memberId, requestKey, input, stored) }!!
         } catch (ex: DataIntegrityViolationException) {
-            if (isTakenByAnother(memberId, input.nickname)) fail(ErrorCode.NICKNAME_TAKEN)
+            if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
             throw ex
         } finally {
             // A file that was uploaded but not attached to the member is never kept.
@@ -108,8 +108,7 @@ class MemberProfileService(
             if (member.profileRequestFingerprint != input.fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
             return false
         }
-        val holder = members.findByNickname(input.nickname)
-        if (holder != null && holder.id != memberId) fail(ErrorCode.NICKNAME_TAKEN)
+        if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
 
         val previousAssetId = member.profileImageAsset?.id
         val newAsset = when (input.imageAction) {
@@ -127,9 +126,6 @@ class MemberProfileService(
         members.saveAndFlush(member)
         return input.imageAction == ProfileImageAction.REPLACE
     }
-
-    private fun isTakenByAnother(memberId: Long, nickname: String): Boolean =
-        members.findByNickname(nickname)?.let { it.id != memberId } == true
 
     private fun hashOf(photo: MultipartFile): String {
         val digest = MessageDigest.getInstance("SHA-256")

@@ -291,7 +291,13 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         `when`(images.upload(photo)).thenThrow(BusinessException(ErrorCode.PROFILE_IMAGE_FAILED))
 
         val error = assertThrows<BusinessException> {
-            edit(member, nickname = unique("실패"), birthYear = 2000, action = ProfileImageAction.REPLACE, photo = photo)
+            edit(
+                member,
+                nickname = unique("실패"),
+                birthYear = 2000,
+                action = ProfileImageAction.REPLACE,
+                photo = photo
+            )
         }
 
         assertThat(error.errorCode).isEqualTo(ErrorCode.PROFILE_IMAGE_FAILED)
@@ -404,7 +410,8 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         edit(owner, nickname = after)
 
         assertThat(publicBunches.members(owner.id, bunch.id).single().nickname).isEqualTo(after)
-        assertThat(notifications.findById(notification.id).get().body).isEqualTo("${before}님이 번치에 참여했어요.")
+        assertThat(notifications.findById(notification.id).get().body)
+            .isEqualTo("${before}님이 번치에 참여했어요.")
     }
 
     private fun edit(
