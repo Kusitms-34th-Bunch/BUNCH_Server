@@ -259,6 +259,12 @@ python3 deploy/monitoring/smoke_test.py
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
 | [번들 API 계약](docs/specs/bundle-api.md) | 번들 REST·STOMP 클라이언트 요청·응답·복구 프로토콜 |
+| [발행본 상세·원자적 수정](docs/specs/published-bundle-edit.md) | 발행 사진·참여자 표시·OWNER 일괄 저장·삭제 |
+| [피드 6장 색인](docs/specs/feed.md) | 승인 원문 24항목·구현 Spec 연결·앱 확인 범위 |
+| [피드 API](docs/specs/feed-api.md) | 두 구간 keyset·문맥 변경 409·카드 배치·공통 접근·운영 숨김 |
+| [좋아요](docs/specs/feed-likes.md) / [댓글](docs/specs/feed-comments.md) / [신고](docs/specs/feed-reports.md) | 번치 좋아요·개인 댓글/답글·삭제 자리·신고 한도·알림 |
+| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·lease·번치 공동 핀·출처 수명 |
+| [광고](docs/specs/feed-ads.md) / [멤버 프로필](docs/specs/member-social-profile.md) | 요청별 랜덤·개인 숨김·참여 번치 프로필 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
