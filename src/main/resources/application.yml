@@ -59,6 +59,8 @@ terms:
   privacy-version: ${TERMS_PRIVACY_VERSION:}
   age-version: ${TERMS_AGE_VERSION:}
   demographics-version: ${TERMS_DEMOGRAPHICS_VERSION:}
+support:
+  open-chat-url: ${SUPPORT_OPEN_CHAT_URL:}
 cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
   api-key: ${CLOUDINARY_API_KEY:}

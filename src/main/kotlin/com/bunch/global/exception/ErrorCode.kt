@@ -24,6 +24,7 @@ enum class ErrorCode(
     TERMS_VERSION_MISMATCH("AUTH_016", "error.terms_version_mismatch", 409),
     NICKNAME_TAKEN("USER_002", "error.nickname_taken", 409),
     REGISTRATION_CONFLICT("USER_003", "error.registration_conflict", 409),
+    SUPPORT_CHANNEL_UNAVAILABLE("USER_004", "error.support_channel_unavailable", 503),
     PROFILE_IMAGE_FAILED("IMAGE_001", "error.profile_image_failed", 503),
     PHOTO_IMAGE_STORAGE_FAILED("PHOTO_007", "error.photo_image_storage_failed", 503),
     BUNCH_NAME_TAKEN("BUNCH_001", "error.bunch_name_taken", 409),
