@@ -45,7 +45,7 @@ class MemberSocialProfileService(
                     BunchSocialCard.from(bunch),
                     relation.followState,
                     relation.followId,
-                    viewer.currentBunchId != null && viewer.currentBunchId != bunch.id
+                    viewer.currentBunchId != bunch.id
                 )
             }
         )

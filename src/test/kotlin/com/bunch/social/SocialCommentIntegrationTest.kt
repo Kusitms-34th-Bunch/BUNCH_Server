@@ -28,6 +28,7 @@ import com.bunch.social.dto.SocialCommentItem
 import com.bunch.social.service.SocialCommentService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.AfterEach
@@ -383,6 +384,40 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `comment and reply notifications flatten line breaks while preserving full comment content`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        participant(bundle.id, owner)
+        val actor = member()
+        val source = publicBunch(actor)
+        device(owner)
+        device(actor)
+        val content = "첫줄\r\n둘째줄\r셋째줄\n" + "가".repeat(60)
+        val expectedBody = "첫줄 둘째줄 셋째줄 " + "가".repeat(60)
+
+        val root = service.create(actor, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest(content))
+        val reply = service.create(owner, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest(content, root.id))
+
+        assertThat(listOf(root.content, reply.content)).containsExactly(content, content)
+        assertThat(service.list(owner, bundle.id).items.single().content).isEqualTo(content)
+        assertThat(service.list(owner, bundle.id, root.id).items.single().content).isEqualTo(content)
+        assertThat(socialNotifications()).hasSize(2).allSatisfy { event ->
+            assertThat(event.body).isEqualTo(expectedBody)
+            val payload = jdbc.queryForObject(
+                "SELECT payload::text FROM push_jobs WHERE notification_id = ?",
+                String::class.java,
+                event.id
+            )!!
+            assertThat(mapper.readTree(payload).path("aps").path("alert").path("body").asText())
+                .doesNotContain("\r", "\n")
+                .endsWith("…")
+        }
+        assertThat(notificationService.list(owner, target, 0, 20).items.single().body).isEqualTo(expectedBody)
+        assertThat(notificationService.list(actor, source, 0, 20).items.single().body).isEqualTo(expectedBody)
+    }
+
+    @Test
     fun `comment specific hide and deletion suppress actual queued notification access`() {
         val owner = member()
         val target = publicBunch(owner)
@@ -537,14 +572,14 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val actor = member()
         publicBunch(actor)
         val root = write(actor, bundle.id)
-        assertError(ErrorCode.FORBIDDEN) { service.reportTarget(actor, bundle.id, root.id) }
+        assertError(ErrorCode.FORBIDDEN) { service.requireReportable(actor, bundle.id, root.id) }
         hide("COMMENT", root.id, target)
-        assertThat(service.reportTarget(owner, bundle.id, root.id).authorMemberId).isEqualTo(actor)
+        assertThatCode { service.requireReportable(owner, bundle.id, root.id) }.doesNotThrowAnyException()
         hide("COMMENT", root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.reportTarget(owner, bundle.id, root.id) }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
         jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
         service.delete(actor, bundle.id, root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.reportTarget(owner, bundle.id, root.id) }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
     }
 
     @Test

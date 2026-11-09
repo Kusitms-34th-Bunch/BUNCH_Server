@@ -1,6 +1,6 @@
 # 참여 멤버 프로필
 
-이슈 #94, FEED-11, 승인된 6장 시트 6.3.3과 2026-11-07 보완 정책을 따른다.
+이슈 #94, FEED-11, 승인된 6장 시트 6.1.7·6.3.3과 2026-11-07 보완 정책을 따른다.
 공통 접근 계약은 [feed-api](feed-api.md), 팔로우 변경은 기존
 [번치 소셜 계약](bunch-social.md)을 재사용한다.
 
@@ -22,11 +22,14 @@
 | `bunches[].bunch` | 기존 `BunchSocialCard`: id/name/imageUrl/characterType/visibility |
 | `bunches[].followState` | 기존 NONE/REQUESTED/FOLLOWING |
 | `bunches[].followId` | 기존 팔로우 취소에 사용할 ID. 관계가 없으면 null |
-| `bunches[].showFollowButton` | 현재 번치가 있고 해당 행이 현재 번치가 아닐 때 true |
+| `bunches[].showFollowButton` | 현재 번치 자신의 행만 false. 소속 0개를 포함한 나머지 행은 true |
 
 비공개 번치도 팔로우 승인 없이 위 기본정보를 반환한다. `visibility: PRIVATE`로
 자물쇠를 표시한다. 멤버 명단·번들·개인 출생연도·성별·동의·외부 식별자·사진 publicId는 반환하지 않는다.
-현재 번치 행과 소속 0개 조회는 NONE/null 상태이며 팔로우 버튼을 표시하지 않는다.
+현재 번치 행과 소속 0개 조회는 NONE/null 상태다. 현재 번치 자신의 행만 팔로우 버튼을 숨긴다.
+소속 0개 조회자는 버튼을 표시하며, 앱은 `currentBunchId:null`일 때 버튼을 누르면
+팔로우 API를 호출하지 않고 토스트 「번치에 참여하면 할 수 있어요.」를 표시한다(6.1.7).
+`showFollowButton`은 표시 여부이며 팔로우 실행 권한을 의미하지 않는다.
 
 이름을 첫 글자부터 비교하며 한글 → 영문(대소문자 무시) → 숫자(연속 숫자 수치 비교)
 순서를 적용한다. 그 외 문자는 뒤에서 코드 포인트로 비교한다. 한글은 NFC로 정규화한다.
