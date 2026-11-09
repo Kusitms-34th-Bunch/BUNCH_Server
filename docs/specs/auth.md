@@ -19,30 +19,20 @@
 
 ## 개발용 access token — 이슈 #112
 
-AUTH-03/04·USER-01의 온보딩 테스트를 위한 개발 보조 API다. 소셜 로그인 계약은 유지한다.
+온보딩 테스트를 위한 임시 API다. `prod` 포함 모든 환경에서 인증 없이 허용하며 테스트 종료 후 삭제한다.
 
-- `POST /api/v1/auth/dev/token` — 인증 없이 JSON `{"account":"tester1"}`로 호출한다.
-- 응답: `{"success":true,"data":{"accessToken":"<발급된 access token>"},"error":null}`.
-  refresh token은 반환하지 않는다. 만료 후 동일 account로 다시 발급한다.
-- 운영(`prod`)을 포함한 모든 환경에서 인증 없이 허용하는 임시 온보딩 테스트 API다.
-  테스트 종료 후 삭제할 대상이며 프로필 제한은 두지 않는다.
-- account는 대소문자를 구분하는 영문·숫자·밑줄 1~32자다. 누락/null은 `COMMON_002`,
-  빈 값·허용하지 않는 문자·길이 초과는 `COMMON_001`(400)이다.
-- 처음 보는 이름이면 `Member` 기본값으로 생성한다: `ROLE_USER`, `ACTIVE`, `IN_PROGRESS`.
-  닉네임·출생연도·성별·프로필 이미지·완료 시각·가입 fingerprint는 null이며 약관 동의·번치 소속은 없다.
-- 같은 이름은 `members.dev_account`의 고유 식별자로 기존 회원을 찾는다. 닉네임과 분리하고
-  진행 상태·프로필·약관·번치 소속을 수정하지 않는다.
-- 회원 조회·생성은 `MemberRepository`를 직접 사용한다. 별도 잠금·네이티브 쿼리·재시도는 두지 않는다.
-- 기존 계정이 비활성 상태면 `AUTH_001`(401)로 발급을 거부한다.
-- 기존 JWT 유효기간·권한·Redis 세션·로그아웃 검증을 그대로 적용한다. 매 호출은 독립 세션이다.
-  가입 중 기능 제한도 유지하므로 약관→프로필→번치 온보딩을 직접 진행해야 한다.
-- 처음부터 다시 테스트하려면 `tester2`, `tester3` 등 새 이름을 사용한다. 초기화·목록·관리 API는 제공하지 않는다.
-- 저장소 변경은 nullable `dev_account VARCHAR(32)`와 unique 제약을 추가하는 V29다.
-  기존 회원은 null을 유지하며 소셜 제공자 식별자에는 변경이 없다.
+- `POST /api/v1/auth/dev/token` — `{}` 또는 `{"memberId":1}`로 호출한다.
+- memberId의 회원이 있으면 재사용한다. ID를 생략하거나 해당 회원이 없으면 `Member()`를 저장한다.
+- 응답은 공통 형식의 `data: {"memberId":1,"accessToken":"<발급된 access token>"}`이다.
+  반환된 memberId로 이후 같은 회원을 사용한다. refresh token은 반환하지 않는다.
+- 새 회원은 기본값 `ROLE_USER`, `ACTIVE`, `IN_PROGRESS`이고 프로필·완료 시각은 null이며
+  약관 동의·번치 소속이 없다. 기존 회원의 상태는 변경하지 않는다. 비활성 회원은 `AUTH_001`(401)이다.
+- memberId를 전달하면 양의 정수여야 한다. 0/음수는 `COMMON_001`, 잘못된 JSON은 `COMMON_002`(400)다.
+- `MemberRepository.findById/save`와 기존 JWT/Redis 세션·로그아웃만 사용한다.
+  개발 계정 표시·이름 매핑·스키마 변경·별도 잠금/재시도·계정 관리 API는 없다.
 
-검증 기준: 인증 없는 발급, 신규·재사용·진행 상태 유지·이름별 분리·입력 오류·비활성 계정 거부,
-발급 토큰의 온보딩 인증/로그아웃을 자동 검증한다.
-실제 iOS SDK·WebView 수동 연동 검증은 별도다.
+검증 기준: 신규 생성·기존 회원 상태 유지·없는 ID의 신규 생성·입력 오류·비활성 회원 거부,
+발급 토큰의 온보딩 조회·가입 중 제한·로그아웃을 자동 검증한다. 실제 iOS/WebView 수동 검증은 별도다.
 
 <a id="auth-responsibilities"></a>
 ## 프런트엔드와 백엔드 책임

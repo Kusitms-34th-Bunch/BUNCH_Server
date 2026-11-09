@@ -41,10 +41,7 @@ class Member(
     var completedAt: Instant? = null,
 
     @Column(length = 64)
-    var registrationFingerprint: String? = null,
-
-    @Column(name = "dev_account", length = 32, unique = true)
-    val devAccount: String? = null
+    var registrationFingerprint: String? = null
 ) {
     val imagePublicId: String?
         get() = profileImageAsset?.publicId

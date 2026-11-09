@@ -1,6 +1,7 @@
 package com.bunch.auth.dto
 
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Positive
 
 object AuthRequests {
     data class NonceLoginRequest(
@@ -13,6 +14,11 @@ object AuthRequests {
     data class GoogleLoginRequest(
         @field:NotBlank
         val idToken: String
+    )
+
+    data class DevTokenRequest(
+        @field:Positive
+        val memberId: Long? = null
     )
 
     data class ReissueRequest(
