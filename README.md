@@ -121,6 +121,17 @@ set +a
 실제 SDK 검증에는 실제 제공자 설정이 필요하다. 자동 테스트는 테스트 키·로컬 JWKS를
 사용하며 실제 제공자 자격 증명이 필요하지 않다.
 
+### 소셜 로그인 없이 온보딩 테스트
+
+`POST /api/v1/auth/dev/token`에 `{"nickname":"tester1"}`을 보내면 기존 닉네임으로 회원을 조회하고,
+없으면 그 닉네임의 일반 회원을 생성한다. 응답은 `data.memberId`, `data.accessToken`이다.
+닉네임을 바꾼 뒤에는 바뀐 값으로 호출한다. 별도 계정 구분·이름 매핑·DB 스키마 변경은 없다.
+
+운영(`prod`)을 포함한 모든 환경에서 인증 없이 사용하는 임시 테스트 API다.
+새 회원은 `IN_PROGRESS`이고 약관 동의·프로필 완료·번치 소속은 없다. 기존 회원의 상태는 유지한다.
+닉네임은 기존 규칙(앞뒤 공백 제거·NFC·한글/영문/숫자/공백 1~12자)을 따른다.
+상세 동작은 [인증 Spec](docs/specs/auth.md#개발용-access-token--이슈-112)을 따른다.
+
 ## 가입·온보딩 환경 설정
 
 | 변수 | 용도 |
@@ -248,6 +259,12 @@ python3 deploy/monitoring/smoke_test.py
 | [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
 | [번들 API 계약](docs/specs/bundle-api.md) | 번들 REST·STOMP 클라이언트 요청·응답·복구 프로토콜 |
+| [발행본 상세·원자적 수정](docs/specs/published-bundle-edit.md) | 발행 사진·참여자 표시·OWNER 일괄 저장·삭제 |
+| [피드 6장 색인](docs/specs/feed.md) | 승인 원문 24항목·구현 Spec 연결·앱 확인 범위 |
+| [피드 API](docs/specs/feed-api.md) | 두 구간 keyset·문맥 변경 409·카드 배치·공통 접근·운영 숨김 |
+| [좋아요](docs/specs/feed-likes.md) / [댓글](docs/specs/feed-comments.md) / [신고](docs/specs/feed-reports.md) | 번치 좋아요·개인 댓글/답글·삭제 자리·신고 한도·알림 |
+| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·lease·번치 공동 핀·출처 수명 |
+| [광고](docs/specs/feed-ads.md) / [멤버 프로필](docs/specs/member-social-profile.md) | 요청별 랜덤·개인 숨김·참여 번치 프로필 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |

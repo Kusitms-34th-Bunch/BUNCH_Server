@@ -37,6 +37,7 @@ enum class ErrorCode(
     BUNCH_PROFILE_UNAVAILABLE("BUNCH_009", "error.bunch_profile_unavailable", 404),
     CURRENT_BUNCH_REQUIRED("BUNCH_010", "error.current_bunch_required", 409),
     BUNCH_REPORT_LIMIT_EXCEEDED("BUNCH_011", "error.bunch_report_limit_exceeded", 409),
+    FEED_CURSOR_CONTEXT_CHANGED("FEED_001", "error.feed_cursor_context_changed", 409),
     INVALID_INVITATION("INVITE_001", "error.invalid_invitation", 404),
     IDEMPOTENCY_CONFLICT("REQUEST_001", "error.idempotency_conflict", 409),
     BUNDLE_LIMIT_EXCEEDED("BUNDLE_001", "error.bundle_limit_exceeded", 409),
