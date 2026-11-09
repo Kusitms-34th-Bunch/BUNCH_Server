@@ -98,7 +98,7 @@
 | --- | --- | --- |
 | 저장 | 날짜를 정하는 요청 한 번으로 바뀐 사진들에 **같은 새 ID**를 서버가 만들어 `photos.date_batch_id`에 저장한다. 사진이 한 장이어도 저장한다. 요청이 다르면 ID도 다르고, 같은 사진의 날짜를 다시 정하면 새 ID로 바뀐다. 요청 모양과 응답은 바뀌지 않는다 | 4.2.7 로직 3 |
 | 되돌리기 | `clearDate`로 날짜를 비우면 ID도 비운다 | 3.4.2 |
-| 제약 | `date_batch_id`는 `date_source = 'USER'`인 사진에만 있을 수 있다(`ck_photo_date_batch`, 마이그레이션 V23) | 개발 선택 |
+| 제약 | `date_batch_id`는 `date_source = 'USER'`인 사진에만 있을 수 있다(`ck_photo_date_batch`, 마이그레이션 V32) | 개발 선택 |
 | 기존 사진 | 이미 날짜를 바꾼 사진은 ID가 없고 채우지 않는다(백필 없음) | 이슈 #66 |
 | 업로드 묶음 ID와의 관계 | 별개다. `photo_uploaders.upload_batch_id`는 그대로이고 사진은 둘 다 가질 수 있다 | 4.2.7 로직 3 |
 | 쓰는 곳 | 추천 번들의 재료 조회가 두 종류의 ID를 한 목록(`PhotoSample.batchIds`)에 합쳐, 시각 없는 사진을 사진 묶음에 붙일 때 같은 묶음의 시각 있는 사진을 따라가게 한다([추천 번들 계약](recommended-bundle.md)) | 4.2.7 상세 4 ① |
