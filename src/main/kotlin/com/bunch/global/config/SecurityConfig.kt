@@ -8,8 +8,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.core.env.Environment
-import org.springframework.core.env.Profiles
 import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -22,7 +20,6 @@ class SecurityConfig(
     private val loggingFilter: MDCLoggingFilter,
     private val entryPoint: CustomAuthenticationEntryPoint,
     private val deniedHandler: CustomAccessDeniedHandler,
-    private val environment: Environment,
     @Value("\${springdoc.api-docs.enabled:true}")
     private val docsEnabled: Boolean
 ) {
@@ -45,11 +42,9 @@ class SecurityConfig(
                     "/api/v1/auth/apple/login",
                     "/api/v1/auth/google/login",
                     "/api/v1/auth/kakao/login",
-                    "/api/v1/auth/reissue"
+                    "/api/v1/auth/reissue",
+                    "/api/v1/auth/dev/token"
                 ).permitAll()
-                if (environment.acceptsProfiles(Profiles.of("(local | dev) & !prod"))) {
-                    it.requestMatchers(HttpMethod.POST, "/api/v1/auth/dev/token").permitAll()
-                }
                 it.requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/ws", "/ws/**").permitAll()
 

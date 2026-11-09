@@ -123,8 +123,8 @@ set +a
 
 ### 소셜 로그인 없이 온보딩 테스트
 
-`local`/`dev`에서 `POST /api/v1/auth/dev/token`에 아래 JSON을 보내면
-공통 응답의 `data.accessToken`을 받을 수 있다. `prod`가 함께 활성화되면 사용할 수 없다.
+`POST /api/v1/auth/dev/token`에 아래 JSON을 보내면 공통 응답의 `data.accessToken`을 받을 수 있다.
+운영(`prod`)을 포함한 모든 환경에서 인증 없이 사용할 수 있는 임시 테스트 API다.
 
 ```json
 { "account": "tester1" }

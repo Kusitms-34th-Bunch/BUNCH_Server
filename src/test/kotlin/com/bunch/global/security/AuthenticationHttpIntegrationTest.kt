@@ -111,18 +111,6 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `development token endpoint is unavailable outside development profiles`() {
-        postJson("/api/v1/auth/dev/token", """{"account":"tester1"}""")
-            .expectError(ErrorCode.UNAUTHORIZED)
-        val pair = newSession()
-        mvc.perform(post("/api/v1/auth/dev/token")
-            .header(HttpHeaders.AUTHORIZATION, "Bearer ${pair.accessToken}")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("""{"account":"tester1"}"""))
-            .andExpect(status().isNotFound)
-    }
-
-    @Test
     fun `logout requires authentication`() {
         mvc.perform(post("/api/v1/auth/logout")).expectError(ErrorCode.UNAUTHORIZED)
     }

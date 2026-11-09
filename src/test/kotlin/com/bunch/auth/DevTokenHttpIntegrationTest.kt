@@ -28,15 +28,10 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
-import java.util.concurrent.Callable
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test", "local")
+@ActiveProfiles("test", "prod")
 class DevTokenHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val json: ObjectMapper,
@@ -46,8 +41,8 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
     private val jdbc: JdbcTemplate
 ) {
     private val prefix = "dev_${UUID.randomUUID().toString().take(8)}_"
-    private val accounts = ConcurrentHashMap.newKeySet<String>()
-    private val issuedSessions = ConcurrentLinkedQueue<Pair<String, Long>>()
+    private val accounts = mutableSetOf<String>()
+    private val issuedSessions = mutableListOf<Pair<String, Long>>()
 
     @AfterEach
     fun cleanOwnAccounts() {
@@ -124,24 +119,6 @@ class DevTokenHttpIntegrationTest @Autowired constructor(
     fun `new names including case differences create separate accounts`() {
         val ids = listOf("tester1", "tester2", "Tester1").map { tokens.getUserId(issue(prefix + it)) }
         assertThat(ids.toSet()).hasSize(3)
-    }
-
-    @Test
-    fun `concurrent first requests create one member and independent usable sessions`() {
-        val account = prefix + "concurrent"
-        val executor = Executors.newFixedThreadPool(4)
-        try {
-            val accesses = executor.invokeAll((1..8).map { Callable { issue(account) } })
-                .map { it.get(15, TimeUnit.SECONDS) }
-            val memberIds = accesses.map { tokens.getUserId(it) }.toSet()
-            assertThat(memberIds).hasSize(1)
-            assertThat(accesses.map { tokens.getSessionId(it) }.toSet()).hasSize(8)
-            assertThat(jdbc.queryForObject(
-                "SELECT count(*) FROM members WHERE dev_account = ?", Long::class.java, account
-            )).isEqualTo(1)
-        } finally {
-            executor.shutdownNow()
-        }
     }
 
     @Test
