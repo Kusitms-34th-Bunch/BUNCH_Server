@@ -28,6 +28,7 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
     private val members: MemberRepository,
     private val tokens: TokenProvider,
     private val sessions: RefreshTokenRepository,
+    private val consents: MemberConsentRepository,
     private val jdbc: JdbcTemplate
 ) {
     private val ids = mutableListOf<Long>()
@@ -58,6 +59,94 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
         val profile = MockMultipartFile("profile", "", "application/json", mapper.writeValueAsBytes(mapOf("nickname" to nickname)))
         mvc.perform(multipart("/api/v1/members/me/registration").file(profile).header("Authorization", "Bearer $access"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.signupStatus").value("COMPLETED"))
+    }
+
+    @Test
+    fun `optional terms are saved idempotently and reused during registration`() {
+        val (id, access) = account()
+        val agreements = TermType.entries.map {
+            mapOf("type" to it, "version" to "v1", "agreed" to true)
+        }
+        fun submit() {
+            mvc.perform(
+                post("/api/v1/auth/terms/agreements")
+                    .header("Authorization", "Bearer $access")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(mapper.writeValueAsBytes(mapOf("agreements" to agreements)))
+            )
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.success").value(true))
+        }
+
+        submit()
+        val before = consents.findAllByMemberId(id).associate { it.type to (it.id to it.agreedAt) }
+        assertThat(before.keys).containsExactlyInAnyOrderElementsOf(TermType.entries)
+        submit()
+        assertThat(consents.findAllByMemberId(id).associate { it.type to (it.id to it.agreedAt) })
+            .isEqualTo(before)
+
+        val profile = MockMultipartFile(
+            "profile",
+            "",
+            "application/json",
+            mapper.writeValueAsBytes(
+                mapOf("nickname" to "선택동의", "birthYear" to 1990, "demographicsConsentVersion" to "v1")
+            )
+        )
+        mvc.perform(
+            multipart("/api/v1/members/me/registration")
+                .file(profile)
+                .header("Authorization", "Bearer $access")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.signupStatus").value("COMPLETED"))
+        assertThat(members.findById(id).orElseThrow().birthYear).isEqualTo(1990)
+        assertThat(consents.findAllByMemberId(id).associate { it.type to (it.id to it.agreedAt) })
+            .isEqualTo(before)
+    }
+
+    @Test
+    fun `optional terms do not bypass required consent or duplicate validation`() {
+        val (id, access) = account()
+        val required = TermType.entries.filter { it.required }.map {
+            mapOf("type" to it, "version" to "v1", "agreed" to true)
+        }
+        val optional = mapOf("type" to TermType.DEMOGRAPHICS, "version" to "v1", "agreed" to true)
+        val invalid = listOf(
+            required.dropLast(1) + optional,
+            required + required.first() + optional,
+            required + optional + optional,
+            required.map { it + ("agreed" to false) } + optional,
+            required + (optional + ("agreed" to false))
+        )
+        invalid.forEach { agreements ->
+            mvc.perform(
+                post("/api/v1/auth/terms/agreements")
+                    .header("Authorization", "Bearer $access")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(mapper.writeValueAsBytes(mapOf("agreements" to agreements)))
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.error.code").value("COMMON_001"))
+            assertThat(consents.findAllByMemberId(id)).isEmpty()
+        }
+    }
+
+    @Test
+    fun `optional terms version mismatch rejects all consents atomically`() {
+        val (id, access) = account()
+        val agreements = TermType.entries.map {
+            mapOf("type" to it, "version" to if (it.required) "v1" else "old", "agreed" to true)
+        }
+        mvc.perform(
+            post("/api/v1/auth/terms/agreements")
+                .header("Authorization", "Bearer $access")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(mapOf("agreements" to agreements)))
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("AUTH_016"))
+        assertThat(consents.findAllByMemberId(id)).isEmpty()
     }
 
     @Test
