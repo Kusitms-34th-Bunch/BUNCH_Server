@@ -8,6 +8,8 @@ import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.dto.EditPublishedBundleRequest
+import com.bunch.bundle.dto.PublishedBundlePhotoInput
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleSnapshot
 import com.bunch.bundle.dto.BundleTextRequest
@@ -1276,47 +1278,19 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val assetId = publishedPhoto.imageAssetId
         val assetPublicId = source.imageAsset.publicId
 
-        val updatedTitle = bundleService.title(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleTextRequest("updated title", published.titleVersion, BundleStatus.PUBLISHED),
-            "published-title"
+        val updated = bundleService.editPublished(
+            actor(owner), bunchId, published.id,
+            publishedEdit(published).copy(
+                title = "updated title", visibility = Visibility.PUBLIC, date = LocalDate.of(2024, 2, 1),
+                photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = publishedPhoto.id, caption = "published caption"))
+            ), "published-save"
         )
-        assertThat(updatedTitle.title).isEqualTo("updated title")
-        val updatedVisibility = bundleService.visibility(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleVisibilityRequest(Visibility.PUBLIC, published.visibilityVersion, BundleStatus.PUBLISHED),
-            "published-visibility"
-        )
-        assertThat(updatedVisibility.visibility).isEqualTo(Visibility.PUBLIC)
-        val updatedDate = bundleService.date(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleDateRequest(LocalDate.of(2024, 2, 1), published.dateVersion, BundleStatus.PUBLISHED),
-            "published-date"
-        )
-        assertThat(updatedDate.date).isEqualTo(LocalDate.of(2024, 2, 1))
-        val updatedCaption = bundleService.caption(
-            actor(owner),
-            bunchId,
-            published.id,
-            publishedPhoto.id,
-            BundleTextRequest("published caption", 0, BundleStatus.PUBLISHED),
-            "published-caption"
-        )
-        assertThat(updatedCaption.photos.single().caption).isEqualTo("published caption")
+        assertThat(updated.title).isEqualTo("updated title")
+        assertThat(updated.visibility).isEqualTo(Visibility.PUBLIC)
+        assertThat(updated.date).isEqualTo(LocalDate.of(2024, 2, 1))
+        assertThat(updated.photos.single().caption).isEqualTo("published caption")
         assertBundleError(ErrorCode.FORBIDDEN) {
-            bundleService.title(
-                actor(guest),
-                bunchId,
-                published.id,
-                BundleTextRequest("guest title", updatedTitle.titleVersion, BundleStatus.PUBLISHED),
-                "guest-published-title"
-            )
+            bundleService.editPublished(actor(guest), bunchId, published.id, publishedEdit(updated), "guest-save")
         }
 
         photoService.removeUploader(bunchId, source.id, owner)
@@ -1348,10 +1322,9 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             val source = photo(bunchId, listOf(owner))
             val published = publishReadyBundle(owner, guest, bunchId, source, "stage-$offset")
             if (offset % 2 == 0) {
-                bundleService.visibility(
+                bundleService.editPublished(
                     actor(owner), bunchId, published.id,
-                    BundleVisibilityRequest(Visibility.PUBLIC, published.visibilityVersion, BundleStatus.PUBLISHED),
-                    "stage-public-$offset"
+                    publishedEdit(published).copy(visibility = Visibility.PUBLIC), "stage-public-$offset"
                 )
             }
             publishedIds += published.id
@@ -1372,7 +1345,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `published common content belongs only to current owner while authors keep their own comments`() {
+    fun `published common content belongs only to current owner and participant comments are immutable`() {
         val owner = member()
         val creator = member()
         val coOwner = member()
@@ -1421,24 +1394,21 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             writes.forEach { assertBundleError(ErrorCode.FORBIDDEN, it) }
             assertThat(lastActivity(bunchId, memberId)).isNull()
             val comment = bundleService.get(memberId, bunchId, published.id).comments.single { it.memberId == memberId }
-            val updated = bundleService.comment(actor(memberId), bunchId, published.id,
-                BundleTextRequest("my published comment", comment.version, BundleStatus.PUBLISHED), "own-comment")
-            assertThat(updated.comments.single { it.memberId == memberId }.content).isEqualTo("my published comment")
-            assertThat(lastActivity(bunchId, memberId)).isNotNull()
-            assertBundleError(ErrorCode.INVALID_INPUT) {
+            assertBundleError(ErrorCode.BUNDLE_STATE_CONFLICT) {
                 bundleService.comment(actor(memberId), bunchId, published.id,
-                    BundleTextRequest("", comment.version + 1, BundleStatus.PUBLISHED), "empty-published-comment")
+                    BundleTextRequest("my published comment", comment.version, BundleStatus.PUBLISHED), "own-comment")
             }
+            assertThat(lastActivity(bunchId, memberId)).isNull()
         }
 
         val ownerPermissions = bundleService.get(owner, bunchId, published.id).permissions
         assertThat(ownerPermissions.participant).isFalse()
         assertThat(ownerPermissions.canEdit).isTrue()
         assertThat(ownerPermissions.canDelete).isTrue()
-        bundleService.title(actor(owner), bunchId, published.id,
-            BundleTextRequest("main owner edit", published.titleVersion, BundleStatus.PUBLISHED), "owner-common")
+        bundleService.editPublished(actor(owner), bunchId, published.id,
+            publishedEdit(published).copy(title = "main owner edit"), "owner-common")
         assertThat(lastActivity(bunchId, owner)).isNull()
-        assertBundleError(ErrorCode.FORBIDDEN) {
+        assertBundleError(ErrorCode.BUNDLE_STATE_CONFLICT) {
             bundleService.comment(actor(owner), bunchId, published.id,
                 BundleTextRequest("not my comment", 0, BundleStatus.PUBLISHED), "owner-comment")
         }
@@ -1696,6 +1666,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             PublishBundleRequest(ready.revision)
         )
     }
+
+    private fun publishedEdit(value: BundleSnapshot) = EditPublishedBundleRequest(
+        value.revision, value.title, value.visibility!!, value.date,
+        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) },
+        emptyList()
+    )
 
     private fun inTransaction(action: () -> Unit) {
         TransactionTemplate(transactionManager).execute<Any?> {

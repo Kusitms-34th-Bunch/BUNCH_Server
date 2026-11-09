@@ -24,26 +24,26 @@ class BunchMembership(
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val role: MembershipRole,
+    var role: MembershipRole,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val status: MembershipStatus = MembershipStatus.ACTIVE,
+    var status: MembershipStatus = MembershipStatus.ACTIVE,
 
     @Column(nullable = false)
     val joinedAt: Instant,
 
     @Column(nullable = false)
-    val roleGrantedAt: Instant = joinedAt,
+    var roleGrantedAt: Instant = joinedAt,
 
     @Column(nullable = false)
     var lastUsedAt: Instant = joinedAt,
 
     @Column
-    val endedAt: Instant? = null,
+    var endedAt: Instant? = null,
 
     @Column
-    val roleGrantedBy: Long? = null,
+    var roleGrantedBy: Long? = null,
 
     @Column
     var lastActivityAt: Instant? = null,
@@ -64,5 +64,22 @@ class BunchMembership(
         outcome: JoinOutcome
     ) {
         joinRequests = joinRequests + (key.toString() to JoinRequest(fingerprint, outcome))
+    }
+
+    fun changeRole(
+        newRole: MembershipRole,
+        grantorMemberId: Long,
+        now: Instant
+    ) {
+        role = newRole
+        roleGrantedAt = now
+        roleGrantedBy = grantorMemberId
+    }
+
+    fun end(newStatus: MembershipStatus, endedAt: Instant) {
+        check(newStatus == MembershipStatus.LEFT || newStatus == MembershipStatus.REMOVED)
+        check(status == MembershipStatus.ACTIVE)
+        status = newStatus
+        this.endedAt = endedAt
     }
 }

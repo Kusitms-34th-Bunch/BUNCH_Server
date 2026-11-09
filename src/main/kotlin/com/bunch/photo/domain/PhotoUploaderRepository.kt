@@ -24,6 +24,16 @@ interface PhotoUploaderRepository : JpaRepository<PhotoUploader, Long> {
 
     fun countByMemberIdAndUploadBatchId(memberId: Long, uploadBatchId: UUID): Long
 
+    @Query(
+        "select uploader from PhotoUploader uploader " +
+            "where uploader.member.id = :memberId and uploader.photo.bunch.id = :bunchId " +
+            "order by uploader.photo.id asc, uploader.id asc"
+    )
+    fun findAllByMemberIdAndBunchIdOrderByPhotoIdAndIdAsc(
+        @Param("memberId") memberId: Long,
+        @Param("bunchId") bunchId: Long
+    ): List<PhotoUploader>
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         "select uploader from PhotoUploader uploader " +

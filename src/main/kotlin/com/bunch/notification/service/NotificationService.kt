@@ -1,6 +1,7 @@
 package com.bunch.notification.service
 
 import com.bunch.bunch.domain.BunchMembershipRepository
+import com.bunch.bunch.service.BunchSocialAccessService
 import com.bunch.member.domain.MemberRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
@@ -31,7 +32,9 @@ class NotificationService(
     private val bundles: BundleRepository,
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
-    private val clock: Clock
+    private val clock: Clock,
+    private val socialAccess: BunchSocialAccessService,
+    private val publishedAccess: PublishedNotificationAccess
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun list(memberId: Long, bunchId: Long, page: Int, size: Int): NotificationPage {
@@ -79,29 +82,48 @@ class NotificationService(
     }
 
     private fun available(memberId: Long, target: NotificationTarget): Boolean {
-        if (memberships.findByMemberIdAndBunchIdAndStatus(memberId, target.bunchId) == null) return false
         return when (target.kind) {
-            NotificationTargetKind.BUNCH_HOME,
-            NotificationTargetKind.MEMBERS,
+            NotificationTargetKind.BUNCH_HOME -> targetAvailable(memberId, target.bunchId)
+            NotificationTargetKind.MEMBERS -> targetAvailable(memberId, target.bunchId, requireContent = true)
             NotificationTargetKind.ROLE_PERMISSIONS,
-            NotificationTargetKind.DRAFT_LIST -> true
+            NotificationTargetKind.DRAFT_LIST -> hasMembership(memberId, target.bunchId)
             NotificationTargetKind.DRAFT -> {
+                if (!hasMembership(memberId, target.bunchId)) return false
                 val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
                 bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.DRAFT &&
                     access.isParticipant(memberId, bundle.id)
             }
             NotificationTargetKind.BUNDLE,
             NotificationTargetKind.BUNDLE_COMMENTS -> {
-                val bundle = target.bundleId?.let { bundles.findById(it).orElse(null) }
-                bundle != null && bundle.bunchId == target.bunchId && bundle.status == BundleStatus.PUBLISHED
+                publishedAccess.canOpen(memberId, target)
             }
-            // External relationship and access-notice producers are not implemented in this pass.
-            // No stored payload is accepted as evidence of access to these destinations.
+            NotificationTargetKind.OTHER_BUNCH_PROFILE -> {
+                val targetId = target.targetBunchId ?: return false
+                targetAvailable(memberId, targetId)
+            }
+            // These destinations still have no real producer/access implementation.
             NotificationTargetKind.CANDIDATES,
-            NotificationTargetKind.OTHER_BUNCH_PROFILE,
             NotificationTargetKind.ACCESS_NOTICE -> false
         }
     }
+
+    private fun targetAvailable(memberId: Long, targetId: Long, requireContent: Boolean = false): Boolean {
+        try {
+            socialAccess.target(memberId, targetId, requireContent)
+            return true
+        } catch (ex: BusinessException) {
+            if (ex.errorCode !in setOf(
+                    ErrorCode.BUNCH_PROFILE_UNAVAILABLE,
+                    ErrorCode.BUNCH_ACCESS_UNAVAILABLE,
+                    ErrorCode.FORBIDDEN
+                )
+            ) throw ex
+            return false
+        }
+    }
+
+    private fun hasMembership(memberId: Long, bunchId: Long): Boolean =
+        memberships.findByMemberIdAndBunchIdAndStatus(memberId, bunchId) != null
 
     private fun owned(memberId: Long, bunchId: Long, id: Long): Notification =
         notifications.findOwnedLocked(id, memberId, bunchId, cutoff())

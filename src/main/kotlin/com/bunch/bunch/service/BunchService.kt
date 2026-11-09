@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.multipart.MultipartFile
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Service
@@ -30,10 +31,16 @@ class BunchService(
     private val transactions = TransactionTemplate(transactionManager)
 
     @Transactional(readOnly = true)
-    fun nameAvailability(userId: Long, name: String): NameAvailability {
+    fun nameAvailability(userId: Long, name: String, excludeBunchId: Long? = null): NameAvailability {
         completed(userId)
         val normalized = ProfileText.name(name)
-        return NameAvailability(normalized, !bunches.existsByName(normalized))
+        val available = if (excludeBunchId == null) {
+            !bunches.existsByName(normalized)
+        } else {
+            requireOwner(userId, excludeBunchId)
+            !bunches.existsByNameAndIdNot(normalized, excludeBunchId)
+        }
+        return NameAvailability(normalized, available)
     }
 
     @Transactional
@@ -92,20 +99,13 @@ class BunchService(
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
             ?.let { BunchResponse.from(it.bunch) }
 
-    // A read-only check: the write paths below lock the bunch, but listing members changes nothing.
-    @Transactional(readOnly = true)
-    fun members(userId: Long, bunchId: Long): List<BunchMemberResponse> {
-        completed(userId)
-        if (!bunches.existsById(bunchId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
-        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        return memberships.findActiveMembers(bunchId).map(BunchMemberResponse::from)
-    }
-
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
         lockOwnerOrMember(userId, bunchId, ownerOnly = false)
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
-        membership.lastUsedAt = Instant.now()
+        val latest = memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)?.lastUsedAt
+        val now = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        membership.lastUsedAt = if (latest == null || now > latest) now else latest.plusNanos(1_000)
     }
 
     // Preflight avoids uploading for unauthorized callers. The second check protects against
@@ -156,6 +156,14 @@ class BunchService(
         val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId) ?: fail(ErrorCode.FORBIDDEN)
         if (ownerOnly && membership.role != MembershipRole.OWNER) fail(ErrorCode.FORBIDDEN)
         return bunch
+    }
+
+    private fun requireOwner(userId: Long, bunchId: Long) {
+        memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)?.let {
+            if (it.role == MembershipRole.OWNER) return
+        }
+        if (!bunches.existsById(bunchId)) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        fail(ErrorCode.FORBIDDEN)
     }
 
     private fun fingerprint(vararg values: String): String = MessageDigest.getInstance("SHA-256")

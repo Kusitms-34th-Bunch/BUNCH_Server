@@ -1,7 +1,8 @@
 # 번치 역할·버전·활동기록 계약 (#47)
 
 2026-10-31 승인 번치 계약 중 #47 구현 범위를 기록한다. 전체 홈·프로필 일괄 저장,
-역할 변경 API(#49), 나가기·내보내기(#25), 알림 저장·전송(#28)은 각 이슈에서 연결한다.
+나가기·내보내기(#25), 알림 저장·전송(#28)은 각 이슈에서 연결한다. 역할 변경 API는
+#49의 `BunchMembershipManagementService`와 역할 관리 계약을 따른다.
 번들 REST·STOMP 계약은 [번들 API](bundle-api.md), 생성·초대는
 [로그인·온보딩 API](login-onboarding-api.md)를 함께 따른다.
 
@@ -39,11 +40,46 @@ V11은 기존 적용 파일을 변경하지 않고 다음 필드를 추가한다
 - 후속 역할·인계·이탈 API는 같은 번치 잠금 아래 실제 변경 트랜잭션에서 membershipVersion을
   갱신해야 한다. 새 API·미사용 범용 변경 프레임워크는 추가하지 않는다.
 
-이 버전은 현재 생성·참여·이미지 API의 실제 변경에서 이미 기록된다. 버전 노출·충돌 검사를 하는
-프로필 일괄 저장·역할 관리 API까지 제공한다는 뜻은 아니다. 해당 API는 #49·#52의 범위다.
+이 버전은 현재 생성·참여·이미지 API의 실제 변경에서 이미 기록된다. 프로필 일괄 저장은 #52,
+역할 관리 API는 #49에서 버전 노출·충돌 검사까지 제공한다. `expectedMembershipVersion`은
+실제 역할 변경 때만 증가한 `membershipVersion`과 대조한다.
 `endedAt`·`roleGrantedBy`는 현재 API의 조회·변경 대상이 아니지만 승인된 소속 스키마의 필수 컬럼이다.
 V11의 기존 종료 소속 시각 백필·nullable 권한 부여자 FK 계약과 JPA 매핑을 함께 유지한다.
 이 필드를 위한 별도 조회·변경 헬퍼나 임시 API는 만들지 않는다.
+
+## #49 역할 관리 연결 계약
+
+`GET /api/v1/bunches/{bunchId}/memberships`는 `membershipId`, `memberId`, 현재 역할,
+`isMe`, `joinedAt`, 역할별 action과 본인 소속·`membershipVersion`을 반환한다. 기존
+`/members` 배열 응답은 호환성을 위해 유지한다. `OWNER`만 `CO_OWNER` 지정·해제와
+`POST /owner-transfer`를 실행할 수 있으며 OWNER는 항상 정확히 한 명이다.
+
+`PUT /memberships/{membershipId}/role`은 `actorMembershipId`,
+`expectedMembershipVersion`, 목표 `CO_OWNER`/`MEMBER`만 받는다. 이 요청에는
+`Idempotency-Key`를 추가하지 않는다. 동일 대상의 동일 목표 역할은 상태·멤버십 ID로
+추가 효과 없이 성공시키고, 실제 변경만 `membershipVersion`과 `roleGrantedAt`/`roleGrantedBy`를
+갱신한다. 다른 번치의 대상 Membership ID는 404, 오래된 실제 변경 버전은 409다.
+
+`POST /owner-transfer`만 UUID `Idempotency-Key`가 필수다. V16의
+`bunch_action_requests`와 `BunchActionRequest`/`BunchActionRequestRepository`는 이
+기능이 실제 사용하는 성공 재생 기록의 소유자다. `PROFILE`, `OWNER_TRANSFER`, `LEAVE`,
+`DELETE` 작업만 허용하며, #52 프로필 저장·#25 이탈·후속 #50 삭제는 같은 단순 테이블과
+Repository를 재사용한다. 성공 재생 조회는 `expiresAt > now`만 허용하고 정확히 30일이
+지난 `expiresAt <= now` 행은 인계 잠금 전에 정리한다. 인계는 먼저 가입 완료와 입력 형식을
+확인한 뒤 성공 재생을 번치 존재·현재 역할 검사보다 먼저 조회하고, 재생이 없을 때만 번치
+잠금 아래 같은 key를 다시 조회해 동시 중복 적용을 막는다. 그래서 번치 본체가 삭제된 뒤에도
+현재 세션의 같은 성공 인계 요청은 최소 결과를 재생하지만, 새 key는 삭제된 번치의 권한을
+우회하지 않는다. `deleteExpiredByBunchId`는 이 실제 인계 사용과 후속 공유 작업이 재사용할
+최소 만료 청소 함수다. 기존 부모 구현 호환용 단순 조회
+`findByMemberIdAndBunchIdAndOperationAndRequestKey`는 유지하고, #49 인계는
+`findActiveByMemberIdAndBunchIdAndOperationAndRequestKey(..., now)`를 사용한다.
+범용 명령·권한·재시도 프레임워크는 만들지 않는다.
+
+역할이 실제 변경되면 11/12/13번 `Notification`을 같은 DB 트랜잭션에 일반 저장한다.
+수신자는 변경된 대상이며 실행자는 제외하고, `target.kind`는 `ROLE_PERMISSIONS`다.
+실제 notification 저장 행을 #48의 `PushJobWriter.enqueue`에 전달해 현재 기기의 전송 대기도
+같은 트랜잭션에서 기록한다. 알림 또는 job 저장 실패는 역할 변경·버전·재생 기록과 함께
+롤백된다. 기기 없는 과거 알림의 소급 전송은 없으며 요청 replay는 알림·job을 만들지 않는다.
 
 ## 실제 활동
 

@@ -2,6 +2,7 @@ package com.bunch.bundle.controller
 
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.*
+import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.common.ApiResponse
 import com.bunch.global.exception.BusinessException
@@ -13,7 +14,10 @@ import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/bunches/{bunchId}/bundles")
-class BundleController(private val bundles: BundleService) {
+class BundleController(
+    private val bundles: BundleService,
+    private val locations: BundleLocationService
+) {
     @PostMapping
     fun create(
         authentication: Authentication,
@@ -65,6 +69,24 @@ class BundleController(private val bundles: BundleService) {
         @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
         @RequestBody request: BundleDateRequest
     ) = ApiResponse.ok(bundles.date(actor(authentication), bunchId, id, request, correlation(requestId)))
+
+    @GetMapping("/{bundleId}/locations")
+    fun getLocations(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable bundleId: Long
+    ) = ApiResponse.ok(locations.get(userId(authentication), bunchId, bundleId))
+
+    @PutMapping("/{bundleId}/locations")
+    fun saveDraftLocations(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable bundleId: Long,
+        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
+        @RequestBody request: BundleLocationsRequest
+    ) = ApiResponse.ok(
+        locations.saveDraft(actor(authentication), bunchId, bundleId, request, correlation(requestId))
+    )
 
     @PutMapping("/{id}/comments/me")
     fun comment(
@@ -144,6 +166,15 @@ class BundleController(private val bundles: BundleService) {
         @RequestHeader("Idempotency-Key") key: UUID,
         @RequestBody request: PublishBundleRequest
     ) = ApiResponse.ok(bundles.publish(actor(authentication), bunchId, id, key, request))
+
+    @PutMapping("/{id}/published")
+    fun editPublished(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable id: Long,
+        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
+        @RequestBody request: EditPublishedBundleRequest
+    ) = ApiResponse.ok(bundles.editPublished(actor(authentication), bunchId, id, request, correlation(requestId)))
 
     @DeleteMapping("/{id}")
     fun delete(

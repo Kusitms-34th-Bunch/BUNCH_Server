@@ -1,5 +1,7 @@
 package com.bunch.auth.service
 
+import com.bunch.auth.dto.AuthResponses
+import com.bunch.global.common.ProfileText
 import com.bunch.global.oidc.SocialTokenVerifier
 import com.bunch.global.redis.IdTokenReplayRepository
 import com.bunch.global.redis.RefreshTokenRepository
@@ -8,9 +10,12 @@ import com.bunch.global.security.TokenProvider
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.oidc.AuthProvider
+import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.service.SocialMemberRegistry
+import com.bunch.notification.service.PushDeviceService
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 @Service
@@ -20,7 +25,8 @@ class AuthService(
     private val replayTokens: IdTokenReplayRepository,
     private val registry: SocialMemberRegistry,
     private val members: MemberRepository,
-    verifiers: List<SocialTokenVerifier>
+    verifiers: List<SocialTokenVerifier>,
+    private val pushDevices: PushDeviceService
 ) {
     private val verifiers = verifiers.associateBy { it.provider }
 
@@ -51,6 +57,21 @@ class AuthService(
         )
 
         return pair
+    }
+
+    fun issueDevToken(nickname: String): AuthResponses.DevTokenResponse {
+        val name = ProfileText.name(nickname)
+        val member = (members.findByNickname(name) ?: members.save(Member(nickname = name)))
+            .requireActive()
+        val sessionId = UUID.randomUUID().toString()
+        val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)
+        refreshTokens.save(
+            sessionId,
+            member.id,
+            pair.refreshToken,
+            tokenProvider.getRefreshTokenValiditySeconds()
+        )
+        return AuthResponses.DevTokenResponse(member.id, pair.accessToken)
     }
 
     fun reissue(refreshToken: String): TokenPair {
@@ -95,8 +116,14 @@ class AuthService(
         return pair
     }
 
+    @Transactional
     fun logout(userId: String, sessionId: String) {
         val id = userId.toLongOrNull() ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        val sid = runCatching { UUID.fromString(sessionId) }.getOrNull()
+            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        members.findLockedById(id)?.requireActive() ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        if (!refreshTokens.isActive(sessionId, id)) throw BusinessException(ErrorCode.UNAUTHORIZED)
+        pushDevices.logoutSession(id, sid)
         if (!refreshTokens.delete(sessionId, id))
             throw BusinessException(ErrorCode.UNAUTHORIZED)
     }

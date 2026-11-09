@@ -60,6 +60,9 @@ class Bundle(
     @Column(name = "date_version", nullable = false)
     var dateVersion: Long = 0,
 
+    @Column(name = "location_version", nullable = false)
+    var locationVersion: Long = 0,
+
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now(),
 
@@ -70,5 +73,8 @@ class Bundle(
     var publishedAt: Instant? = null,
 
     @Column(name = "ready_notified_at")
-    var publishReadyNotifiedAt: Instant? = null
+    var publishReadyNotifiedAt: Instant? = null,
+
+    @Column(name = "recommended_date")
+    val recommendedDate: LocalDate? = null
 )

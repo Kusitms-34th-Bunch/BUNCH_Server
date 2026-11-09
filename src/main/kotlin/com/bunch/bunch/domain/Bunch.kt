@@ -24,14 +24,14 @@ class Bunch(
     val id: Long = 0,
 
     @Column(nullable = false, length = 120, unique = true)
-    val name: String,
+    var name: String,
 
     @Column(nullable = false, columnDefinition = "text")
-    val introduction: String,
+    var introduction: String,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
-    val visibility: Visibility,
+    var visibility: Visibility,
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)

@@ -7,6 +7,7 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.image.ImageFingerprint
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.global.image.PhotoImageUrls
@@ -17,6 +18,8 @@ import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.photo.domain.DateSource
 import com.bunch.photo.domain.Photo
+import com.bunch.photo.domain.PhotoImageFingerprint
+import com.bunch.photo.domain.PhotoImageFingerprintRepository
 import com.bunch.photo.domain.PhotoListCursor
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUndatedCursor
@@ -46,6 +49,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.HexFormat
+import java.util.UUID
 
 /**
  * The photos of a bunch: what the photo box screens call (upload, list, delete) and what other domains call
@@ -60,6 +64,7 @@ class PhotoService(
     private val bunches: BunchRepository,
     private val photos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
+    private val fingerprints: PhotoImageFingerprintRepository,
     private val imageAssets: ImageAssetService,
     private val imageAssetRepository: ImageAssetRepository,
     private val storage: PhotoImageStorage,
@@ -130,9 +135,10 @@ class PhotoService(
         val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash) }
         if (shared != null) return shared
 
+        val fingerprint = ImageFingerprint.of(image.bytes)
         val file = storage.upload(image)
         val result = try {
-            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file) }!!
+            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint) }!!
         } catch (ex: Exception) {
             discardUnlessSaved(file)
             throw ex
@@ -149,7 +155,12 @@ class PhotoService(
         return null
     }
 
-    private fun saveUpload(command: PhotoUploadCommand, hash: String, file: StoredImage): PhotoUploadResult {
+    private fun saveUpload(
+        command: PhotoUploadCommand,
+        hash: String,
+        file: StoredImage,
+        fingerprint: Long?
+    ): PhotoUploadResult {
         val locked = lockForUpload(command)
         photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
@@ -165,6 +176,7 @@ class PhotoService(
                 dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF
             )
         )
+        fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
         locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))
@@ -397,18 +409,42 @@ class PhotoService(
 
         if (photo.bunch.id != bunchId) fail(ErrorCode.FORBIDDEN)
 
-        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photoId)
+        return removeLockedUploader(photo, memberId, finalDeletionCallback)
+    }
+
+    /**
+     * Removes every uploader row for one member while keeping the bunch and all photo locks
+     * in the contract's order. The caller owns the surrounding membership transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllUploaders(
+        bunchId: Long,
+        memberId: Long
+    ): List<PhotoUploaderRemovalResult> {
+        lockBunch(bunchId)
+        return photos
+            .findAllLockedByBunchIdAndUploaderMemberIdOrderByIdAsc(bunchId, memberId)
+            .map { removeLockedUploader(it, memberId, PhotoFinalDeletionCallback.NONE) }
+    }
+
+    private fun removeLockedUploader(
+        photo: Photo,
+        memberId: Long,
+        finalDeletionCallback: PhotoFinalDeletionCallback
+    ): PhotoUploaderRemovalResult {
+
+        val rows = uploaders.findAllLockedByPhotoIdOrderByIdAsc(photo.id)
         val target = rows.firstOrNull { it.member.id == memberId }
-            ?: return PhotoUploaderRemovalResult(photoId, uploaderRemoved = false, photoDeleted = false)
+            ?: return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = false, photoDeleted = false)
 
         uploaders.delete(target)
-        announceChange(bunchId, photo.capturedDate)
+        announceChange(photo.bunch.id, photo.capturedDate)
         if (rows.size > 1) {
-            return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = false)
+            return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = false)
         }
 
         deleteLocked(photo, finalDeletionCallback)
-        return PhotoUploaderRemovalResult(photoId, uploaderRemoved = true, photoDeleted = true)
+        return PhotoUploaderRemovalResult(photo.id, uploaderRemoved = true, photoDeleted = true)
     }
 
     /**
@@ -461,7 +497,7 @@ class PhotoService(
         val ids = selection.photos.map { it.id }
         // Read before the update: the dates the photos leave are the dates whose recommendations must be recalculated.
         val leftDates = selection.photos.mapNotNull { it.capturedDate }.toSet()
-        if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate)
+        if (newDate == null) photos.clearCapturedDate(ids) else photos.setCapturedDate(ids, newDate, UUID.randomUUID())
         (leftDates + listOfNotNull(newDate)).forEach { announceChange(bunchId, it) }
         return PhotoDateChangeResponse(ids.size)
     }
