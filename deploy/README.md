@@ -86,7 +86,10 @@ openssl rand 64 | openssl base64 -A
 
 - `JWT_SECRET`: 디코딩 후 64바이트 이상인 Base64 값. 재배포할 때 유지한다.
 - `APPLE_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `KAKAO_NATIVE_APP_KEY`: 실제 앱의 인증 설정.
-- `TERMS_*`: 앱 약관 원문과 같은 버전. 가입·온보딩 배포 전 4개를 채운다.
+- `TERMS_*`: 약관의 현재 버전. 서비스·개인정보 약관은 같은 버전의 원문이 DB(`terms_documents`)에
+  있어야 한다. 가입·온보딩 배포 전 4개를 채운다.
+- `SUPPORT_OPEN_CHAT_URL`: 마이페이지 문의하기의 카카오톡 오픈채팅 `https` 링크. 마이페이지 배포 전에 채운다.
+  비어 있으면 서버는 기동하지만 문의 채널 API가 503이다.
 - `CLOUDINARY_*`: 사진 저장 설정. 사진 기능 배포 전에 채운다.
 - `BUNCH_INVITATION_BASE_URL`: 실제 공개 초대장 URL 접두사.
 - `SPRING_PROFILES_ACTIVE=prod`: Swagger 기본 비활성화.

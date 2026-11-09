@@ -136,16 +136,18 @@ set +a
 
 | 변수 | 용도 |
 | --- | --- |
-| `TERMS_SERVICE_VERSION` / `TERMS_PRIVACY_VERSION` / `TERMS_AGE_VERSION` | 앱의 승인 원문과 일치하는 필수 약관 버전 |
+| `TERMS_SERVICE_VERSION` / `TERMS_PRIVACY_VERSION` / `TERMS_AGE_VERSION` | 필수 약관의 현재 버전. 서비스·개인정보 약관은 같은 버전의 원문이 `terms_documents`에 있어야 한다 |
 | `TERMS_DEMOGRAPHICS_VERSION` | 분석 목적 선택 개인정보 동의 버전 |
+| `SUPPORT_OPEN_CHAT_URL` | 마이페이지 문의하기가 연결할 카카오톡 오픈채팅 `https` 링크. 미설정·잘못된 값이면 문의 채널 API는 503 |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | 서버의 프로필 사진 업로드·삭제 |
 | `BUNCH_INVITATION_BASE_URL` | 실제 공개 웹·앱에 연결할 초대 URL 접두사. 로컬 기본 `http://localhost:3000/invite` |
 
-약관 버전 미설정 시 관련 API는 503이다. 테스트 프로필의 `v1`은 운영 약관이 아니다.
+약관 버전 미설정 시 관련 API는 503이다. 설정한 버전의 원문 행이 없어도 원문 조회는 503이다.
+테스트 프로필의 `v1`은 운영 약관이 아니다.
 사진 설정이 없어도 서버는 기동하며, 개인 사진 저장 실패는 기본 이미지로 가입을 완료한다.
 번치 사진 변경 실패는 기존 이미지를 유지한다. 서버는 앱이 변환한 JPEG만 받는다.
 이전 sid 없는 인증 토큰은 세션 정책 변경 배포 후 다시 로그인해야 한다.
-실제 약관 원문·이미지 디자인·초대 도메인/AASA는 앱 연동 시 별도로 준비한다.
+실제 약관 원문(확정 후 마이그레이션으로 추가)·이미지 디자인·초대 도메인/AASA는 앱 연동 시 별도로 준비한다.
 
 ## 이미지·Photo 기반
 

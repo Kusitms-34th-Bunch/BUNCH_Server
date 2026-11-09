@@ -35,8 +35,9 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 - 가입 중 허용: 로그인/재발급, 본인 프로필·온보딩 조회, 약관 조회·동의, 닉네임 확인, 가입 완료, 로그아웃.
   나머지 제품 기능은 403 SIGNUP_INCOMPLETE로 거부한다.
 - 필수 약관 enum: SERVICE / PRIVACY / AGE_OVER_14. 선택 분석 동의는 DEMOGRAPHICS.
-  앱이 승인된 원문을 제공하고 서버는 현재 버전과 동의 이력·시각을 관리한다.
-  실제 버전은 설정값으로 공급하며 테스트용 v1을 운영 약관 버전으로 간주하지 않는다.
+  서버는 서비스 이용약관·개인정보처리방침 원문([조회](#terms-documents))과 현재 버전,
+  동의 이력·시각을 관리한다. 실제 버전은 설정값으로 공급하며 테스트용 v1을 운영 약관 버전으로
+  간주하지 않는다.
 - 필수 항목 3개를 모두 현재 버전으로 제출해야 한다. 일부·중복 종류·미동의는 400,
   버전이 다르면 409. 동의 저장은 원자 처리하고 같은 버전 재요청은 이력을 중복 생성하지 않는다.
 - 이미 동의한 가입 중 사용자는 일반 재진입 시 프로필로 간다. 프로필의 명시적 뒤로가기는
@@ -123,7 +124,9 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, birthYear, gender, defaultBunch |
 | PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,birthYear?,gender?,imageAction; photo? + Idempotency-Key | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
-| GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] |
+| GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] (현재 약관 버전 조회, 원문 없음) |
+| GET /api/v1/auth/terms/{type} | 없음. type은 SERVICE / PRIVACY | type, version, effectiveDate, clauses([상세](#terms-documents)) |
+| GET /api/v1/members/support-channel | 없음 | openChatUrl([상세](#support-channel)) |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
 | GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available |
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
@@ -210,6 +213,67 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 재시도·키 충돌,
 가입 미완료·정지·탈퇴, 멤버 목록·기존 알림 문구와 HTTP 계약(헤더·파트 누락, 잘못된 JSON/enum, 401)을 확인한다.
 
+<a id="terms-documents"></a>
+### 약관·개인정보처리방침 원문 조회 — 이슈 #110
+
+기준은 마이 기능명세서 7.4.1~7.4.3과 가입 약관 화면 1.3.2다. 마이페이지와 가입 약관 화면이
+**같은 API**로 현재 적용 중인 최신 원문을 읽는다. 목록 API(`GET /auth/terms`)는 버전·필수 여부만 주고
+본문은 종류별 조회로 분리해, 원문 로딩 실패가 목록 화면과 체크 상태에 영향을 주지 않게 한다.
+
+`GET /api/v1/auth/terms/{type}`은 유효한 access JWT와 ACTIVE 계정을 요구한다. 가입 중 계정도
+읽을 수 있다(1.3.2). 정지·탈퇴 계정은 401 `AUTH_001`이다.
+
+| 항목 | 규칙 |
+| --- | --- |
+| type | `SERVICE`(서비스 이용약관, 7.4.1), `PRIVACY`(개인정보처리방침, 7.4.2). 대소문자를 구분하며 다른 값은 400 `COMMON_001` |
+| 원문이 없는 종류 | `AGE_OVER_14`(원문 없음, 1.3.1)와 `DEMOGRAPHICS`는 404 `RESOURCE_001` |
+| 현재 버전 | 동의 저장이 검증하는 설정값(`TERMS_*_VERSION`)과 **같은 버전**의 원문만 준다. 원문과 동의 버전이 어긋나지 않는다 |
+| 응답 `version` | 설정 버전 문자열 그대로다. 화면의 「버전 N」 표기는 앱이 다듬는다 |
+| 응답 `effectiveDate` | `YYYY-MM-DD`. 화면의 「시행일자: YYYY. MM. DD」는 앱이 포맷한다 |
+| 응답 `clauses` | 조항 순서대로 `[{title, blocks}]`. `title`은 굵게 보이는 조항 제목(예: 「제 1조 (목적)」) |
+| `blocks` | 순서대로 이어서 보여준다. `{type:"PARAGRAPH", text}`는 본문, `{type:"LIST", items:[…]}`는 번호를 붙여 들여 쓰는 목록 본문이다. 쓰지 않는 필드는 응답에서 빠진다 |
+
+- 설정 버전이 비었거나, 그 버전의 원문이 없거나, 저장된 원문이 불완전하면(빈 제목·빈 조항·
+  본문이 없는 PARAGRAPH·항목이 없거나 빈 항목이 있는 LIST·종류에 맞지 않는 필드) 깨진 약관을 보이지
+  않도록 503 `TERMS_UNAVAILABLE`(`AUTH_017`)을 준다. 앱은 7.4.3의 연결 끊김 배너와
+  「약관을 불러오지 못했어요」 안내를 보이고 재시도할 수 있다.
+- 본문의 줄바꿈·특수문자는 가공하지 않고 그대로 준다.
+- 원문은 `terms_documents`(종류+버전 유일, 종류는 SERVICE/PRIVACY만, 조항은 비어 있지 않은 JSON 배열)에
+  저장한다. 운영자 화면이나 API는 만들지 않는다.
+
+**원문 반영 절차(약관 확정 후):** 새 Flyway 마이그레이션으로 `terms_documents`에 한 행을 추가하고, 배포
+환경의 해당 `TERMS_*_VERSION`을 그 버전으로 바꾼다. 앱 업데이트는 필요하지 않다. 이 저장소에는
+**약관 본문을 넣지 않았다**(7.4.1: 약관 내용은 확정되면 반영한다). 약관 본문이 없는 환경에서는 위 503이
+정상 동작이며, 테스트의 약관 문구와 `v1`은 운영 약관이 아니다.
+
+**선행 확정 항목:** 7.4.2의 「개인정보처리방침」과 1.3.1의 「개인정보 수집·이용 동의」가 같은 문서
+(`PRIVACY`)인지 기획 확인이 필요하다. 이 구현은 같은 문서로 본다. 갱신 시 재동의 대상·차단 정책과
+약관 관리 화면은 이 이슈의 범위가 아니다.
+
+<a id="support-channel"></a>
+### 문의 채널 조회 — 이슈 #110
+
+기준은 마이 기능명세서 7.5.1이다. `GET /api/v1/members/support-channel`은 카카오톡 오픈채팅 상담
+링크를 서버 설정값으로 내려주며 앱 업데이트 없이 바꿀 수 있다. 앱 안에서 문의를 받거나 저장하지
+않으므로 문의 저장소는 없다.
+
+- 응답 `data`는 `{openChatUrl}` 하나다. 가입 완료한 ACTIVE 회원만 호출할 수 있다. 가입 중 계정은 403
+  `AUTH_015`, 정지·탈퇴 계정은 401 `AUTH_001`, 미인증은 401이다(가입 중에는 가입 절차 기능만 쓴다).
+- 링크는 환경 변수 `SUPPORT_OPEN_CHAT_URL`(`support.open-chat-url`)로 주입한다. 값은 앞뒤 공백을 지우고
+  `https` 스킴과 호스트가 있어야 하며, 계정 정보(`user:pw@`)·공백·제어 문자·2048자 초과는 허용하지 않는다.
+  호스트는 제한하지 않는다.
+- 값이 비었거나 위 조건에 맞지 않으면 빈 링크를 주지 않고 503 `SUPPORT_CHANNEL_UNAVAILABLE`(`USER_004`)이다.
+  서버 기동은 막지 않는다. 앱은 7.5.1 예외처럼 토스트 「일시적인 오류가 발생했어요. 다시 시도해 주세요」를 보인다.
+- 앱 책임: 「'카카오톡'에서 열기」 확인 모달(취소/열기), 카카오톡 오픈채팅으로 전환, 링크를 열지 못했을 때의 토스트.
+- 로그아웃(7.5.2)은 기존 `POST /api/v1/auth/logout`이 이미 충족한다. 이 기기 세션의 푸시 토큰 연결을 해제하고
+  대기 중인 푸시 작업을 취소하며, 계정 데이터와 다른 기기의 로그인은 그대로 둔다.
+
+검증 기준: 실제 PostgreSQL·Redis와 JWT 인증을 거쳐 두 종류 원문의 필드·조항 순서·목록 블록·줄바꿈 보존,
+현재 버전만 제공·다른 버전만 있을 때 503, 원문 없음 503, 원문 없는 종류 404, 잘못된 type 400,
+불완전한 원문 9가지 503, 가입 중 허용, 미인증·정지·탈퇴 401, 목록 API가 본문 없이 버전만 줌,
+DB 제약(중복 버전·다른 종류·빈 배열), 문의 링크의 정상·미설정 503·가입 중 403·정지/탈퇴 401과
+링크 검증(http·스킴 없음·계정 정보·공백·길이 등)을 확인한다.
+
 <a id="bunch-members"></a>
 ### 번치 멤버 목록 조회 — 이슈 #43
 
@@ -248,7 +312,8 @@ ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책�
 경합·사진 실패, 생성 롤백·동시 초대 발급·코드·정원/소속 한도·요청 재시도·알림 중복을 검증한다.
 기존 Flyway는 수정하지 않으며 새 마이그레이션+JPA validate+전체 clean build가 필요하다.
 사진 외부 호출은 로컬 HTTP stub으로 검증하고 실제 Cloudinary/iOS 연동은 별도로 기록한다.
-실제 약관 원문/버전, Cloudinary 계정 설정, 초대 도메인·앱 이미지 매핑이 준비되어야 앱 연동 가능하다.
+실제 약관 원문(확정 후 마이그레이션으로 반영)과 버전, 오픈채팅 링크(`SUPPORT_OPEN_CHAT_URL`),
+Cloudinary 계정 설정, 초대 도메인·앱 이미지 매핑이 준비되어야 앱 연동 가능하다.
 
 정리 계획: 인증의 단일 refresh 구현만 세션 단위로 교체하고 기존 검증기를 재사용한다.
 기존 테스트로 OIDC·회원 유일성·응답 계약을 보호한 뒤 동작 변경 테스트를 교체/추가한다.
