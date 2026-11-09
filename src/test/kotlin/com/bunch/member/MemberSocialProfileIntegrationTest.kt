@@ -80,7 +80,10 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.data.imageUrl").value("https://example.com/public.jpg"))
             .andExpect(jsonPath("$.data.bunches[0].bunch.imageUrl").value("https://example.com/public.jpg"))
             .andExpect(jsonPath("$.data.bunches[0].bunch.visibility").value("PRIVATE"))
-            .andExpect(jsonPath("$.data.bunches[0].showFollowButton").value(false))
+            .andExpect(jsonPath("$.data.currentBunchId").value(null as Any?))
+            .andExpect(jsonPath("$.data.bunches[0].showFollowButton").value(true))
+            .andExpect(jsonPath("$.data.bunches[0].followState").value("NONE"))
+            .andExpect(jsonPath("$.data.bunches[0].followId").value(null as Any?))
             .andReturn().response.contentAsString
         val data = mapper.readTree(response).path("data")
         assertThat(data.fieldNames().asSequence().toSet())
@@ -199,14 +202,17 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `zero memberships are allowed for viewer and target while follow still requires an actor`() {
+    fun `zero memberships show follow buttons while actions still require an actor`() {
         val viewer = member()
         val target = member()
         assertThat(profiles.get(viewer, target).bunches).isEmpty()
         assertThat(profiles.get(viewer, target).currentBunchId).isNull()
         assertThat(profiles.get(viewer, target).imageUrl).isNull()
-        val bunch = addBunch(target, "비공개번치")
-        assertThat(row(viewer, target, bunch).showFollowButton).isFalse()
+        val bunch = addBunch(target, "공개번치", true)
+        val item = row(viewer, target, bunch)
+        assertThat(item.showFollowButton).isTrue()
+        assertThat(item.followState).isEqualTo(FollowState.NONE)
+        assertThat(item.followId).isNull()
         mvc.perform(put("/api/v1/bunches/$bunch/following/${create(member()).id}")
             .header("Authorization", bearer(viewer)))
             .andExpect(status().isConflict)
