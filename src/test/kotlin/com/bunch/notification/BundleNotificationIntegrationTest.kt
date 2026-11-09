@@ -7,6 +7,8 @@ import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.dto.EditPublishedBundleRequest
+import com.bunch.bundle.dto.PublishedBundlePhotoInput
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundlePhotoChangesRequest
 import com.bunch.bundle.dto.BundleSnapshot
@@ -280,40 +282,17 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
             PublishBundleRequest(ready.revision)
         )
         val beforePublishedEdits = notificationFingerprint(notificationsFor(bunchId))
-        val titled = bundleService.title(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleTextRequest("published edit", published.titleVersion, BundleStatus.PUBLISHED),
-            "published-title"
+        val edited = bundleService.editPublished(
+            actor(owner), bunchId, published.id,
+            EditPublishedBundleRequest(
+                published.revision, "published edit", Visibility.PUBLIC, published.date,
+                published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) } +
+                    PublishedBundlePhotoInput(photoId = publishedAddition.id, caption = ""),
+                emptyList()
+            ), "published-save"
         )
-        val visible = bundleService.visibility(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleVisibilityRequest(Visibility.PUBLIC, titled.visibilityVersion, BundleStatus.PUBLISHED),
-            "published-visibility"
-        )
-        val ownerComment = visible.comments.first { it.memberId == owner }
-        val commented = bundleService.comment(
-            actor(owner),
-            bunchId,
-            published.id,
-            BundleTextRequest("published comment", ownerComment.version, BundleStatus.PUBLISHED),
-            "published-comment"
-        )
-        bundleService.changePhotos(
-            actor(owner),
-            bunchId,
-            published.id,
-            UUID.randomUUID(),
-            BundlePhotoChangesRequest(
-                addPhotoIds = listOf(publishedAddition.id),
-                mode = BundleStatus.PUBLISHED
-            )
-        )
-
-        assertThat(commented.status).isEqualTo(BundleStatus.PUBLISHED)
+        assertThat(edited.status).isEqualTo(BundleStatus.PUBLISHED)
+        assertThat(edited.comments).isEqualTo(published.comments)
         assertThat(notificationFingerprint(notificationsFor(bunchId)))
             .containsExactlyElementsOf(beforePublishedEdits)
     }

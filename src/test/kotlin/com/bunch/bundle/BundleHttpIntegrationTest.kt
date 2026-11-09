@@ -332,7 +332,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `published bundles reject late draft writes and allow manager and self comment updates`() {
+    fun `published bundles reject late drafts and legacy individual or self comment updates`() {
         val fixture = fixture(photoCount = 1, participantUploads = false)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
@@ -431,9 +431,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             expectedVersion = published.path("titleVersion").asLong(),
             leaseToken = null,
             mode = BundleStatus.PUBLISHED
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.title").value("발행본 제목 수정"))
+        ).expectError(ErrorCode.BUNDLE_STATE_CONFLICT)
 
         titleRequest(
             fixture.participant,
@@ -445,23 +443,21 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             mode = BundleStatus.PUBLISHED
         ).expectError(ErrorCode.FORBIDDEN)
 
-        val updatedComments = commentRequest(
+        commentRequest(
             fixture.participant,
             fixture.bunchId,
             bundleId,
             value = "수정된 참여자 코멘트",
             expectedVersion = publishedParticipantCommentVersion,
             mode = BundleStatus.PUBLISHED
-        )
-            .andExpect(status().isOk)
-            .andReturn()
-            .data()
+        ).expectError(ErrorCode.BUNDLE_STATE_CONFLICT)
 
-        assertThat(updatedComments.path("comments").size()).isEqualTo(2)
-        assertThat(commentContent(updatedComments, fixture.owner.memberId))
-            .isEqualTo("생성자 코멘트")
-        assertThat(commentContent(updatedComments, fixture.participant.memberId))
-            .isEqualTo("수정된 참여자 코멘트")
+        val unchanged = mvc.perform(
+            get(bundlePath(fixture.bunchId, bundleId)).header(HttpHeaders.AUTHORIZATION, bearer(fixture.owner))
+        ).andExpect(status().isOk).andReturn().data()
+        assertThat(unchanged.path("comments").size()).isEqualTo(2)
+        assertThat(commentContent(unchanged, fixture.owner.memberId)).isEqualTo("생성자 코멘트")
+        assertThat(unchanged.path("revision").asLong()).isEqualTo(published.path("revision").asLong())
     }
 
     private fun fixture(photoCount: Int, participantUploads: Boolean = true): Fixture {
