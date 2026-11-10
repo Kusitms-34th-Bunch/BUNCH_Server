@@ -65,4 +65,16 @@ class Member(
         if (signupStatus != SignupStatus.COMPLETED) throw BusinessException(ErrorCode.SIGNUP_INCOMPLETE)
         return this
     }
+
+    // The row stays because published records still point at it, but nothing about the person remains (7.6.4).
+    fun withdraw() {
+        accountStatus = AccountStatus.WITHDRAWN
+        nickname = null
+        birthYear = null
+        gender = null
+        profileImageAsset = null
+        registrationFingerprint = null
+        profileRequestKey = null
+        profileRequestFingerprint = null
+    }
 }
