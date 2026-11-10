@@ -42,9 +42,10 @@ class TermsService(
             ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
         if (member.signupStatus == SignupStatus.COMPLETED) throw BusinessException(ErrorCode.FORBIDDEN)
         val required = TermType.entries.filter { it.required }.toSet()
+        val submitted = request.agreements.map { it.type }.toSet()
         if (
-            request.agreements.size != required.size ||
-                request.agreements.map { it.type }.toSet() != required ||
+            request.agreements.size != submitted.size ||
+                !submitted.containsAll(required) ||
                 request.agreements.any { !it.agreed }
         )
             throw BusinessException(ErrorCode.INVALID_INPUT)
