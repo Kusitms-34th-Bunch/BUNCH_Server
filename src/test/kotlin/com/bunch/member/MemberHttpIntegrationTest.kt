@@ -64,16 +64,15 @@ class MemberHttpIntegrationTest @Autowired constructor(
         imageAssetIds.clear()
     }
 
-    @ParameterizedTest
-    @EnumSource(Gender::class)
-    fun `returns only authenticated member profile even when another ID is supplied`(gender: Gender) {
+    @Test
+    fun `returns only authenticated member profile without birth year and gender even when another ID is supplied`() {
         val member = account(
             Member(
                 signupStatus = SignupStatus.COMPLETED,
                 nickname = "본인 ${UUID.randomUUID().toString().take(6)}",
                 profileImageAsset = imageAsset("private-image-id", "https://example.com/profile.jpg"),
                 birthYear = 2000,
-                gender = gender
+                gender = Gender.FEMALE
             )
         )
         val other = account(Member(nickname = "다른 ${UUID.randomUUID().toString().take(6)}"))
@@ -92,8 +91,6 @@ class MemberHttpIntegrationTest @Autowired constructor(
                     "memberId": ${member.id},
                     "nickname": "${member.nickname}",
                     "imageUrl": "https://example.com/profile.jpg",
-                    "birthYear": 2000,
-                    "gender": "$gender",
                     "defaultBunch": null
                   },
                   "error": null
@@ -103,6 +100,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
 
     @Test
     fun `pending account without terms can read explicitly null profile fields`() {
+        // The profile response carries no birth year or gender (my page 7.2.1).
         val member = account()
         val pair = session(member)
 
@@ -115,8 +113,6 @@ class MemberHttpIntegrationTest @Autowired constructor(
                     "memberId": ${member.id},
                     "nickname": null,
                     "imageUrl": null,
-                    "birthYear": null,
-                    "gender": null,
                     "defaultBunch": null
                   },
                   "error": null
@@ -125,7 +121,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `completed account can read default image and unselected demographics as null`() {
+    fun `completed account can read the default image as null`() {
         val member = account(
             Member(signupStatus = SignupStatus.COMPLETED, nickname = "선택 ${UUID.randomUUID().toString().take(6)}")
         )
@@ -140,8 +136,6 @@ class MemberHttpIntegrationTest @Autowired constructor(
                     "memberId": ${member.id},
                     "nickname": "${member.nickname}",
                     "imageUrl": null,
-                    "birthYear": null,
-                    "gender": null,
                     "defaultBunch": null
                   },
                   "error": null

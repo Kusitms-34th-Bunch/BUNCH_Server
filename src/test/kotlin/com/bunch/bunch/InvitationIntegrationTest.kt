@@ -96,7 +96,9 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         repeat(7) { join(member(), invite) }
         val card = invitations.publicPreview(invite.url.substringAfterLast('/'), "test-public-card")
         val fields = mapper.valueToTree<JsonNode>(card).fieldNames().asSequence().toSet()
-        assertThat(fields).containsExactlyInAnyOrder("name", "introduction", "imageUrl", "inviterNickname", "code")
+        assertThat(fields).containsExactlyInAnyOrder(
+            "name", "introduction", "imageUrl", "inviterNickname", "code", "characterType"
+        )
         assertThat(card.inviterNickname).isNotNull()
         jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE member_id = ?", owner)
         assertThat(invitations.publicPreview(invite.code, "test-public-card").inviterNickname).isNull()
