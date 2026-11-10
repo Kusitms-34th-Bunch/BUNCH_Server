@@ -1,5 +1,6 @@
 package com.bunch.global.flow
 
+import com.bunch.bunch.domain.CharacterType
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.member.domain.*
@@ -7,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -149,15 +152,18 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
         assertThat(consents.findAllByMemberId(id)).isEmpty()
     }
 
-    @Test
-    fun `pending signup resumes then creates invites and joins through authenticated APIs`() {
+    @ParameterizedTest
+    @EnumSource(CharacterType::class)
+    fun `pending signup resumes then creates invites and joins through authenticated APIs`(
+        characterType: CharacterType
+    ) {
         val (ownerId, ownerAccess) = account()
         mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer $ownerAccess"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.memberId").value(ownerId))
             .andExpect(jsonPath("$.data.signupStatus").value("IN_PROGRESS"))
             .andExpect(jsonPath("$.data.termsAccepted").value(false))
             .andExpect(jsonPath("$.data.defaultBunchId").isEmpty)
-        val createBody = """{"name":"HTTP 번치","introduction":"함께\n기록해요 👨‍👩‍👧‍👦","visibility":"PRIVATE","characterType":"TYPE_2"}"""
+        val createBody = """{"name":"HTTP 번치","introduction":"함께\n기록해요 👨‍👩‍👧‍👦","visibility":"PRIVATE","characterType":"$characterType"}"""
         val key = UUID.randomUUID().toString()
         mvc.perform(post("/api/v1/bunches").header("Authorization", "Bearer $ownerAccess")
             .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(createBody))
@@ -181,7 +187,7 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.data.defaultBunchId").isEmpty)
         val created = mvc.perform(post("/api/v1/bunches").header("Authorization", "Bearer $ownerAccess")
             .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(createBody))
-            .andExpect(status().isOk).andExpect(jsonPath("$.data.characterType").value("TYPE_2"))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.characterType").value(characterType.name))
             .andReturn().response.contentAsString
         val bunchId = mapper.readTree(created).path("data").path("id").asLong()
         val invitation = mvc.perform(post("/api/v1/bunches/$bunchId/invitations").header("Authorization", "Bearer $ownerAccess"))
@@ -192,12 +198,14 @@ class OnboardingHttpIntegrationTest @Autowired constructor(
         mvc.perform(get("/api/v1/invitations/$token"))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.name").value("HTTP 번치"))
             .andExpect(jsonPath("$.data.code").value(code))
+            .andExpect(jsonPath("$.data.characterType").value(characterType.name))
             .andExpect(jsonPath("$.data.memberCount").doesNotExist())
         val (_, joiningAccess) = account()
         register(joiningAccess, "HTTP 참여자")
         mvc.perform(post("/api/v1/invitations/verify").header("Authorization", "Bearer $joiningAccess")
             .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(mapOf("invitation" to code.lowercase()))))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.eligibility").value("AVAILABLE"))
+            .andExpect(jsonPath("$.data.card.characterType").value(characterType.name))
         val joinKey = UUID.randomUUID().toString()
         repeat(2) {
             mvc.perform(post("/api/v1/invitations/join").header("Authorization", "Bearer $joiningAccess")

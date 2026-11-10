@@ -136,9 +136,13 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/bunches/{id}/members | 없음 | canonical `[{memberId,nickname,imageUrl,role}]`; INTERNAL/허용된 EXTERNAL의 ACTIVE 멤버([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
-| GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
+| GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code,characterType |
 | POST /api/v1/invitations/verify | invitation | card,eligibility |
 | POST /api/v1/invitations/join | invitation + Idempotency-Key | outcome,bunch(생성 응답과 동일) |
+
+공개 초대 조회의 `data`와 초대 확인의 `data.card`는 같은 `InvitationCard`다.
+`characterType`은 대상 번치의 `TYPE_1 | TYPE_2 | TYPE_3 | TYPE_4`를 반환하는 필수 필드이며
+초대 확인 화면의 유형별 색상 표시에 사용한다. 기존 필드·인증·오류 동작은 유지한다.
 
 온보딩 상태 조회는 `GET /api/v1/members/me/onboarding`만 제공한다. 기존
 `/api/v1/auth/session` 경로는 alias로 유지하지 않으며 인증된 요청도 404다.
