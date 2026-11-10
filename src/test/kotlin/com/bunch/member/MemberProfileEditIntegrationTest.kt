@@ -150,7 +150,6 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         assertThat(saved.nickname).isEqualTo(member.nickname)
         assertThat(saved.birthYear).isEqualTo(1990)
         assertThat(saved.gender).isEqualTo(Gender.MALE)
-        assertThat(saved.profileRequestKey).isNull()
     }
 
     @Test
@@ -305,7 +304,6 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         assertThat(saved.nickname).isEqualTo(member.nickname)
         assertThat(saved.birthYear).isEqualTo(1990)
         assertThat(saved.profileImageAsset?.id).isEqualTo(old.id)
-        assertThat(saved.profileRequestKey).isNull()
     }
 
     @Test
@@ -328,34 +326,39 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `a retried request is applied and uploaded once`() {
+    fun `a retried request ends in the same state and the first upload is released`() {
         val member = member()
         val photo = photo(1, 3, 5)
-        val uploaded = StoredImage(publicId("once"), "https://res.cloudinary.com/test/once.jpg")
-        `when`(images.upload(photo)).thenReturn(uploaded)
-        val key = UUID.randomUUID()
+        val first = StoredImage(publicId("first"), "https://res.cloudinary.com/test/first.jpg")
+        val second = StoredImage(publicId("second"), "https://res.cloudinary.com/test/second.jpg")
+        `when`(images.upload(photo)).thenReturn(first, second)
         val nickname = unique("재시도")
 
-        edit(member, nickname = nickname, action = ProfileImageAction.REPLACE, photo = photo, key = key)
-        edit(member, nickname = nickname, action = ProfileImageAction.REPLACE, photo = photo, key = key)
+        edit(member, nickname = nickname, action = ProfileImageAction.REPLACE, photo = photo)
+        edit(member, nickname = nickname, action = ProfileImageAction.REPLACE, photo = photo)
 
-        verify(images, times(1)).upload(photo)
-        verify(images, never()).delete(uploaded.publicId)
-        assertThat(saved(member).imageUrl).isEqualTo(uploaded.url)
+        val saved = saved(member)
+        assertThat(saved.nickname).isEqualTo(nickname)
+        assertThat(saved.imageUrl).isEqualTo(second.url)
+        verify(images, times(2)).upload(photo)
+        verify(images).delete(first.publicId)
+        verify(images, never()).delete(second.publicId)
     }
 
     @Test
-    fun `the same key with other content conflicts while a new key is accepted`() {
-        val member = member()
-        val key = UUID.randomUUID()
-        val nickname = unique("키")
-        edit(member, nickname = nickname, key = key)
+    fun `the same final state sent twice changes nothing the second time`() {
+        val member = member(birthYear = 1990, gender = Gender.MALE)
+        val nickname = unique("같은")
 
-        val error = assertThrows<BusinessException> { edit(member, nickname = unique("다른"), key = key) }
+        edit(member, nickname = nickname)
+        val once = saved(member)
+        edit(member, nickname = nickname)
+        val twice = saved(member)
 
-        assertThat(error.errorCode).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT)
-        assertThat(saved(member).nickname).isEqualTo(nickname)
-        edit(member, nickname = unique("새키"))
+        assertThat(twice.nickname).isEqualTo(once.nickname)
+        assertThat(twice.birthYear).isEqualTo(once.birthYear)
+        assertThat(twice.gender).isEqualTo(once.gender)
+        assertThat(twice.profileImageAsset?.id).isEqualTo(once.profileImageAsset?.id)
     }
 
     @Test
@@ -420,9 +423,8 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         birthYear: Int? = member.birthYear,
         gender: Gender? = member.gender,
         action: ProfileImageAction = ProfileImageAction.KEEP,
-        photo: MultipartFile? = null,
-        key: UUID = UUID.randomUUID()
-    ) = service.update(member.id, key, MemberProfileRequest(nickname, birthYear, gender, action), photo)
+        photo: MultipartFile? = null
+    ) = service.update(member.id, MemberProfileRequest(nickname, birthYear, gender, action), photo)
 
     private fun member(
         nickname: String = unique("닉"),
