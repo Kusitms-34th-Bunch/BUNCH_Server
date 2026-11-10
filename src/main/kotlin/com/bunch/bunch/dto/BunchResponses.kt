@@ -57,7 +57,8 @@ data class InvitationCard(
     val introduction: String,
     val imageUrl: String?,
     val inviterNickname: String?,
-    val code: String
+    val code: String,
+    val characterType: CharacterType
 )
 
 data class InvitationVerification(

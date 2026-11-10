@@ -37,8 +37,11 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 - 필수 약관 enum: SERVICE / PRIVACY / AGE_OVER_14. 선택 분석 동의는 DEMOGRAPHICS.
   앱이 승인된 원문을 제공하고 서버는 현재 버전과 동의 이력·시각을 관리한다.
   실제 버전은 설정값으로 공급하며 테스트용 v1을 운영 약관 버전으로 간주하지 않는다.
-- 필수 항목 3개를 모두 현재 버전으로 제출해야 한다. 일부·중복 종류·미동의는 400,
-  버전이 다르면 409. 동의 저장은 원자 처리하고 같은 버전 재요청은 이력을 중복 생성하지 않는다.
+- 필수 항목 3개를 모두 현재 버전으로 제출해야 하며, 선택 항목 DEMOGRAPHICS도 함께
+  제출할 수 있다. 선택 미동의는 항목을 생략한다. 필수 누락·중복 종류·제출 항목의
+  agreed:false는 400, 제출한 필수·선택 항목의 버전이 다르면 409다.
+  동의 저장은 원자 처리하고 같은 버전 재요청은 이력을 중복 생성하지 않는다.
+  가입 완료의 demographicsConsentVersion으로 같은 선택 동의를 다시 제출해도 기존 이력·시각을 유지한다.
 - 이미 동의한 가입 중 사용자는 일반 재진입 시 프로필로 간다. 프로필의 명시적 뒤로가기는
   동의를 유지한 약관 화면 표시를 허용하고 재저장을 요구하지 않는다.
 - 별도 선택 동의는 분석 목적·회원 탈퇴 시까지 보관을 안내한다. 미동의 상태의 연도/성별
@@ -134,9 +137,13 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/bunches/{id}/members | 없음 | canonical `[{memberId,nickname,imageUrl,role}]`; INTERNAL/허용된 EXTERNAL의 ACTIVE 멤버([상세](#bunch-members)) |
 | PUT /api/v1/bunches/{id}/last-used | 없음 | null |
 | POST /api/v1/bunches/{id}/invitations | 없음 | url,code,expiresAt |
-| GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code |
+| GET /api/v1/invitations/{token} | 공개 | name,introduction,imageUrl,inviterNickname,code,characterType |
 | POST /api/v1/invitations/verify | invitation | card,eligibility |
 | POST /api/v1/invitations/join | invitation + Idempotency-Key | outcome,bunch(생성 응답과 동일) |
+
+공개 초대 조회의 `data`와 초대 확인의 `data.card`는 같은 `InvitationCard`다.
+`characterType`은 대상 번치의 `TYPE_1 | TYPE_2 | TYPE_3 | TYPE_4`를 반환하는 필수 필드이며
+초대 확인 화면의 유형별 색상 표시에 사용한다. 기존 필드·인증·오류 동작은 유지한다.
 
 온보딩 상태 조회는 `GET /api/v1/members/me/onboarding`만 제공한다. 기존
 `/api/v1/auth/session` 경로는 alias로 유지하지 않으며 인증된 요청도 404다.
