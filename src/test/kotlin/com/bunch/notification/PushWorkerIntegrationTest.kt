@@ -32,6 +32,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -208,6 +210,71 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `job of a category switched off after it was queued is cancelled before APNs`() {
+        val job = fixture(type = NotificationType.MEMBER_JOINED)
+        preference(job.recipientMemberId, enabled = true, categories = """{"MEMBER_ROLE":false}""")
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `job of another category is still sent when one category is off`() {
+        val job = fixture(type = NotificationType.MEMBER_JOINED)
+        preference(job.recipientMemberId, enabled = true, categories = """{"FOLLOW":false}""")
+        respond(job, ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+        assertThat(jobs.findById(job.id).orElseThrow().status).isEqualTo(PushJobStatus.SENT)
+    }
+
+    @Test
+    fun `job of a member without settings is still sent`() {
+        val job = fixture(type = NotificationType.MEMBER_JOINED)
+        respond(job, ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+        assertThat(jobs.findById(job.id).orElseThrow().status).isEqualTo(PushJobStatus.SENT)
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationType::class, names = ["MEMBER_REMOVED", "BUNCH_DELETED"])
+    fun `removal and bunch deletion are sent while the app push is on even if every category is off`(
+        type: NotificationType
+    ) {
+        val job = fixture(type = type)
+        preference(
+            job.recipientMemberId,
+            enabled = true,
+            categories = """{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}"""
+        )
+        respond(job, ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+        assertThat(jobs.findById(job.id).orElseThrow().status).isEqualTo(PushJobStatus.SENT)
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationType::class, names = ["MEMBER_REMOVED", "BUNCH_DELETED"])
+    fun `removal and bunch deletion are cancelled when the app push is off`(type: NotificationType) {
+        val job = fixture(type = type)
+        preference(job.recipientMemberId, enabled = false, categories = "{}")
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
+    fun `the removed growth notice is never sent`() {
+        val job = fixture(type = NotificationType.CHARACTER_GROWN) { _, bunchId ->
+            mapOf("kind" to NotificationTargetKind.BUNCH_HOME.name, "bunchId" to bunchId)
+        }
+
+        assertThat(worker.runOnce()).isZero()
+        assertCancelledWithoutProvider(job, "RecipientUnavailable")
+    }
+
+    @Test
     fun `reverse social block cancels other bunch profile job before APNs`() {
         val targetMemberId = member()
         val targetBunchId = create(targetMemberId).id
@@ -343,6 +410,16 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
             duringHttp()
             response
         }
+    }
+
+    private fun preference(memberId: Long, enabled: Boolean, categories: String) {
+        jdbc.update(
+            "INSERT INTO push_preferences(member_id, enabled, categories, updated_at) " +
+                "VALUES (?, ?, ?::jsonb, CURRENT_TIMESTAMP)",
+            memberId,
+            enabled,
+            categories
+        )
     }
 
     private fun assertCancelledWithoutProvider(job: PushJob, reason: String) {
