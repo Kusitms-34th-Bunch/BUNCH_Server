@@ -156,7 +156,10 @@ class BundleService(
         request: BundleVisibilityRequest,
         requestId: String
     ): BundleSnapshot {
-        val bundle = editable(actor, bunchId, id, request.mode)
+        val bundle = access.lock(actor.memberId, bunchId, id)
+        mode(bundle, request.mode)
+        if (bundle.status == BundleStatus.DRAFT) access.requireParticipant(actor.memberId, bundle)
+        else access.requireOwner(actor.memberId, bunchId)
         version(bundle.visibilityVersion, request.expectedVersion, mapOf("value" to bundle.visibility))
         if (bundle.visibility != request.value) {
             bundle.visibility = request.value
@@ -165,8 +168,10 @@ class BundleService(
                 "value" to request.value,
                 "version" to bundle.visibilityVersion
             ))
-            recordActivity(bundle, actor.memberId)
-            notifyReady(bundle, actor.memberId)
+            if (bundle.status == BundleStatus.DRAFT) {
+                recordActivity(bundle, actor.memberId)
+                notifyReady(bundle, actor.memberId)
+            }
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -480,11 +485,6 @@ class BundleService(
         if (bundle.title != title) {
             bundle.title = title
             bundle.titleVersion++
-            edited = true
-        }
-        if (bundle.visibility != request.visibility) {
-            bundle.visibility = request.visibility
-            bundle.visibilityVersion++
             edited = true
         }
         if (bundle.date != request.date) {

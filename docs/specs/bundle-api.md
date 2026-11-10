@@ -1,7 +1,8 @@
 # 번들 REST·STOMP 클라이언트 계약
 
-2026-11-07 승인한 [발행본 일괄 저장](published-bundle-edit.md)을 우선한다.
-`PUT /{bundleId}/published`로만 발행본을 저장하며 아래 개별 저장 API는 DRAFT 전용이다.
+2026-11-07 승인한 [발행본 계약](published-bundle-edit.md)과 2026-11-10 재전달된
+6.2.12·6.2.15(#124)를 따른다. 발행본 내용은 `PUT /{bundleId}/published`, 공개 범위는
+기존 `PUT /{bundleId}/visibility`로 분리한다. 나머지 개별 내용 저장 API는 DRAFT 전용이다.
 발행 후 참여자·멤버별 코멘트는 변경할 수 없다. 기존 comments 필드는 참여자 코멘트로 유지한다.
 
 장소 목록의 REST·LOCATION lease·이벤트·snapshot·내부 일괄 편집/콕 연계는
@@ -226,8 +227,16 @@ STOMP로 한 번 발행한다. 클라이언트는 같은 내용을 STOMP 명령�
 }
 ```
 
-`value`는 `PUBLIC` 또는 `PRIVATE`다. 공개 범위 저장에는 편집권이 필요하지 않지만
-`expectedVersion`과 `mode`는 검사한다.
+`value`는 `PUBLIC` 또는 `PRIVATE`다. 편집권 없이 최신 `visibilityVersion`을
+`expectedVersion`으로 보내며 `mode`는 실제 상태와 일치해야 한다. DRAFT는 참여자,
+PUBLISHED는 ACTIVE OWNER만 허용한다. 발행 참여자 여부는 요구하지 않는다.
+필수 expectedVersion의 누락/null 또는 잘못된 value/mode JSON은 400 `COMMON_002`다.
+모드 충돌은 `BUNDLE_002`, 버전 충돌은 no-op도 `BUNDLE_003`이며 기존 접근·권한 검사를 유지한다.
+
+실변경에 visibilityVersion·revision·updatedAt만 갱신하고 커밋 후 기존 `VISIBILITY` 이벤트를 보낸다.
+최신 버전의 동일 값은 no-op이다. 발행본의 내용·발행 시각·반응·코멘트는 보존하고 알림을 보내지 않는다.
+범위 변경 후 과거 expectedRevision의 내용 저장은 충돌하며, 내용 저장 후에는 변경되지 않은
+visibilityVersion으로 범위를 저장할 수 있다. 상세 오류·공개 의미·픽 연계는 [발행본 계약](published-bundle-edit.md)을 따른다.
 
 #### `BundleDateRequest`
 
@@ -246,7 +255,9 @@ null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 
 
 초안의 text·date·visibility·caption 저장은 참여자만 할 수 있다. 발행본의 제목·날짜·
 공개 범위·사진·캡션 수정은 현재 메인 관리자 OWNER만 할 수 있다. 발행본 코멘트는
-발행 후 누구도 수정하지 않는다. 발행본 공용 수정은 전체 일괄 저장 경로만 사용한다.
+발행 후 누구도 수정하지 않는다. 발행본 내용은 전체 일괄 저장 경로, 공개 범위는 전용 경로를 사용한다.
+일괄 저장 DTO에서는 visibility를 제거하며 구 JSON의 해당 미지 필드는 무시되어 범위를 바꾸지 않는다.
+사진 caption 호환성 전환과 픽 모델은 #123 소유이고 최초 발행 확장은 #107 소유다.
 
 ### 참여자·나가기·삭제
 

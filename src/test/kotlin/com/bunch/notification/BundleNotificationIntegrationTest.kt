@@ -285,7 +285,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         val edited = bundleService.editPublished(
             actor(owner), bunchId, published.id,
             EditPublishedBundleRequest(
-                published.revision, "published edit", Visibility.PUBLIC, published.date,
+                published.revision, "published edit", published.date,
                 published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) } +
                     PublishedBundlePhotoInput(photoId = publishedAddition.id, caption = ""),
                 emptyList()
