@@ -19,6 +19,7 @@ import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.dto.NotificationUnread
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Duration
@@ -134,6 +135,12 @@ class NotificationService(
             notification.readAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
         }
         return notification.readAt!!
+    }
+
+    // Called when the account is withdrawn: the inbox belongs to the person and goes with them (7.6.4).
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllOf(memberId: Long) {
+        notifications.deleteByRecipientMemberId(memberId)
     }
 
     private fun unread(memberId: Long, bunchId: Long, cutoff: Instant): Long =

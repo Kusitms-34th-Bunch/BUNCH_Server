@@ -98,6 +98,11 @@ interface PushJobRepository : JpaRepository<PushJob, UUID> {
     """)
     fun cancelPendingForDevice(memberId: Long, deviceId: Long, reason: String): Int
 
+    // A job being sent right now finds its row gone and simply stops (see PushWorker.finish).
+    @Modifying(flushAutomatically = true)
+    @Query("delete from PushJob j where j.recipientMemberId = :memberId")
+    fun deleteByRecipientMemberId(memberId: Long): Int
+
     fun findAllByNotificationIdAndStatus(
         notificationId: Long,
         status: PushJobStatus
