@@ -120,8 +120,8 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/{apple,google,kakao}/login | 기존 idToken/nonce | 기존 accessToken/refreshToken, 독립 sid |
 | POST /api/v1/auth/reissue | 기존 refreshToken | 같은 sid의 새 토큰 쌍 |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
-| GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, birthYear, gender, defaultBunch |
-| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,birthYear?,gender?,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
+| GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
+| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
@@ -155,8 +155,6 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | memberId | Long, 인증된 본인 ID |
 | nickname | String 또는 null. 가입 완료 전 미저장 상태는 null |
 | imageUrl | String 또는 null. 미등록·사진 저장 실패·기본 이미지이면 null이며 앱이 기본 이미지를 표시 |
-| birthYear | Int 또는 null. 선택하지 않았으면 null, 본인에게만 반환 |
-| gender | FEMALE / MALE 또는 null. 선택하지 않았으면 null, 본인에게만 반환 |
 | defaultBunch | 기존 BunchResponse 형식의 {id,name,characterType,imageUrl} 또는 null |
 
 `defaultBunch`는 가입 완료 회원의 서버 current 번치를 기존 `BunchResponse`로 보여주는
@@ -184,20 +182,20 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 <a id="member-profile-edit"></a>
 ### 본인 프로필 수정 — 이슈 #108
 
-기준은 마이 기능명세서 7.2.5~7.2.7이다. `PUT /api/v1/members/me/profile`은 multipart로
-`profile` JSON(`nickname`, `birthYear?`, `gender?`, `imageAction`)과 선택 `photo`를 받는다.
+기준은 마이 기능명세서 7.2.1~7.2.7이다. `PUT /api/v1/members/me/profile`은 multipart로
+`profile` JSON(`nickname`, `imageAction`)과 선택 `photo`를 받는다.
 `Idempotency-Key` 헤더는 받지 않는다(보내도 무시한다). 화면의 최종 상태를 보내며 성공하면
 `GET /members/me`와 같은 본인 프로필을 반환한다. 번치 소속이 없어도 수정할 수 있다.
 
 | 필드 | 규칙 |
 | --- | --- |
 | nickname | 가입과 같은 규칙(앞뒤 공백 제거, NFC, 1~12자, 한글·영문·숫자·공백). 다른 회원과 중복이면 409 `USER_002`. 본인의 현재 닉네임은 허용 |
-| birthYear | 1930 ~ (올해−14, KST). null이면 지운다. 범위 밖은 400 `COMMON_001` |
-| gender | `FEMALE`/`MALE`/null. null이면 지운다 |
 | imageAction | `KEEP`(유지)·`RESET`(기본 이미지)·`REPLACE`(photo 필수). KEEP/RESET에 photo가 있거나 REPLACE에 photo가 없거나 비어 있으면 400 |
 
-- 출생연도·성별에는 분석 동의 검사를 하지 않는다(7.2.6). 가입 API의 1950 하한과 분석 동의
-  요구는 명세서와 다르며 이 이슈에서 바꾸지 않는다(별도 확인).
+- 출생연도·성별은 마이페이지에서 보여주지 않고 고칠 수도 없다(7.2.1). 수정 API는 이 값을 받지 않으며
+  이전 앱이 `birthYear`·`gender`를 보내도 무시하고 저장된 값을 바꾸지 않는다. `GET /members/me` 응답에도
+  포함하지 않는다. 가입 때 입력한 값은 가입 API(`/me/registration`)로만 저장하고, 선택 동의 철회 요청은
+  문의 채널로 받아 운영자가 지운다(7.5.1 로직 3).
 - 사진 저장이 실패하면 어떤 값도 바꾸지 않고 전체 실패(503 `IMAGE_001`)로 처리한다(7.2.7).
   업로드는 트랜잭션 밖에서 하고, DB 반영에 실패하면 새 파일을 지운다. 이전 파일은 커밋 뒤에만 지운다.
 - 요청 키와 fingerprint는 저장하지 않는다. 요청이 값을 덮어쓰는 최종 상태라 같은 요청을 다시 받아도
@@ -208,8 +206,8 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 - 닉네임 스냅샷: 이미 만들어진 알림 문구는 바꾸지 않고, 멤버 목록·소셜 프로필처럼 회원을
   조회해 보여주는 곳은 새 닉네임을 보여준다(7.2.5).
 
-검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, 출생연도 경계와 비움, 동의 없는 입력,
-imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 같은 요청 재시도의 같은 결과와
+검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, 출생연도·성별 값을 보내도 저장된 값이 바뀌지
+않음과 응답에 없음, imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 같은 요청 재시도의 같은 결과와
 이전 파일 정리, 가입 미완료·정지·탈퇴, 멤버 목록·기존 알림 문구와 HTTP 계약(파트 누락, 잘못된 JSON/enum, 401,
 요청 키 헤더를 보내도 정상 처리)을 확인한다.
 

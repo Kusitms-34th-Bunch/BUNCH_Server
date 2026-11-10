@@ -57,38 +57,39 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
 
     @Test
     fun `edit returns the same member shape as the profile lookup`() {
-        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
+        val (member, access) = account()
         val nickname = "수정${UUID.randomUUID().toString().take(6)}"
         val uploaded = StoredImage("profiles/http-${UUID.randomUUID()}", "https://res.cloudinary.com/test/http.jpg")
             .also { publicIds += it.publicId }
         val photo = MockMultipartFile("photo", "p.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
         `when`(images.upload(photo)).thenReturn(uploaded)
 
-        put(access, body(nickname, 1999, "FEMALE", "REPLACE"), photo)
+        put(access, body(nickname, "REPLACE"), photo)
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.memberId").value(member.id))
             .andExpect(jsonPath("$.data.nickname").value(nickname))
-            .andExpect(jsonPath("$.data.birthYear").value(1999))
-            .andExpect(jsonPath("$.data.gender").value("FEMALE"))
             .andExpect(jsonPath("$.data.imageUrl").value(uploaded.url))
             .andExpect(jsonPath("$.error").isEmpty)
         assertThat(assets.findAll().map { it.publicId }).contains(uploaded.publicId)
     }
 
     @Test
-    fun `null birth year and gender are cleared`() {
-        val (_, access) = account(birthYear = 1990, gender = Gender.MALE)
+    fun `birth year and gender are ignored in the request and not returned`() {
+        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
 
-        put(access, """{"nickname":"비움${hex()}","imageAction":"KEEP"}""")
+        put(access, """{"nickname":"무시${hex()}","birthYear":2000,"gender":"FEMALE","imageAction":"KEEP"}""")
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.birthYear").isEmpty)
-            .andExpect(jsonPath("$.data.gender").isEmpty)
+            .andExpect(jsonPath("$.data.birthYear").doesNotExist())
+            .andExpect(jsonPath("$.data.gender").doesNotExist())
+        val saved = members.findById(member.id).get()
+        assertThat(saved.birthYear).isEqualTo(1990)
+        assertThat(saved.gender).isEqualTo(Gender.MALE)
     }
 
     @Test
     fun `request without a token is unauthorized`() {
-        mvc.perform(profileRequest(body("무토큰${hex()}", null, null, "KEEP")))
+        mvc.perform(profileRequest(body("무토큰${hex()}", "KEEP")))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("AUTH_001"))
     }
@@ -108,7 +109,7 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         val nickname = "키무시${hex()}"
 
         mvc.perform(
-            profileRequest(body(nickname, null, null, "KEEP"))
+            profileRequest(body(nickname, "KEEP"))
                 .header("Authorization", "Bearer $access")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
         )
@@ -123,7 +124,7 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         put(access, "{")
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value("COMMON_002"))
-        put(access, body("액션${hex()}", null, null, "DELETE"))
+        put(access, body("액션${hex()}", "DELETE"))
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value("COMMON_002"))
     }
@@ -133,7 +134,7 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         val (other, _) = account()
         val (_, access) = account()
 
-        put(access, body(other.nickname!!, null, null, "KEEP"))
+        put(access, body(other.nickname!!, "KEEP"))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.error.code").value("USER_002"))
     }
@@ -142,7 +143,7 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
     fun `unfinished signup is forbidden`() {
         val (_, access) = account(signup = SignupStatus.IN_PROGRESS)
 
-        put(access, body("미완료${hex()}", null, null, "KEEP"))
+        put(access, body("미완료${hex()}", "KEEP"))
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("AUTH_015"))
     }
@@ -164,9 +165,7 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         return request
     }
 
-    private fun body(nickname: String, birthYear: Int?, gender: String?, action: String): String =
-        """{"nickname":"$nickname","birthYear":${birthYear ?: "null"},""" +
-            """"gender":${gender?.let { "\"$it\"" } ?: "null"},"imageAction":"$action"}"""
+    private fun body(nickname: String, action: String): String = """{"nickname":"$nickname","imageAction":"$action"}"""
 
     private fun account(
         birthYear: Int? = null,

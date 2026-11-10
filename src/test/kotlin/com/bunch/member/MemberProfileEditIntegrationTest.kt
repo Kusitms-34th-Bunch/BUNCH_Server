@@ -15,7 +15,6 @@ import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.Member
-import com.bunch.member.domain.MemberConsentRepository
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.domain.SignupStatus
 import com.bunch.member.dto.MemberProfileRequest
@@ -43,8 +42,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.web.multipart.MultipartFile
 import java.text.Normalizer
 import java.time.Instant
-import java.time.Year
-import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -56,7 +53,6 @@ import java.util.concurrent.TimeUnit
 class MemberProfileEditIntegrationTest @Autowired constructor(
     private val service: MemberProfileService,
     private val members: MemberRepository,
-    private val consents: MemberConsentRepository,
     private val assets: ImageAssetRepository,
     private val bunches: BunchService,
     private val publicBunches: BunchPublicService,
@@ -78,16 +74,15 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `all four values are saved from the final state in one request`() {
-        val member = member(birthYear = 1990, gender = Gender.MALE)
+    fun `the nickname and the image are saved from the final state in one request`() {
+        val member = member(image = asset("before"))
         val nickname = unique("새")
 
-        edit(member, nickname = "  $nickname  ", birthYear = 1999, gender = Gender.FEMALE)
+        edit(member, nickname = "  $nickname  ", action = ProfileImageAction.RESET)
 
         val saved = saved(member)
         assertThat(saved.nickname).isEqualTo(nickname)
-        assertThat(saved.birthYear).isEqualTo(1999)
-        assertThat(saved.gender).isEqualTo(Gender.FEMALE)
+        assertThat(saved.profileImageAsset).isNull()
     }
 
     @Test
@@ -127,29 +122,29 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `a member may keep the own nickname while other values change`() {
-        val member = member(birthYear = 1990)
+    fun `a member may keep the own nickname while the image changes`() {
+        val member = member(image = asset("own"))
 
-        edit(member, birthYear = 1991)
+        edit(member, action = ProfileImageAction.RESET)
 
         assertThat(saved(member).nickname).isEqualTo(member.nickname)
-        assertThat(saved(member).birthYear).isEqualTo(1991)
+        assertThat(saved(member).profileImageAsset).isNull()
     }
 
     @Test
     fun `a nickname of another member is rejected and nothing else changes`() {
         val other = member()
-        val member = member(birthYear = 1990, gender = Gender.MALE)
+        val old = asset("taken")
+        val member = member(image = old)
 
         val error = assertThrows<BusinessException> {
-            edit(member, nickname = other.nickname!!, birthYear = 2000, gender = Gender.FEMALE)
+            edit(member, nickname = other.nickname!!, action = ProfileImageAction.RESET)
         }
 
         assertThat(error.errorCode).isEqualTo(ErrorCode.NICKNAME_TAKEN)
         val saved = saved(member)
         assertThat(saved.nickname).isEqualTo(member.nickname)
-        assertThat(saved.birthYear).isEqualTo(1990)
-        assertThat(saved.gender).isEqualTo(Gender.MALE)
+        assertThat(saved.profileImageAsset?.id).isEqualTo(old.id)
     }
 
     @Test
@@ -187,43 +182,14 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `birth year accepts the range of the specification and can be cleared`() {
-        val member = member(birthYear = 1990)
-        val latest = Year.now(ZoneId.of("Asia/Seoul")).value - 14
+    fun `birth year and gender are never changed by the edit`() {
+        val member = member(birthYear = 1990, gender = Gender.MALE)
 
-        edit(member, birthYear = 1930)
-        assertThat(saved(member).birthYear).isEqualTo(1930)
-        edit(member, birthYear = latest)
-        assertThat(saved(member).birthYear).isEqualTo(latest)
+        edit(member, nickname = unique("그대로"))
 
-        listOf(1929, latest + 1).forEach {
-            assertThat(assertThrows<BusinessException> { edit(member, birthYear = it) }.errorCode)
-                .isEqualTo(ErrorCode.INVALID_INPUT)
-        }
-        assertThat(saved(member).birthYear).isEqualTo(latest)
-
-        edit(member, birthYear = null)
-        assertThat(saved(member).birthYear).isNull()
-    }
-
-    @Test
-    fun `gender can be cleared`() {
-        val member = member(gender = Gender.FEMALE)
-
-        edit(member, gender = null)
-
-        assertThat(saved(member).gender).isNull()
-    }
-
-    @Test
-    fun `birth year and gender need no analysis consent`() {
-        val member = member()
-        assertThat(consents.findAllByMemberId(member.id)).isEmpty()
-
-        edit(member, birthYear = 1995, gender = Gender.MALE)
-
-        assertThat(saved(member).birthYear).isEqualTo(1995)
-        assertThat(saved(member).gender).isEqualTo(Gender.MALE)
+        val saved = saved(member)
+        assertThat(saved.birthYear).isEqualTo(1990)
+        assertThat(saved.gender).isEqualTo(Gender.MALE)
     }
 
     @Test
@@ -285,24 +251,17 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     @Test
     fun `a failed upload changes no value`() {
         val old = asset("kept")
-        val member = member(image = old, birthYear = 1990)
+        val member = member(image = old)
         val photo = photo(4, 5, 6)
         `when`(images.upload(photo)).thenThrow(BusinessException(ErrorCode.PROFILE_IMAGE_FAILED))
 
         val error = assertThrows<BusinessException> {
-            edit(
-                member,
-                nickname = unique("실패"),
-                birthYear = 2000,
-                action = ProfileImageAction.REPLACE,
-                photo = photo
-            )
+            edit(member, nickname = unique("실패"), action = ProfileImageAction.REPLACE, photo = photo)
         }
 
         assertThat(error.errorCode).isEqualTo(ErrorCode.PROFILE_IMAGE_FAILED)
         val saved = saved(member)
         assertThat(saved.nickname).isEqualTo(member.nickname)
-        assertThat(saved.birthYear).isEqualTo(1990)
         assertThat(saved.profileImageAsset?.id).isEqualTo(old.id)
     }
 
@@ -347,7 +306,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
 
     @Test
     fun `the same final state sent twice changes nothing the second time`() {
-        val member = member(birthYear = 1990, gender = Gender.MALE)
+        val member = member(image = asset("same"))
         val nickname = unique("같은")
 
         edit(member, nickname = nickname)
@@ -356,8 +315,6 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         val twice = saved(member)
 
         assertThat(twice.nickname).isEqualTo(once.nickname)
-        assertThat(twice.birthYear).isEqualTo(once.birthYear)
-        assertThat(twice.gender).isEqualTo(once.gender)
         assertThat(twice.profileImageAsset?.id).isEqualTo(once.profileImageAsset?.id)
     }
 
@@ -420,11 +377,9 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     private fun edit(
         member: Member,
         nickname: String = member.nickname!!,
-        birthYear: Int? = member.birthYear,
-        gender: Gender? = member.gender,
         action: ProfileImageAction = ProfileImageAction.KEEP,
         photo: MultipartFile? = null
-    ) = service.update(member.id, MemberProfileRequest(nickname, birthYear, gender, action), photo)
+    ) = service.update(member.id, MemberProfileRequest(nickname, action), photo)
 
     private fun member(
         nickname: String = unique("닉"),

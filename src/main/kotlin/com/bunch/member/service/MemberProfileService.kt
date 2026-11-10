@@ -7,7 +7,6 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
 import com.bunch.image.service.ImageAssetService
-import com.bunch.member.domain.Gender
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.dto.MemberProfileRequest
 import org.springframework.dao.DataIntegrityViolationException
@@ -15,16 +14,12 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.multipart.MultipartFile
-import java.time.Clock
-import java.time.Year
-import java.time.ZoneId
 
 @Service
 class MemberProfileService(
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
-    private val clock: Clock,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactions = TransactionTemplate(transactionManager)
@@ -52,22 +47,13 @@ class MemberProfileService(
         }
     }
 
-    private fun normalize(request: MemberProfileRequest, photo: MultipartFile?): Input {
-        val nickname = ProfileText.name(request.nickname)
-        val latestBirthYear = Year.now(clock.withZone(SEOUL)).value - MINIMUM_AGE
-        if (request.birthYear != null && request.birthYear !in EARLIEST_BIRTH_YEAR..latestBirthYear) {
-            fail(ErrorCode.INVALID_INPUT)
-        }
+    // Returns the request with the nickname in the stored form.
+    private fun normalize(request: MemberProfileRequest, photo: MultipartFile?): MemberProfileRequest {
         when (request.imageAction) {
             ProfileImageAction.KEEP, ProfileImageAction.RESET -> if (photo != null) fail(ErrorCode.INVALID_INPUT)
             ProfileImageAction.REPLACE -> if (photo == null || photo.isEmpty) fail(ErrorCode.INVALID_INPUT)
         }
-        return Input(
-            nickname = nickname,
-            birthYear = request.birthYear,
-            gender = request.gender,
-            imageAction = request.imageAction
-        )
+        return request.copy(nickname = ProfileText.name(request.nickname))
     }
 
     // Rejects an account that cannot edit its profile before anything is uploaded.
@@ -77,7 +63,7 @@ class MemberProfileService(
     }
 
     // Returns true when the uploaded image became the profile image of the member.
-    private fun save(memberId: Long, input: Input, uploaded: StoredImage?): Boolean {
+    private fun save(memberId: Long, input: MemberProfileRequest, uploaded: StoredImage?): Boolean {
         val member = members.findLockedById(memberId)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)
         if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
@@ -89,8 +75,6 @@ class MemberProfileService(
             ProfileImageAction.REPLACE -> imageAssets.store(requireNotNull(uploaded))
         }
         member.nickname = input.nickname
-        member.birthYear = input.birthYear
-        member.gender = input.gender
         member.profileImageAsset = newAsset
         imageAssets.releaseAfterCommit(previousAssetId.takeUnless { it == newAsset?.id })
         members.saveAndFlush(member)
@@ -98,17 +82,4 @@ class MemberProfileService(
     }
 
     private fun fail(code: ErrorCode): Nothing = throw BusinessException(code)
-
-    private data class Input(
-        val nickname: String,
-        val birthYear: Int?,
-        val gender: Gender?,
-        val imageAction: ProfileImageAction
-    )
-
-    private companion object {
-        const val EARLIEST_BIRTH_YEAR = 1930
-        const val MINIMUM_AGE = 14
-        val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
-    }
 }
