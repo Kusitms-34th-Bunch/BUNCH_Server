@@ -432,7 +432,7 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         val f = fixture()
         val before = save(f, listOf(place("a", 0)))
         jdbc.update(
-            "UPDATE bundles SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE bundles SET status = 'PUBLISHED', published_at = updated_at WHERE id = ?",
             f.bundleId
         )
         val executor = Executors.newSingleThreadExecutor()
