@@ -1,4 +1,4 @@
-package com.bunch.global.redis
+git add src/main/kotlin/com/bunch/global/redis/RefreshTokenRepository.ktpackage com.bunch.global.redis
 
 interface RefreshTokenRepository {
     fun save(sessionId: String, userId: Long, refreshToken: String, expiresInSeconds: Long)
@@ -6,6 +6,9 @@ interface RefreshTokenRepository {
     fun isActive(sessionId: String, userId: Long): Boolean
 
     fun delete(sessionId: String, userId: Long): Boolean
+
+    // Every session of the account on every device, for the withdrawal (7.6.4). Returns how many were removed.
+    fun deleteAll(userId: Long): Int
 
     fun compareAndRotate(
         sessionId: String,
