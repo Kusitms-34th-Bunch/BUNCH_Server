@@ -15,8 +15,8 @@
   actor와 기대 membership version을 받는다. OWNER는 CO_OWNER/MEMBER를,
   CO_OWNER는 MEMBER만 내보낼 수 있다. 자기 자신·OWNER 대상은 허용하지 않는다.
 - OWNER가 직접 나갈 때 후임을 명시해야 하며, 유일한 활성 멤버이면
-  `BUNCH_007`, 후임 누락이면 `BUNCH_006`을 반환한다. 계정 탈퇴 자동 승계는
-  #29의 별도 흐름이다.
+  `BUNCH_007`, 후임 누락이면 `BUNCH_006`을 반환한다. 계정 탈퇴는 자동 승계 없이
+  권한을 먼저 넘겨야 하는 별도 흐름이다([회원 탈퇴](member-withdrawal.md), 이슈 #111).
 - 나가기는 `LEFT`, 내보내기는 `REMOVED`로 종료한다. 두 경우 모두 새 유효 초대와
   새 참여 키로만 새 `MEMBER` Membership을 만든다. 이전 join key의 성공 요청은
   종료된 Membership을 재생하지 않는다.
