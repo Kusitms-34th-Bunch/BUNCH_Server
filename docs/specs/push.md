@@ -2,6 +2,7 @@
 
 [알림 Spec](notification.md)·[inbox API](notification-api.md)·[저장 계약](notification-schema.md)의 기기별 전송 계약이다.
 기능·테스트·V15 migration과 함께 관리한다. 앱 내 알림은 개인 푸시 설정과 독립적이다.
+푸시 설정은 이슈 #109(V35)에서 종류별 21개가 아니라 [4개 카테고리](#push-preferences)로 바뀌었다.
 
 ## API
 
@@ -11,8 +12,8 @@
 | --- | --- | --- |
 | `PUT /members/me/push-devices/{installationId}` | `{deviceToken,environment,authorizationStatus}` | `{installationId,environment,authorizationStatus,registeredAt}` |
 | `DELETE /members/me/push-devices/{installationId}` | 없음 | `null` |
-| `GET /members/me/push-preferences` | 없음 | `{enabled,types}` |
-| `PATCH /members/me/push-preferences` | `{enabled?,types?}` | `{enabled,types}` |
+| `GET /members/me/push-preferences` | 없음 | `{enabled,categories}` ([상세](#push-preferences)) |
+| `PATCH /members/me/push-preferences` | `{enabled?,categories?}` | `{enabled,categories}` |
 
 `installationId`는 설치별 UUID다. 토큰은 APNs Data를 hex로 인코딩한 짝수 길이 2~4096자(1~2048 bytes)이며,
 32 bytes로 고정하지 않는다. 대문자 입력도 소문자로 정규화한다. 토큰은 응답에 포함하지 않는다.
@@ -24,19 +25,63 @@ topic과 endpoint는 서버 설정을 사용하며 앱이 지정하지 않는다
 - DELETE는 본인·현재 sid 소유만 해제한다. 이미 없으면 성공, 다른 귀속이면 404 `RESOURCE_001`이다.
 - 로그아웃은 현재 sid의 기기와 pending job만 해제·취소한다. 다른 sid는 유지한다.
   등록·해제·로그아웃은 회원 잠금 아래 활성 session을 다시 확인한다.
-- 설정 기본값은 전체·21종 모두 `true`다. PATCH는 받은 항목만 변경한다. 서로 다른 종류의 동시 PATCH는 둘 다 보존한다.
-  미지의 종류는 400 `COMMON_001`, 문자열·숫자·null 종류 값은 400 `COMMON_002`다. JSON boolean만 받는다.
-  같은 PATCH 재시도는 같은 결과이며 별도 요청 키·버전은 요구하지 않는다.
+- 푸시 설정의 값·규칙·오류는 [알림 설정](#push-preferences)을 따른다.
 - 형식·enum·토큰 오류는 400, 비활성 session은 401, 미가입 완료는 기존 가입 오류다.
-  `enabled`와 종류별 설정은 inbox 생성·읽음에 영향을 주지 않는다. 알림 읽음만으로 pending push를 취소하지 않는다.
+  `enabled`와 카테고리 설정은 inbox 생성·읽음에 영향을 주지 않는다. 알림 읽음만으로 pending push를 취소하지 않는다.
 
 ```json
 {"deviceToken":"a1b2c3d4","environment":"SANDBOX","authorizationStatus":"AUTHORIZED"}
 ```
 
 ```json
-{"enabled":true,"types":{"COMMENT_REMINDER":false,"BUNDLE_PUBLISHED":true}}
+{"enabled":true,"categories":{"BUNDLE_NEWS":true,"MEMBER_ROLE":true,"FOLLOW":false,"REACTION":true}}
 ```
+
+<a id="push-preferences"></a>
+## 알림 설정 — 이슈 #109
+
+기준은 마이 기능명세서 7.3.1~7.3.4이며, 메인 명세서 5.12.3 로직 3이 "푸시는 사용자의 알림 설정을 따른다(MY 명세 범위)"로
+이 설정에 위임한다. 설정은 번치별이 아니라 **계정 단위**이고 모든 기기에 같이 적용된다. 푸시에만 적용하며 앱 안 알림(inbox)은
+설정과 관계없이 그대로 쌓인다. 기기 자체의 알림 권한(`authorizationStatus`)은 설정과 별개로 각 기기 기준으로 확인한다.
+
+| 카테고리 | 화면 제목(7.3.3) | 알림 번호 | 알림 종류 |
+| --- | --- | --- | --- |
+| `BUNDLE_NEWS` | 번들 소식(제안) | 1~8 | `DRAFT_PARTICIPANT_ADDED`, `DRAFT_ACTIVITY`, `COMMENT_REMINDER`, `DRAFT_PARTICIPANT_REMOVED`, `DRAFT_READY_TO_PUBLISH`, `DRAFT_PARTICIPANTS_INSUFFICIENT`, `BUNDLE_PUBLISHED`, `CANDIDATE_CREATED` |
+| `MEMBER_ROLE` | 멤버 및 권한 소식 | 10~13, 16(제안) | `MEMBER_JOINED`, `CO_OWNER_GRANTED`, `CO_OWNER_REVOKED`, `OWNER_TRANSFERRED`, `BUNCH_VISIBILITY_CHANGED` |
+| `FOLLOW` | 팔로우 | 17~19 | `BUNCH_FOLLOWED`, `FOLLOW_REQUESTED`, `FOLLOW_REQUEST_APPROVED` |
+| `REACTION` | 좋아요 및 댓글 | 20~22 | `SOCIAL_COMMENT_CREATED`(20·22), `BUNDLE_LIKED` |
+
+- **응답:** `enabled`(앱 푸시 알림)와 네 카테고리의 현재 값을 항상 모두 준다. 마스터가 꺼져 있어도 카테고리는 저장된 원래 값을
+  주므로 앱이 "비활성이지만 켜짐/꺼짐"을 구분해 보여줄 수 있다(7.3.1). 저장된 값이 없으면 전부 `true`다.
+- **PATCH:** 받은 항목만 바꾸는 병합 저장이며 같은 요청을 다시 보내면 같은 결과다. 토글마다 즉시 저장한다(7.3.2·7.3.3).
+  같은 계정의 동시 PATCH는 회원 잠금으로 직렬화해 서로 다른 토글을 모두 보존한다. 미지의 카테고리는 400 `COMMON_001`
+  (알림 종류 이름도 카테고리가 아니므로 같다), 문자열·숫자·null 값은 400 `COMMON_002`다. 예전 `types` 필드는 무시한다.
+- **마스터 끄기·켜기(7.3.2):** 끄면 모든 푸시를 보내지 않지만 카테고리 값은 지우지 않는다. 다시 켜면 끄기 전 값 그대로다.
+  마스터가 꺼진 동안 도착한 카테고리 PATCH도 값은 저장하고 마스터는 그대로 둔다(앱은 이때 토글을 막지만 서버는 연타·지연
+  요청을 실패시키지 않는다).
+- **자동 OFF(7.3.3):** 네 카테고리가 모두 꺼지면 서버가 `enabled`도 `false`로 만든다. 한 요청이 카테고리를 모두 끄면서
+  `enabled:true`를 같이 보내도 결과는 `enabled:false`다. 반대로 `enabled:true`만 보냈는데 네 카테고리가 모두 꺼져 있으면
+  "켜졌는데 받을 것이 없는" 상태를 만들지 않도록 네 카테고리를 모두 켠다(명세서가 정하지 않아 정한 규칙, 기획 확인 대상).
+- **항상 발송(7.3.2 로직 4):** 내보내짐(14번 `MEMBER_REMOVED`)과 번치 삭제(15번 `BUNCH_DELETED`)는 카테고리가 없고 개별로 끌 수
+  없다. 마스터가 켜져 있으면 항상 보내고, 마스터나 기기 자체의 알림 권한이 꺼져 있으면 보내지 않는다.
+- **카테고리가 없는 종류:** 푸시하지 않는다. 메인 명세서 5.12.3 9번(뭉치 성장)이 삭제되어 `CHARACTER_GROWN`이 여기에 해당한다.
+  이 알림을 **만드는** 코드는 메인(번들) 담당 범위라 이 변경에서 건드리지 않았고, 인박스에는 남지만 푸시는 나가지 않는다.
+- **적용 시점:** 알림을 만들 때(job 생성)와 전송 직전 두 번 같은 판단(`PushPreference.allows`)으로 확인한다. 설정을 끈 뒤에는
+  이미 대기 중이던 job도 `CANCELLED(RecipientUnavailable)`로 취소된다. 설정 행이 없으면 모든 카테고리를 받는다.
+- **권한이 꺼져도(7.3.4):** 앱 안 설정값은 바꾸거나 지우지 않는다. 기기 등록 요청이 설정 행을 만들거나 바꾸지 않는다.
+- **최초 가입 시 초기값(7.3.1 로직 3):** 알림을 허용했으면 모두 켜짐(저장된 값이 없을 때의 기본값과 같다), 거부했으면 모두 꺼짐이다.
+  거부한 사용자는 기기 토큰이 없어 서버에 기기를 등록할 수 없으므로, 앱이 가입 직후 권한 결과로 `PATCH`를 한 번 보낸다.
+  거부면 `{"enabled":false,"categories":{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}}`다.
+  서버가 권한 결과를 직접 받는 방식은 이 이슈에서 만들지 않았다(앱 담당과 확인 필요).
+
+**호환성:** 응답·요청의 `types`(21개 알림 종류) 필드가 사라지고 `categories`로 바뀐다. 이전 `types`로 연동한 앱은 맞춰야 한다.
+V35는 `categories` 컬럼을 추가하고 기존 종류별 값을 이관한다. 한 카테고리의 알림 종류 중 하나라도 꺼져 있었으면 그 카테고리를 끄고,
+네 카테고리가 모두 꺼지게 된 계정은 `enabled`도 끈다. 예전 `types` 컬럼은 지우지 않고 더 이상 읽지 않는다. 운영 DB에
+`SELECT count(*) FROM push_preferences WHERE types <> '{}'`가 0이면 이후 정리 마이그레이션으로 삭제할 수 있다.
+
+검증 기준: 실제 PostgreSQL·Redis로 카테고리 조회·병합 저장·동시 PATCH·마스터 보존/복원·자동 OFF·모두 꺼진 상태에서 마스터 켜기·
+`types` 무시·세션 간 공유·미가입/미인증, 카테고리 분류표와 `allows` 규칙, 대기열 생성 시점과 전송 직전의 카테고리 적용,
+14·15번의 마스터 의존, 카테고리 없는 종류 미발송, V35의 종류별 값 이관과 자동 OFF 정규화를 확인한다.
 
 ## 저장·트랜잭션
 
@@ -45,7 +90,7 @@ V15는 다음 세 테이블을 추가한다. 기존 `notifications`를 포함해
 | 테이블 | 주요 컬럼·키·삭제 관계 |
 | --- | --- |
 | `push_devices` | bigint identity PK; installation UUID UNIQUE; member FK CASCADE; sid UUID; environment/topic; AES-256-GCM token BYTEA; SHA-256 hash CHAR(64); authorization; registered_at |
-| `push_preferences` | member PK/FK CASCADE; enabled; 종류별 override JSONB; updated_at |
+| `push_preferences` | member PK/FK CASCADE; enabled; 카테고리 JSONB(V35, 없는 키는 켜짐); 예전 종류별 override JSONB(V15, 더 이상 읽지 않음); updated_at |
 | `push_jobs` | UUID PK; device FK SET NULL; recipient member FK CASCADE; sid; bunch ID(의도적으로 FK 없음); notification FK SET NULL; dedupe/type/payload JSONB/status/attempts/available_at/expires_at/sent_at/last_error_code/created_at |
 
 기기는 `(environment,topic,token_hash)` UNIQUE, `(member_id,session_id)` 인덱스를 가진다.
