@@ -11,7 +11,6 @@ import com.bunch.bunch.dto.BunchMemberResponse
 import com.bunch.bunch.dto.BunchSocialPage
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.dto.BundleLocationResponse
-import com.bunch.bundle.dto.BundlePhotoPicks
 import com.bunch.bundle.service.BundlePhotoPickService
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.service.BundleAttributionService
@@ -132,7 +131,7 @@ class BunchPublicService(
             date = bundle.date,
             publishedAt = bundle.publishedAt,
             photos = photoRows.map {
-                it.copy(picks = photoPicks[it.id] ?: BundlePhotoPicks(version = bundle.revision))
+                it.copy(picks = photoPicks.getValue(it.id))
             },
             contributors = people.participants.map {
                 BunchPublicBundleContributor(it.memberId, it.nickname, it.imageUrl, it.profileAvailable)

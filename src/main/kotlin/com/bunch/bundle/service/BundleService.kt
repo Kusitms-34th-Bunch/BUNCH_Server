@@ -262,7 +262,12 @@ class BundleService(
         access.requireMember(memberId, bunchId)
         if (!access.isParticipant(memberId, id)) {
             val participant = participants.saveAndFlush(
-                BundleParticipant(bundleId = id, memberId = memberId, joinedAt = clock.instant())
+                BundleParticipant(
+                    bundleId = id,
+                    memberId = memberId,
+                    joinedAt = clock.instant(),
+                    pickInitialVersion = bundle.revision + 1
+                )
             )
             // A newly added participation starts above every prior comment version. Removing
             // and re-adding a member must not let an old expectedVersion=0 save become valid.
@@ -712,7 +717,7 @@ class BundleService(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
             photoRows(bundle.id).map {
-                photoResponse(it).copy(picks = photoPicks[it.id] ?: BundlePhotoPicks(version = bundle.revision))
+                photoResponse(it).copy(picks = photoPicks.getValue(it.id))
             },
             people,
             publishedPeople?.comments ?: comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),

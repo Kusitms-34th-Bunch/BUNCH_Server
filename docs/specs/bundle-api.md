@@ -120,7 +120,7 @@ client 식별자를 추가하지 않는다.
 | `dateVersion` | 번들 날짜 |
 | `locationVersion` | 장소 목록 전체 |
 | `captionVersion` | 한 `BundlePhoto`의 캡션 |
-| `BundlePhotoPick.version` | 한 사진·회원 픽 row의 마지막 변경 당시 번들 revision. row가 없으면 현재 번들 revision |
+| `BundlePhotoPick.version` | 한 사진·회원 픽 row의 마지막 변경 당시 번들 revision. row가 없으면 해당 참여자의 고정 `pickInitialVersion`, 미참여 조회자는 0 |
 | `BundleCommentResponse.version` | 한 회원의 코멘트 |
 
 `expectedVersion` 또는 `expectedRevision`이 서버 값과 다르면 변경하지 않고 현재 값과
@@ -131,7 +131,7 @@ client 식별자를 추가하지 않는다.
 사진 픽은 예외적으로 원하는 상태를 보내는 멱등 요청이다. 현재 `picked`와 요청 값이
 같으면 `expectedVersion`이 오래되어도 현재 `BundlePhotoPicks`를 성공 응답으로 반환하며
 revision·`updatedAt`·활동을 바꾸지 않는다. 상태가 달라지고 expected version이 현재
-픽 row 버전(픽 row가 없으면 요청 시점의 현재 bundle revision)과 다르면 `BUNDLE_003`을
+픽 row 버전(픽 row가 없으면 해당 참여자의 고정 `pickInitialVersion`)과 다르면 `BUNDLE_003`을
 반환하고 `error.detail`에 현재 `BundlePhotoPicks`를 담는다.
 
 코멘트에는 다음 참여자별 규칙이 적용된다.
@@ -377,11 +377,19 @@ WITHDRAWN 계정이나 새 계정은 복구하지 않는다.
 
 서버는 번치와 번들을 잠근 뒤 현재 픽 row를 다시 읽어 부모 트랜잭션의 stale entity를
 사용하지 않는다. 실제 변경이면 번들 revision·`updatedAt`·현재 소속의 활동을 한 번 갱신하고,
-픽 row의 `version`을 그 revision으로 저장한다. row가 없을 때의 현재 version은 bundle
-revision이며, `picked=false` row도 ABA 방지를 위해 남긴다. 사진·참여자 FK는 같은 번들
-범위로 묶고 `ON DELETE CASCADE`를 적용한다. 내 픽 row가 아직 없는 첫 픽은 현재 bundle
-revision을 version으로 사용하므로, 다른 픽이나 무관한 초안 편집이 먼저 일어나면 cached
-version으로는 보수적으로 `BUNDLE_003`이 될 수 있다. 이 경우 snapshot을 다시 읽고 재시도한다.
+픽 row의 `version`을 그 revision으로 저장한다. row가 없으면 해당 참여자의 고정
+`pickInitialVersion`을 사용한다. 생성 시 초기 참여자와 마이그레이션 전 참여자는 0이며,
+이후 참여자 추가 시 그 변경으로 증가할 `bundle.revision`을 초기값으로 저장한다.
+다른 사진·멤버의 픽이나 무관한 초안 편집은 이 초기값을 바꾸지 않는다. 참여자를 제거하면
+해당 픽 row가 지워지고, 다시 추가하면 새 초기 버전을 발급하여 이전 참여의 늦은 변경 요청을
+거부한다. 초기값은 부모 트랜잭션에 남은 참여자 엔티티 대신 DB의 scalar 조회로 읽는다.
+`picked=false` row도 ABA 방지를 위해 남긴다. 사진·참여자 FK는 같은 번들 범위로 묶고
+`ON DELETE CASCADE`를 적용한다. 참여자가 아닌 조회자는 초기 version 0을 받으며 쓰기는 거부된다.
+발행 후 내용·공개 범위 변경이나 원본 사진 삭제로 빈 픽의 version도 바뀌지 않는다.
+
+`V2026111111281__bundle_pick_initial_versions.sql`은 참여자에 non-null·0 이상인 초기 버전
+컬럼을 추가한다. 기존 픽 row·버전·캡션은 변경하지 않는다. 전환 전 row 없는 픽의 버전을
+캐시한 클라이언트는 한 번 상세를 새로 읽어 고정 초기값으로 전환한다.
 
 픽 변경은 STOMP 내용 이벤트나 알림을 만들지 않는다. 따라서 topic revision이 건너뛸 수
 있으며, 클라이언트는 픽 화면 재진입·재연결 또는 revision gap에서 상세 snapshot을 다시

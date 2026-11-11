@@ -57,6 +57,8 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 발행 시각·참여자 순서·코멘트·좋아요·소셜 댓글과 피드 순서를 보존하고 수정 알림은 보내지 않는다.
 보존한 `bundlePhotoId`는 기존 사진 row와 그 픽을 유지하며, 배열에서 빠진 사진은 사진 row와
 그 사진의 픽을 함께 cascade한다. 새 `photoId`로 만든 사진에는 픽을 만들지 않는다.
+픽 row가 없는 사진의 version도 참여자의 고정 초기값을 사용한다. 내용·공개 범위 변경이나
+원본 Photo 삭제로 이 version을 바꾸지 않으며, 미참여 조회자의 초기 version은 0이다.
 장소 교체는 MANDATORY `BundleLocationService.replaceLocked`를 호출한다. 동기 출처 제거
 이벤트의 실제 핀 정리는 #92 소유이며 별도 임시 writer를 만들지 않는다. listener 실패도 전체 롤백한다.
 

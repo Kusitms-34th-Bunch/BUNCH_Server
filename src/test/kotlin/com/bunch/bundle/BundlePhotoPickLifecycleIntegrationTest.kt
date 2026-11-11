@@ -151,7 +151,7 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
 
         val isolatedBefore = bundleService.get(owner, bunchId, isolated.id).photos.single().picks!!
         assertThat(isolatedBefore.count).isZero()
-        assertThat(isolatedBefore.version).isEqualTo(isolated.revision)
+        assertThat(isolatedBefore.version).isZero()
         pick(first, bunchId, isolated.id, isolatedRow.id, true)
         assertThat(bundleService.get(owner, bunchId, isolated.id).photos.single().picks!!.count).isEqualTo(1)
         assertThat(bundleService.get(owner, bunchId, main.id).photos.first { it.id == mainFirst.id }.picks!!.count)
@@ -172,6 +172,60 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         assertThat(reordered.photos.first().picks!!.count).isZero()
         assertThat(reordered.photos.last().picks!!.count).isEqualTo(2)
         assertThat(reordered.photos.last().picks!!.members.map { it.memberId }).containsExactly(first, second)
+    }
+
+    @Test
+    fun `cached first pick versions are independent of other photos members and draft edits`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, owner), photo(bunchId, owner)))
+        val added = bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "initial-pick-guest")
+        val ownerBefore = bundleService.get(owner, bunchId, draft.id)
+        val guestBefore = bundleService.get(guest, bunchId, draft.id)
+        assertThat(ownerBefore.photos.map { it.picks!!.version }).containsOnly(0L)
+        assertThat(guestBefore.photos.map { it.picks!!.version }).containsOnly(added.revision)
+
+        bundleService.visibility(
+            actor(owner), bunchId, draft.id,
+            BundleVisibilityRequest(Visibility.PUBLIC, added.visibilityVersion, BundleStatus.DRAFT),
+            "unrelated-scope"
+        )
+        assertThat(bundleService.get(owner, bunchId, draft.id).photos.map { it.picks })
+            .isEqualTo(ownerBefore.photos.map { it.picks })
+        assertThat(bundleService.get(guest, bunchId, draft.id).photos.map { it.picks })
+            .isEqualTo(guestBefore.photos.map { it.picks })
+
+        for ((memberId, snapshot) in listOf(owner to ownerBefore, guest to guestBefore)) {
+            for (photo in snapshot.photos) {
+                val saved = pickService.save(
+                    memberId, bunchId, draft.id, photo.id, BundlePhotoPickRequest(true, photo.picks!!.version)
+                )
+                assertThat(saved.pickedByMe).isTrue()
+            }
+        }
+        assertThat(bundleService.get(owner, bunchId, draft.id).photos.map { it.picks!!.count }).containsOnly(2)
+    }
+
+    @Test
+    fun `removing and readding a never picked participant invalidates cached initial versions`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, owner)))
+        bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "initial-add")
+        val old = bundleService.get(guest, bunchId, draft.id).photos.single()
+        bundleService.removeParticipant(actor(owner), bunchId, draft.id, guest, "initial-remove")
+        val readded = bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "initial-readd")
+        val fresh = bundleService.get(guest, bunchId, draft.id).photos.single()
+        assertThat(fresh.picks!!.version).isEqualTo(readded.revision).isGreaterThan(old.picks!!.version)
+        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) {
+            pickService.save(guest, bunchId, draft.id, old.id, BundlePhotoPickRequest(true, old.picks!!.version))
+        }
+        assertThat(pickRows.findAllByBundleId(draft.id)).isEmpty()
+        assertThat(pickService.save(
+            guest, bunchId, draft.id, fresh.id, BundlePhotoPickRequest(true, fresh.picks!!.version)
+        ).pickedByMe).isTrue()
     }
 
     @Test
@@ -442,6 +496,43 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         assertThat(assets.existsById(assetId)).isTrue()
         assertThat(bundleService.get(owner, bunchId, published.id).photos.single().picks!!.count).isEqualTo(2)
         assertThat(bundleService.get(guest, bunchId, published.id).photos.single().picks!!.pickedByMe).isTrue()
+    }
+
+    @Test
+    fun `published empty pick summaries retain initial versions through content edits and source deletion`() {
+        val owner = member()
+        val guest = member()
+        val observer = member()
+        val bunchId = bunchWithMembers(owner, guest, observer)
+        val source = photo(bunchId, owner)
+        val ready = preparePublishableDraft(owner, guest, bunchId, listOf(source), "empty-pick-freeze")
+        val ownerInitial = ready.photos.single().picks!!
+        val guestInitial = bundleService.get(guest, bunchId, ready.id).photos.single().picks!!
+        val published = publish(owner, bunchId, ready.id)
+        assertThat(published.photos.single().picks).isEqualTo(ownerInitial)
+        assertThat(bundleService.get(guest, bunchId, ready.id).photos.single().picks).isEqualTo(guestInitial)
+        val observerInitial = bundleService.get(observer, bunchId, ready.id).photos.single().picks!!
+        assertThat(observerInitial.version).isZero()
+
+        val saved = bundleService.editPublished(
+            actor(owner), bunchId, published.id,
+            EditPublishedBundleRequest(
+                expectedRevision = published.revision,
+                title = "edited without picks",
+                visibility = Visibility.PUBLIC,
+                date = published.date,
+                photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = published.photos.single().id)),
+                locations = emptyList()
+            ), "empty-pick-edit"
+        )
+        assertThat(saved.revision).isGreaterThan(published.revision)
+        assertThat(saved.photos.single().picks).isEqualTo(ownerInitial)
+        assertThat(photoService.removeUploader(bunchId, source.id, owner).photoDeleted).isTrue()
+        for ((memberId, initial) in listOf(owner to ownerInitial, guest to guestInitial, observer to observerInitial)) {
+            val retained = bundleService.get(memberId, bunchId, published.id).photos.single()
+            assertThat(retained.photoId).isNull()
+            assertThat(retained.picks).isEqualTo(initial)
+        }
     }
 
     @Test

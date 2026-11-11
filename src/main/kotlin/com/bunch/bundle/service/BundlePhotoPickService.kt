@@ -2,6 +2,7 @@ package com.bunch.bundle.service
 
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bundle.domain.Bundle
+import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundlePhotoPick
 import com.bunch.bundle.domain.BundlePhotoPickRepository
 import com.bunch.bundle.domain.BundlePhotoRepository
@@ -20,6 +21,7 @@ class BundlePhotoPickService(
     private val access: BundleAccessService,
     private val photos: BundlePhotoRepository,
     private val picks: BundlePhotoPickRepository,
+    private val participants: BundleParticipantRepository,
     private val attribution: BundleAttributionService,
     private val memberships: BunchMembershipRepository,
     private val entityManager: EntityManager,
@@ -43,11 +45,12 @@ class BundlePhotoPickService(
         val row = picks.findByBundlePhotoIdAndMemberId(photoId, userId)
         row?.let(entityManager::refresh)
         if ((row?.picked ?: false) != request.picked) {
-            val current = row?.version ?: bundle.revision
+            val current = row?.version ?: participants.findPickInitialVersion(bundleId, userId)
+                ?: throw BusinessException(ErrorCode.FORBIDDEN)
             if (request.expectedVersion != current) {
                 throw BusinessException(
                     ErrorCode.BUNDLE_VERSION_CONFLICT,
-                    summaries(bundle, userId, people)[photoId] ?: BundlePhotoPicks(version = current)
+                    summaries(bundle, userId, people).getValue(photoId)
                 )
             }
             bundle.revision++
@@ -68,7 +71,7 @@ class BundlePhotoPickService(
             memberships.findByMemberIdAndBunchIdAndStatus(userId, bunchId)?.recordActivity(bundle.updatedAt)
         }
         // No pick event: this screen refreshes other members' choices only on re-entry.
-        return summaries(bundle, userId, people)[photoId] ?: BundlePhotoPicks(version = bundle.revision)
+        return summaries(bundle, userId, people).getValue(photoId)
     }
 
     /** Internal assembler. The caller authorizes the bundle and supplies its ordered attribution. */
@@ -77,11 +80,15 @@ class BundlePhotoPickService(
         bundle: Bundle,
         userId: Long,
         people: List<BundleParticipantResponse>
-    ): Map<Long, BundlePhotoPicks> = picks.findStatesByBundleId(bundle.id).groupBy { it.bundlePhotoId }
-        .mapValues { (_, rows) ->
+    ): Map<Long, BundlePhotoPicks> {
+        val initialVersion = participants.findPickInitialVersion(bundle.id, userId) ?: 0L
+        val byPhoto = picks.findStatesByBundleId(bundle.id).groupBy { it.bundlePhotoId }
+        return photos.findAllByBundleIdOrderByPositionAscIdAsc(bundle.id).associate { photo ->
+            val rows = byPhoto[photo.id].orEmpty()
             val selectedIds = rows.filter { it.picked }.map { it.memberId }.toSet()
             val selected = people.filter { it.memberId in selectedIds }
             val own = rows.firstOrNull { it.memberId == userId }
-            BundlePhotoPicks(selected.size, own?.picked ?: false, own?.version ?: bundle.revision, selected)
+            photo.id to BundlePhotoPicks(selected.size, own?.picked ?: false, own?.version ?: initialVersion, selected)
         }
+    }
 }

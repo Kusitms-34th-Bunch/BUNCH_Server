@@ -29,10 +29,8 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
     fun `migration preserves captions and constrains pick ownership with cascade cleanup and repeatable validation`() {
         val schema = "bundle_pick_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            val version = "2026111011230"
-            val previous = configure(schema, version).info().all().mapNotNull { it.version }
-                .filter { it < MigrationVersion.fromVersion(version) }.max()
-            configure(schema, previous.toString()).migrate()
+            val version = "2026111111280"
+            configure(schema, "32").migrate()
             val member = id("INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id")
             val other = id("INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id")
             val bunch = id("""INSERT INTO $schema.bunches(name, introduction, visibility, character_type, created_by,
@@ -56,7 +54,8 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
                 VALUES (?, ?, CURRENT_TIMESTAMP)""",
                 second, other)
             val migration = configure(schema, version)
-            assertThat(migration.migrate().migrationsExecuted).isEqualTo(1)
+            migration.migrate()
+            assertThat(migration.info().current()?.version).isEqualTo(MigrationVersion.fromVersion(version))
             migration.validate()
             assertThat(migration.migrate().migrationsExecuted).isZero()
             assertThat(jdbc.queryForObject(
@@ -79,6 +78,29 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
             assertThatThrownBy { insert(second, other) }.isInstanceOf(DataIntegrityViolationException::class.java)
             assertThatThrownBy { insert(first, member, -1) }.isInstanceOf(DataIntegrityViolationException::class.java)
             insert(first, member)
+            val initialVersion = "2026111111281"
+            val initialVersions = configure(schema, initialVersion)
+            initialVersions.migrate()
+            assertThat(initialVersions.info().current()?.version)
+                .isEqualTo(MigrationVersion.fromVersion(initialVersion))
+            initialVersions.validate()
+            assertThat(initialVersions.migrate().migrationsExecuted).isZero()
+            assertThat(jdbc.queryForList(
+                "SELECT pick_initial_version FROM $schema.bundle_participants", Long::class.java
+            )).containsOnly(0L)
+            assertThat(jdbc.queryForObject(
+                "SELECT version FROM $schema.bundle_photo_picks WHERE bundle_photo_id = ?",
+                Long::class.java, photo
+            )).isEqualTo(8)
+            assertThat(jdbc.queryForObject(
+                "SELECT caption FROM $schema.bundle_photos WHERE id = ?", String::class.java, photo
+            )).isEqualTo("과거 캡션")
+            assertThatThrownBy {
+                jdbc.update("UPDATE $schema.bundle_participants SET pick_initial_version = -1")
+            }.isInstanceOf(DataIntegrityViolationException::class.java)
+            assertThatThrownBy {
+                jdbc.update("UPDATE $schema.bundle_participants SET pick_initial_version = NULL")
+            }.isInstanceOf(DataIntegrityViolationException::class.java)
             assertThatThrownBy { insert(first, member) }.isInstanceOf(DataIntegrityViolationException::class.java)
             jdbc.update("DELETE FROM $schema.bundle_participants WHERE bundle_id = ?", first)
             assertThat(jdbc.queryForObject(
@@ -87,6 +109,10 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
             jdbc.update("""INSERT INTO $schema.bundle_participants(bundle_id, member_id, joined_at)
                 VALUES (?, ?, CURRENT_TIMESTAMP)""",
                 first, member)
+            assertThat(jdbc.queryForObject(
+                "SELECT pick_initial_version FROM $schema.bundle_participants WHERE bundle_id = ?",
+                Long::class.java, first
+            )).isZero()
             insert(first, member)
             jdbc.update("DELETE FROM $schema.bundle_photos WHERE id = ?", photo)
             assertThat(jdbc.queryForObject(

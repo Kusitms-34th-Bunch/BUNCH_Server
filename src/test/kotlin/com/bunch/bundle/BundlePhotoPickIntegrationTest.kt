@@ -2,6 +2,7 @@ package com.bunch.bundle
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundlePhotoPickRepository
 import com.bunch.bundle.service.BundlePhotoPickService
 import com.bunch.global.exception.BusinessException
@@ -54,6 +55,9 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var pickRows: BundlePhotoPickRepository
+
+    @Autowired
+    private lateinit var participants: BundleParticipantRepository
 
     @Autowired
     private lateinit var transactions: PlatformTransactionManager
@@ -130,7 +134,8 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
     @Test
     fun `concurrent duplicate picks have one effect and stale independent requests cannot undo newer state`() {
         val f = fixture()
-        val version = service.get(f.owner, f.bunchId, f.id).revision
+        val before = service.get(f.owner, f.bunchId, f.id)
+        val version = before.photos.single().picks!!.version
         val beforeEvents = count("notifications")
         val results = concurrently(List(4) {
             { pickService.save(f.owner, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(true, version)) }
@@ -139,7 +144,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         assertThat(results.map { it.getOrThrow().version }.distinct()).hasSize(1)
         val selected = results.first().getOrThrow()
         assertThat(count("bundle_photo_picks")).isEqualTo(1)
-        assertThat(service.get(f.owner, f.bunchId, f.id).revision).isEqualTo(version + 1)
+        assertThat(service.get(f.owner, f.bunchId, f.id).revision).isEqualTo(before.revision + 1)
         assertThat(count("notifications")).isEqualTo(beforeEvents)
         pickService.save(f.owner, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(false, selected.version))
         assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) {
@@ -150,7 +155,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
     @Test
     fun `a parent transaction must refresh a previously loaded pick after waiting for current state`() {
         val f = fixture()
-        val version = service.get(f.owner, f.bunchId, f.id).revision
+        val version = service.get(f.owner, f.bunchId, f.id).photos.single().picks!!.version
         val selected = pickService.save(f.owner, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(true, version))
         val cleared = pickService.save(
             f.owner, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(false, selected.version)
@@ -180,6 +185,47 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
             changed.countDown()
             assertThat(stale.get(20, TimeUnit.SECONDS)).isTrue()
             assertThat(detail(f).path("photos").first().path("picks").path("pickedByMe").asBoolean()).isTrue()
+        } finally {
+            changed.countDown()
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `a parent transaction cannot reuse a removed participation initial pick version`() {
+        val f = fixture()
+        val actor = BundleActor(f.owner, "test")
+        service.addParticipant(actor, f.bunchId, f.id, f.guest, "generation-add")
+        val oldVersion = service.get(f.guest, f.bunchId, f.id).photos.single().picks!!.version
+        val loaded = CountDownLatch(1)
+        val changed = CountDownLatch(1)
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val stale = pool.submit<Boolean> {
+                TransactionTemplate(transactions).execute { tx ->
+                    participants.findByBundleIdAndMemberId(f.id, f.guest)!!
+                    loaded.countDown()
+                    check(changed.await(15, TimeUnit.SECONDS))
+                    try {
+                        pickService.save(f.guest, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(true, oldVersion))
+                        false
+                    } catch (error: BusinessException) {
+                        tx.setRollbackOnly()
+                        error.errorCode == ErrorCode.BUNDLE_VERSION_CONFLICT
+                    }
+                }!!
+            }
+            check(loaded.await(15, TimeUnit.SECONDS))
+            service.removeParticipant(actor, f.bunchId, f.id, f.guest, "generation-remove")
+            service.addParticipant(actor, f.bunchId, f.id, f.guest, "generation-readd")
+            val fresh = service.get(f.guest, f.bunchId, f.id).photos.single().picks!!
+            assertThat(fresh.version).isGreaterThan(oldVersion)
+            changed.countDown()
+            assertThat(stale.get(20, TimeUnit.SECONDS)).isTrue()
+            assertThat(pickRows.findByBundlePhotoIdAndMemberId(f.photoId, f.guest)).isNull()
+            assertThat(pickService.save(
+                f.guest, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(true, fresh.version)
+            ).pickedByMe).isTrue()
         } finally {
             changed.countDown()
             pool.shutdownNow()
@@ -268,7 +314,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
     fun `external published detail includes picks and still enforces bundle and bunch visibility`() {
         val f = fixture()
         val viewer = member()
-        val version = service.get(f.owner, f.bunchId, f.id).revision
+        val version = service.get(f.owner, f.bunchId, f.id).photos.single().picks!!.version
         pickService.save(f.owner, f.bunchId, f.id, f.photoId, BundlePhotoPickRequest(true, version))
         jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", f.bunchId)
         jdbc.update(
@@ -282,6 +328,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         val displayed = mapper.readTree(response.contentAsString).path("data").path("photos").first().path("picks")
         assertThat(displayed.path("count").asInt()).isEqualTo(1)
         assertThat(displayed.path("pickedByMe").asBoolean()).isFalse()
+        assertThat(displayed.path("version").asLong()).isZero()
         assertThat(displayed.path("members").first().path("memberId").asLong()).isEqualTo(f.owner)
         assertThat(displayed.path("members").first().path("profileAvailable").asBoolean()).isTrue()
         jdbc.update("UPDATE bundles SET visibility = 'PRIVATE' WHERE id = ?", f.id)
