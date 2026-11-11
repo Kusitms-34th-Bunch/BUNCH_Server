@@ -322,8 +322,8 @@ class SocialLikeIntegrationTest : BunchIntegrationSupport() {
         device(owner)
         device(recipient)
         jdbc.update(
-            "INSERT INTO push_preferences(member_id, enabled, types, updated_at) " +
-                "VALUES (?, true, '{\"BUNDLE_LIKED\":false}'::jsonb, CURRENT_TIMESTAMP)", recipient
+            "INSERT INTO push_preferences(member_id, enabled, categories, updated_at) " +
+                "VALUES (?, true, '{\"REACTION\":false}'::jsonb, CURRENT_TIMESTAMP)", recipient
         )
         likes.like(actor, bundle)
         val inbox = likeNotifications()

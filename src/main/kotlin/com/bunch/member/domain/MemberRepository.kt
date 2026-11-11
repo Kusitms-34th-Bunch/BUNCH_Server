@@ -8,6 +8,7 @@ interface MemberRepository : JpaRepository<Member, Long> {
     @org.springframework.data.jpa.repository.Query("select m from Member m where m.id = :id")
     fun findLockedById(id: Long): Member?
     fun existsByNickname(nickname: String): Boolean
+    fun existsByNicknameAndIdNot(nickname: String, id: Long): Boolean
     fun findByNickname(nickname: String): Member?
 
     @Query("select member from Member member left join fetch member.profileImageAsset where member.id in :ids")
