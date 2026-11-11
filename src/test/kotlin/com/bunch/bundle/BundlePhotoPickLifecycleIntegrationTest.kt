@@ -667,7 +667,7 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         val draft = createDraft(owner, bunchId, sources, listOf(guest))
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "$label-add-participant")
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
-            .comments.first { it.memberId == guest }.version
+            .comments.firstOrNull { it.memberId == guest }?.version ?: 0L
         val titleToken = bundleLeases.acquire(
             actor(owner),
             bunchId,
