@@ -1,4 +1,4 @@
-package com.bunch.place
+package com.bunch.kok
 
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -21,7 +21,7 @@ import javax.sql.DataSource
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = ["spring.flyway.enabled=false"])
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-class PinnedPlaceMigrationIntegrationTest @Autowired constructor(private val dataSource: DataSource) {
+class KokMigrationIntegrationTest @Autowired constructor(private val dataSource: DataSource) {
     private val jdbc = JdbcTemplate(dataSource)
 
     @Test
@@ -74,6 +74,45 @@ class PinnedPlaceMigrationIntegrationTest @Autowired constructor(private val dat
                 Long::class.java, member)).isEqualTo(2)
             jdbc.update("DELETE FROM $schema.bunches WHERE id = ?", bunch)
             assertThat(jdbc.queryForObject("SELECT count(*) FROM $schema.pinned_places", Long::class.java)).isZero()
+        } finally {
+            jdbc.execute("DROP SCHEMA IF EXISTS $schema CASCADE")
+        }
+    }
+
+    @Test
+    fun `V2026111111270 adds current bunch and member keyset indexes without changing existing pins`() {
+        val schema = "pin_list_" + UUID.randomUUID().toString().replace("-", "")
+        try {
+            configure(schema, "32").migrate()
+            val member = jdbc.queryForObject(
+                "INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id", Long::class.java
+            )!!
+            val bunch = jdbc.queryForObject(
+                """INSERT INTO $schema.bunches(name, introduction, visibility, character_type, created_by,
+                    creation_request_key, creation_fingerprint, created_at)
+                    VALUES (?, 'migration', 'PUBLIC', 'TYPE_2', ?, ?, 'test', CURRENT_TIMESTAMP) RETURNING id""",
+                Long::class.java, "migration-${UUID.randomUUID()}", member, UUID.randomUUID()
+            )!!
+            val pin = jdbc.queryForObject(
+                """INSERT INTO $schema.pinned_places(bunch_id, provider, external_id, name, address,
+                    source_type, pinned_by_member_id, pinned_at)
+                    VALUES (?, 'kakao', 'external', 'retained', 'address', 'BUNDLE', ?, CURRENT_TIMESTAMP)
+                    RETURNING id""", Long::class.java, bunch, member
+            )!!
+            val migration = configure(schema, "2026111111270")
+            // Keep the existing V35 push migration and apply this issue after it.
+            assertThat(migration.migrate().migrationsExecuted).isPositive()
+            assertThat(migration.info().current().version.toString()).isEqualTo("2026111111270")
+            migration.validate()
+            assertThat(migration.migrate().migrationsExecuted).isZero()
+            assertThat(jdbc.queryForObject("SELECT name FROM $schema.pinned_places WHERE id = ?",
+                String::class.java, pin)).isEqualTo("retained")
+            val indexes = jdbc.queryForList(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = ? AND tablename = 'pinned_places'",
+                String::class.java, schema
+            )
+            assertThat(indexes).anyMatch { it.contains("(bunch_id, pinned_at DESC, id DESC)") }
+            assertThat(indexes).anyMatch { it.contains("(bunch_id, pinned_by_member_id, pinned_at DESC, id DESC)") }
         } finally {
             jdbc.execute("DROP SCHEMA IF EXISTS $schema CASCADE")
         }

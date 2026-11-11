@@ -47,7 +47,7 @@ data class BundleLocationResponse(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+    val address: String?,
     val position: Int
 )
 

@@ -126,7 +126,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         assertThat(detail(f, f.guest).path("photos").first().path("picks").path("count").asInt()).isZero()
         write(f, """{"picked":true,"expectedVersion":0}""", 403, f.guest)
         val other = service.create(BundleActor(f.owner, "test"), f.bunchId, UUID.randomUUID(),
-            CreateBundleRequest(listOf(f.sourceId)))
+            CreateBundleRequest(listOf(f.sourceId), participantMemberIds = listOf(f.guest)))
         write(f.copy(photoId = other.photos.single().id), """{"picked":true,"expectedVersion":0}""", 404)
         write(f, """{"picked":true,"expectedVersion":-1}""", 400)
     }
@@ -299,7 +299,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         ))
         val current = service.get(f.owner, f.bunchId, f.id)
         val result = service.editPublished(BundleActor(f.owner, "test"), f.bunchId, f.id,
-            EditPublishedBundleRequest(current.revision, current.title, current.visibility!!, current.date,
+            EditPublishedBundleRequest(current.revision, current.title, current.date,
                 listOf(
                     PublishedBundlePhotoInput(bundlePhotoId = f.photoId),
                     PublishedBundlePhotoInput(photoId = added.id)
@@ -343,8 +343,10 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
     private fun fixture(): Fixture {
         val owner = member()
         val guest = member()
+        val selected = member()
         val bunchId = create(owner).id
         join(guest, issue(owner, bunchId))
+        join(selected, issue(owner, bunchId))
         val asset = assets.saveAndFlush(ImageAsset(
             publicId = "pick/${UUID.randomUUID()}",
             url = "https://images.example/pick.jpg"
@@ -356,7 +358,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
             processingStatus = ProcessingStatus.READY
         ))
         val bundle = service.create(
-            BundleActor(owner, "test"), bunchId, UUID.randomUUID(), CreateBundleRequest(listOf(source.id))
+            BundleActor(owner, "test"), bunchId, UUID.randomUUID(), CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(selected))
         )
         return Fixture(owner, guest, bunchId, bundle.id, bundle.photos.single().id, source.id)
     }

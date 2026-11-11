@@ -567,7 +567,6 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
             EditPublishedBundleRequest(
                 expectedRevision = current.revision,
                 title = current.title,
-                visibility = current.visibility!!,
                 date = current.date,
                 photos = listOf(
                     PublishedBundlePhotoInput(bundlePhotoId = retained.id),
@@ -647,7 +646,8 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
             actor(owner),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(sources.map { it.id })
+            CreateBundleRequest(sources.map { it.id }, participantMemberIds =
+                memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.filter { it != owner })
         )
 
     private fun preparePublishableDraft(

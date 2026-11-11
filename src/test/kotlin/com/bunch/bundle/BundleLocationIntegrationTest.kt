@@ -349,6 +349,57 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `HTTP rejects absent and blank search result addresses without replacing saved locations`() {
+        val f = fixture()
+        val saved = save(f, listOf(place("existing", 0)))
+        val authorization = credential(f.owner)
+        val path = "/api/v1/bunches/${f.bunchId}/bundles/${f.bundleId}/locations"
+        val result = mapper.createObjectNode().apply {
+            put("provider", "kakao")
+            put("externalId", "region-result")
+            put("name", "여의도")
+            put("position", 0)
+        }
+        val missing = result.deepCopy()
+        val blank = result.deepCopy().put("address", " \t ")
+        listOf(missing, blank).forEachIndexed { index, location ->
+            val body = mapper.createObjectNode().apply {
+                putArray("locations").add(location)
+                put("expectedVersion", saved.locationVersion)
+                put("leaseToken", f.token.toString())
+            }
+            mvc.perform(put(path).header("Authorization", authorization)
+                .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(body)))
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.error.code").value(if (index == 0) "COMMON_002" else "COMMON_001"))
+            assertThat(locations.get(f.owner.memberId, f.bunchId, f.bundleId)).isEqualTo(saved)
+            assertThat(recorder.events).isEmpty()
+        }
+    }
+
+    @Test
+    fun `HTTP accepts an explicit null address and preserves the regional name in snapshots`() {
+        val f = fixture()
+        val authorization = credential(f.owner)
+        val path = "/api/v1/bunches/${f.bunchId}/bundles/${f.bundleId}/locations"
+        val body = """{"locations":[{"provider":" example-provider ","externalId":"region-01",
+            "name":" 여의도 ","address":null,"position":0}],"expectedVersion":0,"leaseToken":"${f.token}"}"""
+        val result = mvc.perform(put(path).header("Authorization", authorization)
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.locations[0].provider").value("example-provider"))
+            .andExpect(jsonPath("$.data.locations[0].name").value("여의도"))
+            .andReturn()
+        val address = mapper.readTree(result.response.contentAsByteArray).path("data").path("locations")[0].path("address")
+        assertThat(address.isNull).isTrue()
+        val stored = locations.get(f.owner.memberId, f.bunchId, f.bundleId).locations.single()
+        assertThat(stored.address).isNull()
+        assertThat(stored.name).isEqualTo("여의도")
+        val snapshot = bundleService.get(f.owner.memberId, f.bunchId, f.bundleId)
+        assertThat(snapshot.locations.single()).isEqualTo(stored)
+    }
+
+    @Test
     fun `locations are optional for publication and are preserved with title and photo content events`() {
         val f = fixture()
         val asset = assets.saveAndFlush(ImageAsset(publicId = "location/${UUID.randomUUID()}", url = "https://test/a.jpg"))
@@ -381,7 +432,7 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         val f = fixture()
         val before = save(f, listOf(place("a", 0)))
         jdbc.update(
-            "UPDATE bundles SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE bundles SET status = 'PUBLISHED', published_at = updated_at WHERE id = ?",
             f.bundleId
         )
         val executor = Executors.newSingleThreadExecutor()

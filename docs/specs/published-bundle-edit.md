@@ -1,7 +1,10 @@
-# 발행 번들 상세·일괄 저장
+# 발행 번들 상세·내용 저장·공개 범위
 
 이슈 #88. 2026-11-07 승인한 원문 6.2.1~5·6.2.11~13·6.3.2가 기존 발행 후
-개별 저장·코멘트 편집 계약보다 우선한다. 초안의 lease·발행 조건은 유지한다.
+개별 저장·코멘트 편집 계약보다 우선한다. 이슈 #124는 2026-11-10 재전달된
+[피드 시트](https://docs.google.com/spreadsheets/d/1ScziF7WoYLHRiC_UYJBkKsi0jL6KKQJD2TNDzW1QGfU/edit?gid=294136194#gid=294136194)의
+E19:K20(6.2.11·6.2.12), E23:K23(6.2.15)에 따라 내용 저장과 공개 범위 설정을 분리한다.
+초안의 lease·최초 발행 조건은 이 변경의 대상이 아니며 최초 발행 확장은 #107 소유다.
 
 ## 전체 저장
 
@@ -13,7 +16,6 @@
 {
   "expectedRevision": 12,
   "title": "함께한 하루",
-  "visibility": "PUBLIC",
   "date": "2026-07-09",
   "photos": [
     {"bundlePhotoId": 201},
@@ -25,15 +27,20 @@
 }
 ```
 
-모든 최종 값을 보내되 사진 입력의 `caption`은 optional nullable이다. 날짜 null·장소 빈 배열·
+사진·제목·위치·날짜의 최종 값을 보내되 사진 입력의 `caption`은 optional nullable이다. 날짜 null·장소 빈 배열·
 빈 캡션은 허용한다. 사진은 배열 순서대로 1~20장, 장소는 [장소 계약](bundle-locations.md)에
 따라 최대 3개다. 제목은 NFC·trim 후 1~40 grapheme, 캡션은 NFC 후 최대 200 grapheme,
 날짜는 서울 기준 미래 날짜를 거부한다.
+공개 범위는 아래 전용 경로로만 변경한다.
 사진마다 `bundlePhotoId`(보존할 번들 사진)와 `photoId`(새 사진함 사진) 중 정확히 하나를
 보낸다. 기존 사진 ID는 해당 번들 소속이어야 하며 중복 ID·중복 원본 사진을 거부한다.
 원본 Photo가 삭제된 기존 번들 사진도 ID·이미지 참조·추가자·시각·픽을 유지한다.
 새 사진은 같은 번치의 READY 사진이어야 한다. 기존 사진함 업로드 한도를 추가로 소비하지 않는다.
-참여 멤버와 멤버별 코멘트는 입력 대상이 아니며 발행 후 변경할 수 없다.
+참여 멤버와 멤버별 코멘트·픽은 입력 대상이 아니며 발행 후 변경할 수 없다.
+`EditPublishedBundleRequest.visibility`는 제거한다. 구 클라이언트가 일괄 저장 JSON에
+`visibility`를 남겨도 기존 Jackson 미지 필드 처리대로 무시하며 공개 범위와 그 버전은
+변경하지 않는다. 클라이언트는 공개 범위 변경을 전용 경로로 전환해야 한다.
+사진 입력의 `caption`은 #123의 호환성 전환 전까지 기존 계약을 유지하며 과거 데이터를 삭제하지 않는다.
 
 보존 입력(`bundlePhotoId`)의 `caption`을 생략하거나 null로 보내면 기존 캡션을 유지한다.
 새 입력(`photoId`)의 caption이 생략되거나 null이면 빈 캡션으로 시작한다. 명시적인 non-null
@@ -62,9 +69,55 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 장소 교체는 MANDATORY `BundleLocationService.replaceLocked`를 호출한다. 동기 출처 제거
 이벤트의 실제 핀 정리는 #92 소유이며 별도 임시 writer를 만들지 않는다. listener 실패도 전체 롤백한다.
 
-기존 제목·공개 범위·날짜·사진 추가/삭제/이동·캡션 경로는 PUBLISHED에서 OWNER도
+기존 제목·날짜·사진 추가/삭제/이동·캡션 경로는 PUBLISHED에서 OWNER도
 409 `BUNDLE_002`로 거부한다. 참여자 추가/삭제·leave·comments/me도 발행 후 거부한다.
 이 경로들의 DRAFT lease·version·참여 권한은 유지한다.
+
+## 공개 범위 단독 저장 (#124)
+
+기존 `PUT /api/v1/bunches/{bunchId}/bundles/{bundleId}/visibility`를 확장한다.
+
+```json
+{"value": "PRIVATE", "expectedVersion": 3, "mode": "PUBLISHED"}
+```
+
+`value`는 PUBLIC 또는 PRIVATE, `expectedVersion`은 최신 `visibilityVersion`이다.
+제목·사진·위치·날짜·참여자·코멘트·픽을 재전송하지 않는다. lease는 필요 없다.
+`mode: DRAFT`의 기존 초안 참여자 권한은 유지하고, `PUBLISHED`는 현재 ACTIVE OWNER만 허용한다.
+발행 참여자였는지는 요구하지 않는다. 가입 완료·소속·경로·공통 피드 접근을 기존
+`BundleAccessService.lock`으로 재검사하고 번치→번들 잠금 획득 후 최신 상태·역할·버전을 확인한다.
+현재 번치에 따른 공통 접근 규칙은 그대로 적용하며 별도 접근 우회나 새 선택 규칙을 만들지 않는다.
+
+- 모드와 실제 상태 불일치: 409 `BUNDLE_002`와 현재 status.
+- 버전 불일치: no-op도 409 `BUNDLE_003`, detail `{value: 현재 공개 범위, version: 현재 버전}`.
+- ACTIVE OWNER가 아님: 403 `AUTH_002`. 없는·삭제된·경로가 다른 번들은 기존 404를 유지한다.
+- 공통 접근에서 거부되는 숨김·차단·신고·탈퇴·가입 중 계정은 기존 오류를 유지한다.
+- value/mode가 없거나 잘못된 enum, expectedVersion 누락/null은 400 `COMMON_002`다.
+
+실제 변경에만 visibilityVersion·revision·updatedAt을 한 번 갱신한다. 동일 값과 최신 버전은
+no-op으로 시각·버전·이벤트를 유지한다. 성공 응답은 기존 BundleSnapshot이다.
+커밋 후 기존 `VISIBILITY` 이벤트 `{value, version}`를 한 번 보내며 선택 `X-Request-Id`를 유지한다.
+롤백 시 이벤트를 보내지 않는다. 발행본 변경에서는 활동 기록·발행 준비 알림·수정 알림을 만들지 않는다.
+발행 시각·제목·사진 ID/순서/캡션·위치·날짜·참여자 코멘트·좋아요·소셜 댓글은 보존한다.
+
+내용 저장은 visibilityVersion을 바꾸지 않는다. 먼저 내용 저장이 끝나면 기존 visibilityVersion으로
+범위 변경을 이어갈 수 있다. 반대로 범위 변경은 aggregate revision을 올리므로 그 이전
+expectedRevision의 내용 저장은 충돌로 거부하고 재조회한다. 두 경로는 같은 잠금 순서를 사용해
+서로의 필드를 덮어쓰지 않는다. 기존 전체 revision 경계를 완화하거나 별도 revision을 추가하지 않는다.
+
+PRIVATE(멤버 공개)로 바꾸면 외부 피드·번치 프로필 목록·상세에서 제외하되 내부 멤버 접근은 유지한다.
+다시 PUBLIC으로 바꾸면 저장된 반응과 기존 발행 시각을 유지한다. 공개 번치의 PUBLIC은 전체 공개,
+비공개 번치의 PUBLIC은 승인된 팔로워 번치에게만 공개이며 PENDING은 허용하지 않는다.
+
+픽은 #123 소유다. 범위 저장은 사진/참여자 변경이나 픽 저장·삭제 경로를 호출하지 않는다.
+기준 dev에 픽 모델이 없으므로 별도 모델·가짜 저장소를 정의하지 않는다. #123 통합 시 기존 사진 ID의
+픽 보존을 검증하고, 내용 수정의 사진 삭제 정리는 #123의 lifecycle/FK 경계로 연결한다.
+신규 의존성·마이그레이션은 추가하지 않는다.
+
+검증 기준: OWNER/CO_OWNER/일반 멤버·미참여 OWNER·동시 역할 변경·비활성 소속,
+모드/버전/경로/삭제/운영 숨김·no-op·커밋/롤백 이벤트·내용 저장과의 경합·반응과 시각 보존,
+실제 피드/프로필/상세 비노출 및 공개 복구·비공개 번치 승인 팔로우 경계를 자동 테스트한다.
+실제 iOS/WebView와 Figma GUI3 화면은 별도 확인 대상이며 시트 기반 서버 검증으로 대체했다고 주장하지 않는다.
 
 ## 상세·권한·집계
 
