@@ -1,4 +1,4 @@
-package com.bunch.place
+package com.bunch.kok
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
@@ -15,11 +15,11 @@ import com.bunch.bundle.service.BundleService
 import com.bunch.feed.domain.FeedContentHideRepository
 import com.bunch.feed.domain.FeedContentKind
 import com.bunch.global.exception.ErrorCode
-import com.bunch.place.domain.PinnedPlaceRepository
-import com.bunch.place.domain.PinnedPlaceSource
+import com.bunch.kok.domain.KokRepository
+import com.bunch.kok.domain.KokSource
 import com.bunch.place.domain.PlaceDetails
-import com.bunch.place.service.PinnedPlaceLocationListener
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.service.KokLocationListener
+import com.bunch.kok.service.KokService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -37,12 +37,12 @@ import java.util.concurrent.TimeUnit
 
 @SpringBootTest
 @ActiveProfiles("test")
-class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
+class KokIntegrationTest : BunchIntegrationSupport() {
     @Autowired
-    private lateinit var pins: PinnedPlaceService
+    private lateinit var pins: KokService
 
     @Autowired
-    private lateinit var pinRows: PinnedPlaceRepository
+    private lateinit var pinRows: KokRepository
 
     @Autowired
     private lateinit var locations: BundleLocationService
@@ -63,7 +63,7 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
     private lateinit var hides: FeedContentHideRepository
 
     @Autowired
-    private lateinit var listener: PinnedPlaceLocationListener
+    private lateinit var listener: KokLocationListener
 
     @Autowired
     private lateinit var transactions: PlatformTransactionManager
@@ -115,6 +115,26 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `pending undo keeps original registration and delayed delete never removes a repin`() {
+        val f = fixture()
+        val colleague = member()
+        join(colleague, issue(f.actor, f.bunch))
+        val original = pins.pinBundleLocation(f.actor, f.bundle, f.location)
+        // Undo during the toast sends no DELETE, so a duplicate still returns the original registration.
+        assertThat(pins.pinBundleLocation(colleague, f.bundle, f.location)).isEqualTo(original)
+        assertThat(pins.list(f.actor).items.single().pinnedByMemberId).isEqualTo(f.actor)
+        assertThat(pins.list(f.actor).items.single().pinnedAt).isEqualTo(original.pinnedAt)
+        pins.unpin(colleague, original.id)
+        val repin = pins.pinBundleLocation(colleague, f.bundle, f.location)
+        pins.unpin(f.actor, original.id)
+        val retained = pins.list(f.actor)
+        assertThat(retained.items.single().id).isEqualTo(repin.id)
+        assertThat(retained.items.single().pinnedByMemberId).isEqualTo(colleague)
+        assertThat(retained.members.first { it.memberId == f.actor }.count).isZero()
+        assertThat(retained.members.first { it.memberId == colleague }.count).isEqualTo(1)
+    }
+
+    @Test
     fun `server current bunch scopes uniqueness and never cancels another bunch pin`() {
         val f = fixture()
         val first = pins.pinBundleLocation(f.actor, f.bundle, f.location)
@@ -127,6 +147,78 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
         pins.unpin(f.actor, second.id)
         assertThat(pinRows.existsById(first.id)).isTrue()
         assertThat(pins.forBundle(f.actor, f.bundle).locations.single().pinned).isFalse()
+    }
+
+    @Test
+    fun `selected place fields survive normalized bundle storage and pin display without provider lookup`() {
+        val f = fixture()
+        val input = BundleLocationInput(
+            provider = " KAKAO ",
+            externalId = " Selected-ID ",
+            name = " 여의도 ",
+            address = " 서울특별시 영등포구 여의도동 ",
+            position = 0
+        )
+        replace(f, listOf(input))
+        val stored = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(stored.provider).isEqualTo("kakao")
+        assertThat(stored.externalId).isEqualTo("Selected-ID")
+        assertThat(stored.name).isEqualTo("여의도")
+        assertThat(stored.address).isEqualTo("서울특별시 영등포구 여의도동")
+        assertThat(stored.pinned).isFalse()
+
+        val pinned = pins.pinBundleLocation(f.actor, f.bundle, stored.id)
+        assertThat(pinned.provider).isEqualTo(stored.provider)
+        assertThat(pinned.externalId).isEqualTo(stored.externalId)
+        assertThat(pinned.name).isEqualTo(stored.name)
+        assertThat(pinned.address).isEqualTo(stored.address)
+        assertThat(pinned.sourceLocationId).isEqualTo(stored.id)
+        val displayed = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(displayed.pinned).isTrue()
+        assertThat(displayed.pinId).isEqualTo(pinned.id)
+        assertThat(displayed.address).isEqualTo(stored.address)
+    }
+
+    @Test
+    fun `selected region without address survives actual replacement pinning and source bundle deletion`() {
+        val f = fixture()
+        val input = BundleLocationInput(
+            provider = " KAKAO ",
+            externalId = " Region-ID ",
+            name = " 여의도 ",
+            address = null,
+            position = 0
+        )
+        replace(f, listOf(input))
+        val stored = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(stored.provider).isEqualTo("kakao")
+        assertThat(stored.externalId).isEqualTo("Region-ID")
+        assertThat(stored.name).isEqualTo("여의도")
+        assertThat(stored.address).isNull()
+        assertThat(jdbc.queryForMap("SELECT name, address FROM bundle_locations WHERE id = ?", stored.id))
+            .containsEntry("name", "여의도")
+            .containsEntry("address", null)
+
+        val pinned = pins.pinBundleLocation(f.actor, f.bundle, stored.id)
+        assertThat(pinned.name).isEqualTo("여의도")
+        assertThat(pinned.address).isNull()
+        assertThat(pinned.sourceLocationId).isEqualTo(stored.id)
+        val displayed = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(displayed.pinId).isEqualTo(pinned.id)
+        assertThat(displayed.pinned).isTrue()
+        assertThat(displayed.name).isEqualTo("여의도")
+        assertThat(displayed.address).isNull()
+
+        bundleService.delete(BundleActor(f.owner, "test-session"), f.sourceBunch, f.bundle, UUID.randomUUID().toString())
+        val snapshot = pinRows.findById(pinned.id).orElseThrow()
+        assertThat(snapshot.sourceBundleId).isNull()
+        assertThat(snapshot.sourceLocationId).isNull()
+        assertThat(snapshot.name).isEqualTo("여의도")
+        assertThat(snapshot.address).isNull()
+        assertThat(snapshot.pinnedAt).isEqualTo(pinned.pinnedAt)
+        assertThat(jdbc.queryForMap("SELECT name, address FROM pinned_places WHERE id = ?", pinned.id))
+            .containsEntry("name", "여의도")
+            .containsEntry("address", null)
     }
 
     @Test
@@ -336,7 +428,7 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
         assertThat(tx { pins.pinAdvertisement(f.actor, 123, place()) }).isEqualTo(bundleFirst)
         pins.unpin(f.actor, bundleFirst.id)
         val adFirst = tx { pins.pinAdvertisement(f.actor, 123, place()) }
-        assertThat(adFirst.sourceType).isEqualTo(PinnedPlaceSource.ADVERTISEMENT)
+        assertThat(adFirst.sourceType).isEqualTo(KokSource.ADVERTISEMENT)
         assertThat(adFirst.sourceAdvertisementId).isEqualTo(123)
         assertThat(pins.pinBundleLocation(f.actor, f.bundle, f.location)).isEqualTo(adFirst)
         replace(f, emptyList())

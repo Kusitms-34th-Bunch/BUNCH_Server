@@ -149,7 +149,10 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 피드 페이지 조회는 실제 `Bundle bundle, Bunch bunch`에서 `bunch.id = bundle.bunchId`와
 `PUBLISHED_ACCESS AND FEED_EXCLUSIONS`를 **LIMIT/커서/count 이전**에 적용한다.
 구간별 기간·APPROVED 팔로우·공개 번치·anchor 조건은 #95가 추가한다.
-`visibleBundleIds`로 이미 자른 페이지를 사후 필터링하면 누락·빈 페이지·잘못된 hasNext가 생기므로 금지한다.
+`visibleBundleIds`로 이미 자른 피드 페이지를 사후 필터링하면 누락·빈 페이지·잘못된 hasNext가 생기므로 금지한다.
+[콕 목록](pinned-places.md)의 #125는 원본 불가 핀도 유지하므로 해당 핀 페이지를 거르지 않고
+`forFeed=false` 배치 결과로 출처 접근 상태만 조립한다. 유효한 내보내짐/삭제 안내도 배치 검사해
+상세에서 거부할 출처 ID·이름·제목을 숨긴다. 카드 탭은 기존 발행본 상세에서 다시 검사한다.
 `viewer`의 `memberId/currentBunchId`를 요청마다 다시 얻고 클라이언트의 viewer ID로 바꾸지 않는다.
 
 댓글·좋아요 집계는 실제 자기 테이블의 작성 번치에 `VISIBLE_BUNCH`를 적용한다.

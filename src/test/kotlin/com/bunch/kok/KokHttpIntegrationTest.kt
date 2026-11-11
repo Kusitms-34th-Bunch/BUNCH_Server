@@ -1,4 +1,4 @@
-package com.bunch.place
+package com.bunch.kok
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.global.exception.ErrorCode
@@ -26,7 +26,7 @@ import java.util.UUID
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-class PinnedPlaceHttpIntegrationTest : BunchIntegrationSupport() {
+class KokHttpIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var mvc: MockMvc
 
@@ -147,6 +147,102 @@ class PinnedPlaceHttpIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(put(path(f)).header(HttpHeaders.AUTHORIZATION, authorization))
             .expectError(ErrorCode.CURRENT_BUNCH_REQUIRED)
         assertThat(count("pinned_places")).isZero()
+    }
+
+    @Test
+    fun `HTTP current list requires active session completed account and current bunch`() {
+        mvc.perform(get("/api/v1/pinned-places")).expectError(ErrorCode.UNAUTHORIZED)
+        val f = fixture()
+        val expired = tokens.createAccessToken(f.actor, "ROLE_USER", UUID.randomUUID().toString())
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, "Bearer $expired"))
+            .expectError(ErrorCode.UNAUTHORIZED)
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, bearer(member())))
+            .expectError(ErrorCode.CURRENT_BUNCH_REQUIRED)
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, bearer(member(false))))
+            .expectError(ErrorCode.SIGNUP_INCOMPLETE)
+    }
+
+    @Test
+    fun `HTTP current list returns snapshot and current attribution and reuses detail recheck`() {
+        val f = fixture()
+        val authorization = bearer(f.actor)
+        val saved = mvc.perform(put(path(f)).header(HttpHeaders.AUTHORIZATION, authorization)).andReturn()
+        val pinId = mapper.readTree(saved.response.contentAsByteArray).path("data").path("id").asLong()
+        jdbc.update("UPDATE bunches SET name = 'renamed bunch' WHERE id = ?", f.otherBunch)
+        jdbc.update("UPDATE bundles SET title = 'renamed title' WHERE id = ?", f.bundle)
+        val colleague = member()
+        join(colleague, issue(f.actor, f.bunch))
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, bearer(colleague))
+            .param("bunchId", f.otherBunch.toString()))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.bunchId").value(f.bunch))
+            .andExpect(jsonPath("$.data.totalCount").value(1))
+            .andExpect(jsonPath("$.data.members.length()").value(2))
+            .andExpect(jsonPath("$.data.members[0].count").value(1))
+            .andExpect(jsonPath("$.data.members[1].count").value(0))
+            .andExpect(jsonPath("$.data.items[0].id").value(pinId))
+            .andExpect(jsonPath("$.data.items[0].name").value("real name"))
+            .andExpect(jsonPath("$.data.items[0].address").value("real address"))
+            .andExpect(jsonPath("$.data.items[0].sourceAccessible").value(true))
+            .andExpect(jsonPath("$.data.items[0].sourceBunchId").value(f.otherBunch))
+            .andExpect(jsonPath("$.data.items[0].sourceBundleId").value(f.bundle))
+            .andExpect(jsonPath("$.data.items[0].sourceBunchName").value("renamed bunch"))
+            .andExpect(jsonPath("$.data.items[0].sourceBundleTitle").value("renamed title"))
+            .andExpect(jsonPath("$.data.nextCursor").doesNotExist())
+        jdbc.update("UPDATE bundles SET visibility = 'PRIVATE' WHERE id = ?", f.bundle)
+        mvc.perform(get("/api/v1/bunches/${f.otherBunch}/published-bundles/${f.bundle}")
+            .header(HttpHeaders.AUTHORIZATION, authorization)).expectError(ErrorCode.RESOURCE_NOT_FOUND)
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, authorization))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.totalCount").value(1))
+            .andExpect(jsonPath("$.data.items[0].name").value("real name"))
+            .andExpect(jsonPath("$.data.items[0].sourceAccessible").value(false))
+            .andExpect(jsonPath("$.data.items[0].sourceBunchId").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].sourceBundleId").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].sourceBunchName").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].sourceBundleTitle").doesNotExist())
+        jdbc.update("UPDATE bundles SET visibility = 'PUBLIC' WHERE id = ?", f.bundle)
+        mvc.perform(get("/api/v1/pinned-places").header(HttpHeaders.AUTHORIZATION, authorization))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[0].sourceAccessible").value(true))
+    }
+
+    @Test
+    fun `HTTP validates list params and isolates current bunch and cursor filter context`() {
+        val f = fixture()
+        val authorization = bearer(f.actor)
+        mvc.perform(put(path(f)).header(HttpHeaders.AUTHORIZATION, authorization)).andExpect(status().isOk)
+        val another = jdbc.queryForObject(
+            """INSERT INTO bundle_locations(bundle_id, provider, external_id, name, address, position)
+                VALUES (?, 'kakao', 'second', 'second', 'second address', 1) RETURNING id""",
+            Long::class.java, f.bundle
+        )!!
+        mvc.perform(put("/api/v1/bundles/${f.bundle}/locations/$another/pin")
+            .header(HttpHeaders.AUTHORIZATION, authorization)).andExpect(status().isOk)
+        val first = mvc.perform(get("/api/v1/pinned-places").param("size", "1")
+            .header(HttpHeaders.AUTHORIZATION, authorization))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.items.length()").value(1)).andReturn()
+        val cursor = mapper.readTree(first.response.contentAsByteArray).path("data").path("nextCursor").asText()
+        mvc.perform(get("/api/v1/pinned-places").param("size", "1").param("cursor", cursor)
+            .header(HttpHeaders.AUTHORIZATION, authorization))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.nextCursor").doesNotExist())
+        mvc.perform(get("/api/v1/pinned-places").param("memberId", f.actor.toString()).param("cursor", cursor)
+            .header(HttpHeaders.AUTHORIZATION, authorization)).expectError(ErrorCode.INVALID_INPUT)
+        listOf("size" to "0", "size" to "51", "size" to "wrong", "memberId" to "0",
+            "memberId" to "-1", "memberId" to "wrong", "cursor" to "", "cursor" to "garbled").forEach { (key, value) ->
+            mvc.perform(get("/api/v1/pinned-places").param(key, value)
+                .header(HttpHeaders.AUTHORIZATION, authorization)).expectError(ErrorCode.INVALID_INPUT)
+        }
+        val secondBunch = create(f.actor).id
+        mvc.perform(get("/api/v1/pinned-places").param("cursor", cursor)
+            .header(HttpHeaders.AUTHORIZATION, authorization)).expectError(ErrorCode.INVALID_INPUT)
+        mvc.perform(get("/api/v1/pinned-places").param("bunchId", f.bunch.toString())
+            .header(HttpHeaders.AUTHORIZATION, authorization))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.bunchId").value(secondBunch))
+            .andExpect(jsonPath("$.data.totalCount").value(0))
+            .andExpect(jsonPath("$.data.items.length()").value(0))
+            .andExpect(jsonPath("$.data.members.length()").value(1))
     }
 
     private fun fixture(): Fixture {
