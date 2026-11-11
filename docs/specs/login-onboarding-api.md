@@ -126,7 +126,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
 | PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
-| GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] |
+| GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] (현재 약관 버전 조회, 원문 없음) |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
 | GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available |
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
