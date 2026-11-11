@@ -9,8 +9,13 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class CreateBundleRequest(
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
     val photoIds: List<Long>,
-    val recommendationId: Long? = null
+
+    val recommendationId: Long? = null,
+
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
+    val participantMemberIds: List<Long> = emptyList()
 )
 
 data class BundleTextRequest(
@@ -40,7 +45,9 @@ data class BundleLocationInput(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+
+    @param:JsonProperty(value = "address", required = true)
+    val address: String?,
 
     @param:JsonProperty(value = "position", required = true)
     @param:JsonSetter(nulls = Nulls.FAIL)

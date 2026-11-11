@@ -1,4 +1,4 @@
-package com.bunch.place.domain
+package com.bunch.kok.domain
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -12,7 +12,7 @@ import java.time.Instant
 
 @Entity
 @Table(name = "pinned_places")
-class PinnedPlace(
+class Kok(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
@@ -29,12 +29,12 @@ class PinnedPlace(
     @Column(nullable = false, columnDefinition = "text")
     val name: String,
 
-    @Column(nullable = false, columnDefinition = "text")
-    val address: String,
+    @Column(columnDefinition = "text")
+    val address: String?,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, length = 16)
-    val sourceType: PinnedPlaceSource,
+    val sourceType: KokSource,
 
     @Column(name = "source_bundle_id")
     val sourceBundleId: Long? = null,

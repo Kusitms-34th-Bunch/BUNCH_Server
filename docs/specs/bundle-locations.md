@@ -15,7 +15,7 @@
 | provider | trim 후 소문자. ASCII `[a-z0-9_-]` 1~32자 |
 | externalId | trim 후 1~128 Unicode code point. 대소문자 유지 |
 | name | trim 후 비어 있지 않은 1~200 grapheme |
-| address | trim 후 비어 있지 않은 1~500 grapheme |
+| address | 필드 필수. 주소가 없으면 null, 문자열이면 trim 후 비어 있지 않은 1~500 grapheme |
 | position | 0부터 시작하는 연속 정수. 목록이 `[0, ..., size-1]`이어야 함 |
 
 문자열의 NUL은 거부한다. 목록 내 정규화한 `(provider, externalId)`는 중복할 수 없다.
@@ -23,6 +23,9 @@
 `com.bunch.place.domain.PlaceDetails.of`를 광고·콕하기에서도 공통 검증에 재사용한다.
 잘못된 값은 `IllegalArgumentException`이며 유스케이스에서 `INVALID_INPUT`으로 변환한다.
 검색 공급자 결과의 진위 검증은 후속이다. 이번에는 구조 검증한 장소 입력을 저장한다.
+최신 4.3.10의 검색·공급자 호출은 프론트가 맡고 서버는 결과값만 받는다.
+서버 검색 API는 추가하지 않는다. 주소 없는 지역은 `address: null`로 저장하며
+상세 입력·호환성은 [#126 장소 검색 계약](place-search.md)을 따른다.
 
 ## HTTP
 
@@ -131,3 +134,12 @@ TEXT로 저장하고 애플리케이션에서 상한을 검사한다. 적용된 
 실제 STOMP 커밋/롤백/재연결·기존 발행 조건·PostgreSQL migration·JPA validate다.
 C의 실제 일괄 편집과 G의 실제 콕 writer 연결은 각각의 구현 통합 시 추가 검증한다.
 검색 공급자·실제 iOS/WebView 연동은 후속이며 자동 검증과 구분한다.
+
+
+## 콕 목록 연계 — #125
+
+현재 번치 전체 목록·멤버 필터·개수·원본 접근 상태는 [콕 계약](pinned-places.md)이 소유한다.
+목록의 장소 이름·주소는 최초 핀 스냅샷을 사용하며 현재 번치명·번들 제목만 최신으로 조립한다.
+장소 제거 listener·번들 삭제 FK·provider+externalId 중복 보존은 위 계약을 그대로 재사용한다.
+콕 시트 K8의 주소 없는 지역은 #126의 입력·검색 공급자 계약 정렬이 선행한다.
+#125에서 PlaceDetails·DB의 빈 주소 금지 검증을 임의로 완화하지 않는다.

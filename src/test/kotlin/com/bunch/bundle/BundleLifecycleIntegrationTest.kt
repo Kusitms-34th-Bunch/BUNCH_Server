@@ -1,6 +1,8 @@
 package com.bunch.bundle
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.dto.BunchMembershipExitRequest
+import com.bunch.bunch.service.BunchMembershipExitService
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
@@ -65,6 +67,9 @@ import java.util.UUID
 @SpringBootTest
 @ActiveProfiles("test")
 class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
+    @Autowired
+    private lateinit var membershipExit: BunchMembershipExitService
+
     @Autowired
     private lateinit var bundleService: BundleService
 
@@ -146,7 +151,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             actor(owner),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(photo.id))
+            CreateBundleRequest(listOf(photo.id), participantMemberIds = listOf(guest))
         )
 
         assertThat(created.status).isEqualTo(BundleStatus.DRAFT)
@@ -204,7 +209,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 actor(owner),
                 bunchId,
                 UUID.randomUUID(),
-                CreateBundleRequest(listOf(foreignPhoto.id))
+                CreateBundleRequest(listOf(foreignPhoto.id), participantMemberIds = listOf(guest))
             )
         }
 
@@ -227,21 +232,194 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `initial participants are the creator plus the current bunch uploader union`() {
+    fun `initial participants are selected non uploaders plus creator excluding unselected uploaders`() {
+        val owner = member()
+        val selected = member()
+        val uploader = member()
+        val bunchId = bunchWithMembers(owner, selected, uploader)
+        val source = photo(bunchId, uploadedBy = listOf(uploader))
+        val request = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(selected))
+        val key = UUID.randomUUID()
+
+        val created = bundleService.create(actor(owner), bunchId, key, request)
+        val replay = bundleService.create(actor(owner), bunchId, key, request)
+
+        assertThat(created.participants.map { it.memberId }).containsExactly(owner, selected)
+        assertThat(replay.id).isEqualTo(created.id)
+        assertThat(bundleService.get(uploader, bunchId, created.id).permissions.canEdit).isFalse()
+        assertThat(bundleService.get(selected, bunchId, created.id).permissions.canEdit).isTrue()
+        assertThat(created.publishBlockers).contains("COMMENTS_REQUIRED")
+        assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            bundleService.create(actor(owner), bunchId, key, request.copy(participantMemberIds = listOf(uploader)))
+        }
+    }
+
+    @Test
+    fun `creation rejects missing self only duplicate foreign inactive and incomplete selected members atomically`() {
+        val owner = member()
+        val selected = member()
+        val remaining = member()
+        val outsider = member()
+        val bunchId = bunchWithMembers(owner, selected, remaining)
+        val source = photo(bunchId, listOf(owner))
+        val request = CreateBundleRequest(listOf(source.id))
+        for (selection in listOf(emptyList(), listOf(owner), listOf(selected, selected), listOf(0L))) {
+            assertBundleError(ErrorCode.INVALID_INPUT) {
+                bundleService.create(
+                    actor(owner), bunchId, UUID.randomUUID(), request.copy(participantMemberIds = selection)
+                )
+            }
+        }
+        for (selection in listOf(listOf(outsider), listOf(Long.MAX_VALUE))) {
+            assertBundleError(ErrorCode.FORBIDDEN) {
+                bundleService.create(
+                    actor(owner), bunchId, UUID.randomUUID(), request.copy(participantMemberIds = selection)
+                )
+            }
+        }
+        jdbc.update("UPDATE members SET signup_status = 'IN_PROGRESS' WHERE id = ?", selected)
+        assertBundleError(ErrorCode.FORBIDDEN) {
+            bundleService.create(
+                actor(owner), bunchId, UUID.randomUUID(), request.copy(participantMemberIds = listOf(selected))
+            )
+        }
+        jdbc.update("UPDATE members SET signup_status = 'COMPLETED' WHERE id = ?", selected)
+        for (status in listOf("SUSPENDED", "WITHDRAWN")) {
+            jdbc.update("UPDATE members SET account_status = ? WHERE id = ?", status, selected)
+            assertBundleError(ErrorCode.FORBIDDEN) {
+                bundleService.create(
+                    actor(owner), bunchId, UUID.randomUUID(), request.copy(participantMemberIds = listOf(selected))
+                )
+            }
+        }
+        assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isZero()
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bundle_requests WHERE bunch_id = ?", Long::class.java, bunchId
+        )).isZero()
+    }
+
+    @Test
+    fun `creation rejects partially or entirely deleted photo selections and permits corrected retry`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val first = photo(bunchId, listOf(owner))
+        val removed = photo(bunchId, listOf(owner))
+        val last = photo(bunchId, listOf(owner))
+        photoService.removeUploader(bunchId, removed.id, owner)
+        val key = UUID.randomUUID()
+        val request = CreateBundleRequest(
+            listOf(last.id, removed.id, first.id),
+            participantMemberIds = listOf(guest)
+        )
+        for (ids in listOf(request.photoIds, listOf(removed.id))) {
+            val error = org.assertj.core.api.Assertions.catchThrowable {
+                bundleService.create(actor(owner), bunchId, key, request.copy(photoIds = ids))
+            } as BusinessException
+            assertThat(error.errorCode).isEqualTo(ErrorCode.PHOTO_SELECTION_CHANGED)
+            assertThat(error.detail).isEqualTo(mapOf("missingPhotoIds" to listOf(removed.id)))
+        }
+        assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isZero()
+        val corrected = request.copy(photoIds = listOf(last.id, first.id))
+        val created = bundleService.create(actor(owner), bunchId, key, corrected)
+        assertThat(created.photos.map { it.photoId }).containsExactly(last.id, first.id)
+        assertThat(created.photos.map { it.position }).containsExactly(0, 1)
+        assertThat(created.title).isEmpty()
+        assertThat(created.date).isNull()
+        assertThat(bundleService.create(actor(owner), bunchId, key, corrected).id).isEqualTo(created.id)
+    }
+
+    @Test
+    fun `creation rejects foreign and processing photos instead of treating them as deleted`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val otherOwner = member()
+        val otherGuest = member()
+        val otherBunch = bunchWithMembers(otherOwner, otherGuest)
+        val foreign = photo(otherBunch, listOf(otherOwner))
+        val processing = photo(bunchId, listOf(owner), status = ProcessingStatus.PENDING)
+        val removed = photo(bunchId, listOf(owner))
+        photoService.removeUploader(bunchId, removed.id, owner)
+        for (invalid in listOf(foreign, processing)) {
+            assertBundleError(ErrorCode.INVALID_INPUT) {
+                bundleService.create(actor(owner), bunchId, UUID.randomUUID(), CreateBundleRequest(
+                    listOf(removed.id, invalid.id), participantMemberIds = listOf(guest)
+                ))
+            }
+        }
+    }
+
+    @Test
+    fun `creation revalidates selected membership after waiting for concurrent departure`() {
+        val owner = member()
+        val selected = member()
+        val remaining = member()
+        val bunchId = bunchWithMembers(owner, selected, remaining)
+        val source = photo(bunchId, listOf(owner))
+        val request = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(selected))
+        val membershipId = jdbc.queryForObject(
+            "SELECT id FROM bunch_memberships WHERE bunch_id = ? AND member_id = ? AND status = 'ACTIVE'",
+            Long::class.java, bunchId, selected
+        )!!
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val pending = TransactionTemplate(transactionManager).execute {
+                val bunch = bunchRepository.findLocked(bunchId)!!
+                val creation = executor.submit<Throwable?> {
+                    runCatching {
+                        bundleService.create(actor(owner), bunchId, UUID.randomUUID(), request)
+                    }.exceptionOrNull()
+                }
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (true) {
+                    val waiting = jdbc.queryForObject(
+                        """SELECT count(*) FROM pg_stat_activity
+                            WHERE datname = current_database() AND wait_event_type = 'Lock'""",
+                        Long::class.java
+                    ) ?: 0L
+                    if (waiting > 0) break
+                    check(!creation.isDone) { "Creation completed before waiting" }
+                    check(System.nanoTime() < deadline) { "Creation did not wait for the bunch lock" }
+                    Thread.sleep(10)
+                }
+                membershipExit.leave(selected, bunchId, UUID.randomUUID(),
+                    BunchMembershipExitRequest(membershipId, bunch.membershipVersion))
+                creation
+            }!!
+            val error = pending.get(10, TimeUnit.SECONDS)
+            assertThat(error).isInstanceOf(BusinessException::class.java)
+            assertThat((error as BusinessException).errorCode).isEqualTo(ErrorCode.FORBIDDEN)
+            assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isZero()
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `concurrent creation retries create one graph and changed selected member conflicts`() {
         val owner = member()
         val first = member()
         val second = member()
-        val outsider = member()
         val bunchId = bunchWithMembers(owner, first, second)
-        val firstPhoto = photo(bunchId, uploadedBy = listOf(first))
-        val secondPhoto = photo(bunchId, uploadedBy = listOf(second, outsider))
-
-        val created = createDraft(owner, bunchId, listOf(firstPhoto.id, secondPhoto.id))
-
-        assertThat(created.participants.map { it.memberId })
-            .containsExactly(owner, first, second)
-        assertThat(created.permissions.creator).isTrue()
-        assertThat(created.permissions.participant).isTrue()
+        val source = photo(bunchId, listOf(owner))
+        val key = UUID.randomUUID()
+        val request = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(first))
+        val results = concurrently(listOf(
+            { bundleService.create(actor(owner), bunchId, key, request) },
+            { bundleService.create(actor(owner), bunchId, key, request) }
+        ))
+        assertThat(results).allMatch { it.isSuccess }
+        assertThat(results.map { it.getOrThrow().id }.distinct()).hasSize(1)
+        assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            bundleService.create(actor(owner), bunchId, key, request.copy(participantMemberIds = listOf(second)))
+        }
+        val created = results.first().getOrThrow()
+        assertThat(bundleParticipants.findAllByBundleIdOrderByJoinedAtAscIdAsc(created.id)).hasSize(2)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM notifications WHERE bunch_id = ? AND type = 'DRAFT_PARTICIPANT_ADDED'",
+            Long::class.java, bunchId
+        )).isEqualTo(1)
     }
 
     @Test
@@ -813,7 +991,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 actor(owner),
                 bunchId,
                 UUID.randomUUID(),
-                CreateBundleRequest(listOf(source.id))
+                CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(guest))
             )
         }.isNotNull
 
@@ -999,15 +1177,17 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val first = photo(bunchId, listOf(owner))
         val second = photo(bunchId, listOf(owner))
         val key = UUID.randomUUID()
-        val request = CreateBundleRequest(listOf(first.id))
+        val request = CreateBundleRequest(listOf(first.id), participantMemberIds = listOf(guest))
 
         val created = bundleService.create(actor(owner), bunchId, key, request)
         val replay = bundleService.create(actor(owner), bunchId, key, request)
         assertThat(replay.id).isEqualTo(created.id)
         assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isEqualTo(1)
-        assertThat(bundleParticipants.findAllByBundleIdOrderByJoinedAtAscIdAsc(created.id)).hasSize(1)
+        assertThat(bundleParticipants.findAllByBundleIdOrderByJoinedAtAscIdAsc(created.id)).hasSize(2)
         assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
-            bundleService.create(actor(owner), bunchId, key, CreateBundleRequest(listOf(second.id)))
+            bundleService.create(
+                actor(owner), bunchId, key, CreateBundleRequest(listOf(second.id), participantMemberIds = listOf(guest))
+            )
         }
 
         bundleService.delete(actor(owner), bunchId, created.id, "delete-idempotent-create")
@@ -1599,8 +1779,24 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         { row, _ -> row.getTimestamp(1)?.toInstant() }, bunchId, memberId
     )
 
-    private fun createDraft(owner: Long, bunchId: Long, photoIds: List<Long>): BundleSnapshot =
-        bundleService.create(actor(owner), bunchId, UUID.randomUUID(), CreateBundleRequest(photoIds))
+    private fun createDraft(owner: Long, bunchId: Long, photoIds: List<Long>): BundleSnapshot {
+        val current = jdbc.queryForList(
+            "SELECT member_id FROM bunch_memberships WHERE bunch_id = ? AND status = 'ACTIVE' ORDER BY id",
+            Long::class.java, bunchId
+        )
+        val selected = uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(photoIds)
+            .map { it.member.id }.distinct().filter { it != owner && it in current }
+        val initial = selected.ifEmpty { listOf(current.first { it != owner }) }
+        val created = bundleService.create(
+            actor(owner), bunchId, UUID.randomUUID(), CreateBundleRequest(photoIds, participantMemberIds = initial)
+        )
+        // Older lifecycle cases exercise the valid singleton state after a participant leaves.
+        if (selected.isEmpty()) {
+            bundleService.leave(actor(initial.single()), bunchId, created.id, "fixture-leave")
+            return bundleService.get(owner, bunchId, created.id)
+        }
+        return created
+    }
 
     private fun publishableDraft(
         owner: Long,

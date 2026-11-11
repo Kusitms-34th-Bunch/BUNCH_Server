@@ -20,8 +20,8 @@ import com.bunch.bundle.dto.*
 import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
 import com.bunch.bundle.service.BundleAttributionService
-import com.bunch.place.domain.PinnedPlaceRepository
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.domain.KokRepository
+import com.bunch.kok.service.KokService
 import jakarta.persistence.EntityManagerFactory
 import org.hibernate.SessionFactory
 import com.bunch.global.exception.BusinessException
@@ -86,10 +86,10 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     private lateinit var entityManagerFactory: EntityManagerFactory
 
     @Autowired
-    private lateinit var pins: PinnedPlaceService
+    private lateinit var pins: KokService
 
     @Autowired
-    private lateinit var pinRows: PinnedPlaceRepository
+    private lateinit var pinRows: KokRepository
 
     @Autowired
     private lateinit var blocks: BunchBlockRepository
