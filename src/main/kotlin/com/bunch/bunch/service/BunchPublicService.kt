@@ -11,6 +11,7 @@ import com.bunch.bunch.dto.BunchMemberResponse
 import com.bunch.bunch.dto.BunchSocialPage
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.dto.BundleLocationResponse
+import com.bunch.bundle.service.BundlePhotoPickService
 import com.bunch.bundle.service.BundleAccessService
 import com.bunch.bundle.service.BundleAttributionService
 import com.bunch.bundle.service.BundleLocationService
@@ -34,6 +35,7 @@ class BunchPublicService(
     private val memberships: BunchMembershipRepository,
     private val bundleAccess: BundleAccessService,
     private val attribution: BundleAttributionService,
+    private val picks: BundlePhotoPickService,
     private val locations: BundleLocationService,
     private val likes: SocialLikeService,
     private val socialComments: SocialCommentService
@@ -119,6 +121,7 @@ class BunchPublicService(
         photoRows: List<BunchPublicBundlePhoto>
     ): BunchPublicBundleDetail {
         val people = attribution.published(bundle)
+        val photoPicks = picks.summaries(bundle, userId, people.participants)
         val social = likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
         return BunchPublicBundleDetail(
             id = bundle.id,
@@ -127,7 +130,9 @@ class BunchPublicService(
             coverImageUrl = photoRows.firstOrNull()?.imageUrl,
             date = bundle.date,
             publishedAt = bundle.publishedAt,
-            photos = photoRows,
+            photos = photoRows.map {
+                it.copy(picks = photoPicks.getValue(it.id))
+            },
             contributors = people.participants.map {
                 BunchPublicBundleContributor(it.memberId, it.nickname, it.imageUrl, it.profileAvailable)
             },

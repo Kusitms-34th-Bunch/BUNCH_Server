@@ -3,6 +3,7 @@ package com.bunch.bundle.dto
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
+import com.fasterxml.jackson.annotation.JsonInclude
 import java.time.Instant
 import java.time.LocalDate
 
@@ -17,7 +18,9 @@ data class BundlePhotoResponse(
     val caption: String,
     val captionVersion: Long,
     val captionUpdatedBy: Long?,
-    val captionUpdatedAt: Instant?
+    val captionUpdatedAt: Instant?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val picks: BundlePhotoPicks? = null
 )
 
 data class BundleParticipantResponse(
@@ -47,7 +50,7 @@ data class BundleLocationResponse(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+    val address: String?,
     val position: Int
 )
 
@@ -123,4 +126,12 @@ data class BundlePhotoChangeResult(
     val addedPhotoIds: List<Long>,
     val rejectedPhotoIds: List<Long>,
     val replayed: Boolean = false
+)
+
+
+data class BundlePhotoPicks(
+    val count: Int = 0,
+    val pickedByMe: Boolean = false,
+    val version: Long = 0,
+    val members: List<BundleParticipantResponse> = emptyList()
 )

@@ -193,8 +193,17 @@ STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
 `PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
 private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
 서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
+사진 픽은 `PUT /api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{photoId}/pick`에서
+`picked`와 `expectedVersion`을 모두 받아 처리한다. DRAFT 참여자만 변경할 수 있고,
+비참여 멤버는 상세 snapshot에서 읽기만 가능하다. 같은 상태는 stale version이어도 no-op이며,
+상태가 달라지는 stale 요청은 `BUNDLE_003`과 현재 picks 요약을 반환한다. 픽은 전용 STOMP
+이벤트·알림 없이 revision만 올리므로 화면 재진입·재연결 시 snapshot을 다시 읽는다.
+발행본의 `photos[].picks`는 상세 응답에서만 제공하며, 피드 카드에는 추가하지 않는다.
 Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
 `bundle_edit_leases.screen_id`를 삭제한다.
+사진 픽 저장은 별도 `V2026111111280__bundle_photo_picks.sql` 마이그레이션으로 관리하며,
+참여자의 고정 초기 픽 버전은 `V2026111111281__bundle_pick_initial_versions.sql`로 추가한다.
+적용된 마이그레이션 파일은 수정하거나 기존 번호를 재사용하지 않는다.
 사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
 테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 
@@ -219,6 +228,10 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
   다른 connection 충돌·token 재발급·5초 heartbeat·15초 만료·실제 변경 이벤트·재연결
   snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
   준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
+- 사진 픽은 실제 PostgreSQL에서 HTTP 정상·동일 상태 stale no-op·상태 변경 stale `BUNDLE_003`,
+  동시 요청 직렬화, 응답 요약, false row의 ABA 방지, 사진·참여자 FK cascade, 발행 동결과
+  nullable caption 호환을 검증한다. 픽 전용 STOMP event·알림은 만들지 않으며 snapshot 재조회로
+  revision gap을 복구한다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.

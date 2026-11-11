@@ -820,7 +820,10 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         listOf(owner, guest).forEach { uploaderRows.saveAndFlush(PhotoUploader(
             photo = photo, member = members.findById(it.memberId).orElseThrow(), uploadBatchId = UUID.randomUUID()
         )) }
-        val bundle = bundles.create(actor(owner), bunchId, UUID.randomUUID(), CreateBundleRequest(listOf(photo.id)))
+        val bundle = bundles.create(
+            actor(owner), bunchId, UUID.randomUUID(),
+            CreateBundleRequest(listOf(photo.id), participantMemberIds = listOf(guest.memberId))
+        )
         return Fixture(owner, guest, bunchId, bundle.id, bundle.revision)
     }
 

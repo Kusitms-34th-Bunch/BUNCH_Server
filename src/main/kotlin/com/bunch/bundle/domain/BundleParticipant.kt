@@ -47,5 +47,8 @@ class BundleParticipant(
     var reminder72SentAt: Instant? = null,
 
     @Column(name = "reminders_cancelled_at")
-    var remindersCancelledAt: Instant? = null
+    var remindersCancelledAt: Instant? = null,
+
+    @Column(name = "pick_initial_version", nullable = false)
+    val pickInitialVersion: Long = 0
 )

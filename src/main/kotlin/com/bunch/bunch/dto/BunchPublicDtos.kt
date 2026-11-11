@@ -2,6 +2,7 @@ package com.bunch.bunch.dto
 
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.dto.BundleLocationResponse
+import com.bunch.bundle.dto.BundlePhotoPicks
 import com.bunch.bundle.dto.BundlePermissions
 import java.time.Instant
 import java.time.LocalDate
@@ -23,11 +24,12 @@ data class BunchPublicBundleCard(
     val commentCount: Long = 0
 )
 
-data class BunchPublicBundlePhoto(
+data class BunchPublicBundlePhoto @JvmOverloads constructor(
     val id: Long,
     val imageUrl: String,
     val position: Int,
-    val caption: String
+    val caption: String,
+    val picks: BundlePhotoPicks? = null
 )
 
 data class BunchPublicBundleContributor(

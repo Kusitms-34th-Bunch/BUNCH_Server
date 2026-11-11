@@ -43,8 +43,8 @@ class Advertisement(
     @Column(name = "place_name", nullable = false, columnDefinition = "text")
     val placeName: String,
 
-    @Column(name = "place_address", nullable = false, columnDefinition = "text")
-    val placeAddress: String,
+    @Column(name = "place_address", columnDefinition = "text")
+    val placeAddress: String?,
 
     @Column(nullable = false)
     val active: Boolean = true,

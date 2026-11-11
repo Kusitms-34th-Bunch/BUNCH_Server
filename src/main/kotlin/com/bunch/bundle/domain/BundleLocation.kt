@@ -26,8 +26,8 @@ class BundleLocation(
     @Column(nullable = false, columnDefinition = "text")
     var name: String,
 
-    @Column(nullable = false, columnDefinition = "text")
-    var address: String,
+    @Column(columnDefinition = "text")
+    var address: String?,
 
     @Column(nullable = false)
     var position: Int

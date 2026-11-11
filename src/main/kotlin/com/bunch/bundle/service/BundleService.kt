@@ -12,8 +12,8 @@ import com.bunch.social.dto.SocialLikeSummary
 import com.bunch.social.service.SocialLikeService
 import com.bunch.social.service.SocialCommentService
 import com.bunch.photo.domain.Photo
+import com.bunch.photo.domain.ProcessingStatus
 import com.bunch.photo.domain.PhotoRepository
-import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.service.PhotoService
 import com.bunch.notification.service.NotificationWriter
 import com.bunch.notification.service.PushJobWriter
@@ -37,6 +37,7 @@ class BundleService(
     private val access: BundleAccessService,
     private val feedAccess: FeedAccessService,
     private val attribution: BundleAttributionService,
+    private val picks: BundlePhotoPickService,
     private val likes: SocialLikeService,
     private val socialComments: SocialCommentService,
     private val bunches: BunchRepository,
@@ -48,7 +49,6 @@ class BundleService(
     private val memberships: BunchMembershipRepository,
     private val photoService: PhotoService,
     private val originalPhotos: PhotoRepository,
-    private val uploaders: PhotoUploaderRepository,
     private val leases: BundleLeaseService,
     private val locations: BundleLocationService,
     private val images: ImageAssetService,
@@ -72,6 +72,23 @@ class BundleService(
             fail(ErrorCode.BUNDLE_LIMIT_EXCEEDED)
         }
         if (request.photoIds.size !in 1..20) fail(ErrorCode.INVALID_INPUT)
+        validIds(request.photoIds)
+        validIds(request.participantMemberIds)
+        if (request.participantMemberIds.isEmpty() || actor.memberId in request.participantMemberIds) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        // The query applies membership, account and signup status in the database after the bunch lock.
+        val currentMembers = memberships.findActiveProfilesForBunches(listOf(bunchId)).map { it.member.id }.toSet()
+        if (request.participantMemberIds.any { it !in currentMembers }) fail(ErrorCode.FORBIDDEN)
+        val found = originalPhotos.findAllLockedByIdInOrderByIdAsc(request.photoIds)
+        if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        val foundIds = found.map { it.id }.toSet()
+        val missingIds = request.photoIds.filter { it !in foundIds }
+        if (missingIds.isNotEmpty()) {
+            fail(ErrorCode.PHOTO_SELECTION_CHANGED, mapOf("missingPhotoIds" to missingIds))
+        }
         val selected = photoService.lockReadyPhotosForConnection(bunchId, request.photoIds)
         val recommended = request.recommendationId?.let { recommendations.useCandidate(bunchId, it) }
         val bundle = bundles.saveAndFlush(
@@ -85,10 +102,7 @@ class BundleService(
         )
         bundle.titleCrdt = titleCrdt.initialState(bundle.title)
         selected.forEachIndexed { index, photo -> addPhoto(bundle, photo, index, actor.memberId) }
-        val currentMembers = memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.toSet()
-        val initial = linkedSetOf(actor.memberId)
-        uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(request.photoIds)
-            .map { it.member.id }.filter { it in currentMembers }.forEach(initial::add)
+        val initial = listOf(actor.memberId) + request.participantMemberIds
         initial.forEach {
             val participant = participants.saveAndFlush(
                 BundleParticipant(bundleId = bundle.id, memberId = it, joinedAt = bundle.createdAt)
@@ -194,7 +208,10 @@ class BundleService(
         request: BundleVisibilityRequest,
         requestId: String
     ): BundleSnapshot {
-        val bundle = editable(actor, bunchId, id, request.mode)
+        val bundle = access.lock(actor.memberId, bunchId, id)
+        mode(bundle, request.mode)
+        if (bundle.status == BundleStatus.DRAFT) access.requireParticipant(actor.memberId, bundle)
+        else access.requireOwner(actor.memberId, bunchId)
         version(bundle.visibilityVersion, request.expectedVersion, mapOf("value" to bundle.visibility))
         if (bundle.visibility != request.value) {
             bundle.visibility = request.value
@@ -203,8 +220,10 @@ class BundleService(
                 "value" to request.value,
                 "version" to bundle.visibilityVersion
             ))
-            recordActivity(bundle, actor.memberId)
-            notifyReady(bundle, actor.memberId)
+            if (bundle.status == BundleStatus.DRAFT) {
+                recordActivity(bundle, actor.memberId)
+                notifyReady(bundle, actor.memberId)
+            }
         }
         return snapshot(bundle, actor.memberId)
     }
@@ -297,7 +316,12 @@ class BundleService(
         access.requireMember(memberId, bunchId)
         if (!access.isParticipant(memberId, id)) {
             val participant = participants.saveAndFlush(
-                BundleParticipant(bundleId = id, memberId = memberId, joinedAt = clock.instant())
+                BundleParticipant(
+                    bundleId = id,
+                    memberId = memberId,
+                    joinedAt = clock.instant(),
+                    pickInitialVersion = bundle.revision + 1
+                )
             )
             // A newly added participation starts above every prior comment version. Removing
             // and re-adding a member must not let an old expectedVersion=0 save become valid.
@@ -513,7 +537,7 @@ class BundleService(
             request.date?.isAfter(LocalDate.ofInstant(clock.instant(), ZoneId.of("Asia/Seoul"))) == true) {
             fail(ErrorCode.INVALID_INPUT)
         }
-        val captions = request.photos.map { validateText { BundleText.caption(it.caption) } }
+        val captions = request.photos.map { input -> input.caption?.let { validateText { BundleText.caption(it) } } }
         request.photos.forEach {
             if ((it.bundlePhotoId == null) == (it.photoId == null)) fail(ErrorCode.INVALID_INPUT)
         }
@@ -544,8 +568,9 @@ class BundleService(
                 row.position = index
                 edited = true
             }
-            if (row.caption != captions[index]) {
-                row.caption = captions[index]
+            val caption = captions[index]
+            if (caption != null && row.caption != caption) {
+                row.caption = caption
                 row.captionVersion++
                 row.captionUpdatedBy = actor.memberId
                 row.captionUpdatedAt = clock.instant()
@@ -555,11 +580,6 @@ class BundleService(
         if (bundle.title != title) {
             bundle.title = title
             bundle.titleVersion++
-            edited = true
-        }
-        if (bundle.visibility != request.visibility) {
-            bundle.visibility = request.visibility
-            bundle.visibilityVersion++
             edited = true
         }
         if (bundle.date != request.date) {
@@ -780,13 +800,16 @@ class BundleService(
         val draft = bundle.status == BundleStatus.DRAFT
         if (draft && bundle.titleCrdt == null) bundle.titleCrdt = titleCrdt.initialState(bundle.title)
         val people = if (draft) attribution.draft(bundle) else attribution.published(bundle)
+        val photoPicks = picks.summaries(bundle, userId, people.participants)
         val social = if (draft) SocialLikeSummary() else
             likeSummary ?: likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
         val count = if (draft) 0 else commentTotal ?: socialComments.counts(userId, listOf(bundle.id))[bundle.id] ?: 0
         return BundleSnapshot(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
-            photoRows(bundle.id).map(::photoResponse),
+            photoRows(bundle.id).map {
+                photoResponse(it).copy(picks = photoPicks.getValue(it.id))
+            },
             people.participants,
             people.comments,
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),

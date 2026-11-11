@@ -14,5 +14,5 @@ data class PushPreferencePatchRequest(
     @field:JsonDeserialize(using = PushBooleanDeserializer::class)
     val enabled: Boolean? = null,
     @field:JsonDeserialize(contentUsing = PushBooleanDeserializer::class)
-    val types: Map<String, Boolean>? = null
+    val categories: Map<String, Boolean>? = null
 )
