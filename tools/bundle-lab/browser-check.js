@@ -40,6 +40,19 @@ async page => {
     await wait(async () => (await a.locator('.presence').textContent()).includes('회원 2') &&
       (await b.locator('.presence').textContent()).includes('회원 1'), 'nonexclusive presence / null revision');
 
+    await field(a, 'date').focus();
+    await wait(async () => await b.locator('[data-edit-target="DATE"]').getAttribute('data-active') === 'true', 'date interaction begins immediately');
+    await click(a, 'refresh');
+    await wait(async () => await b.locator('[data-edit-target="DATE"]').getAttribute('data-active') === 'false', 'date interaction ends on blur');
+    await a.locator('.location-name').focus();
+    await wait(async () => await b.locator('[data-edit-target="LOCATION"]').getAttribute('data-active') === 'true', 'location interaction begins immediately');
+    await a.locator('.location-name').press('Escape');
+    await wait(async () => await b.locator('[data-edit-target="LOCATION"]').getAttribute('data-active') === 'false', 'location cancel clears editing');
+    await a.locator('.photo-drag-card').first().press('Space');
+    await wait(async () => await b.locator('[data-edit-target="PHOTOS"]').getAttribute('data-active') === 'true', 'photo grab begins immediately');
+    await a.locator('.photo-drag-card').first().press('Escape');
+    await wait(async () => await b.locator('[data-edit-target="PHOTOS"]').getAttribute('data-active') === 'false', 'photo cancel clears editing');
+
     // Delay B's real PATCH before forwarding. A saves while B remains dirty and focused.
     const initial = (await snapshot(a)).title;
     const localB = `${initial} 1일차`;

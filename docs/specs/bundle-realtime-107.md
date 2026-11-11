@@ -2,7 +2,7 @@
 
 최신 재전달 시트 4.3.13의 3초 무입력이 이전 5초를 대체한다.
 2026-11-11 명시적 사용자 요구는 I46의 필드 편집 표시 제외 제안보다 우선한다.
-같은 날 리더 확정에 따라 TITLE/COMMENT는 focus 즉시 BEGIN을 보낸다. 실제 입력 전에는
+같은 사용자 요청 범위에서 TITLE/COMMENT는 focus 즉시 BEGIN을 보낸다. 실제 입력 전에는
 편집 표시를 하지 않는 이전 규칙보다 이 사용자 요구가 우선한다.
 TITLE·COMMENT·DATE·LOCATION·PHOTOS·VISIBILITY·PARTICIPANTS와
 PHOTO:{bundlePhotoId}·PICK:{bundlePhotoId}의 비독점 editing을

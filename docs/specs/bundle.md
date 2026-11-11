@@ -10,7 +10,7 @@
 [장소 작업](bundle-locations.md)을 함께 따른다. 미전송 입력은 재연결 때 폐기한다.
 2026-11-11 명시적 사용자 요구로 I46의 필드 편집 표시 제외 제안을 대체한다.
 비독점 BEGIN/END 필드 editing은 아래 6절과 [presence 계약](bundle-realtime-107.md)을 따른다.
-같은 날 리더 확정으로 TITLE/COMMENT focus 즉시 BEGIN을 보내며 이전의 입력 전 표시 제외 규칙보다 우선한다.
+같은 사용자 요청 범위에서 TITLE/COMMENT focus 즉시 BEGIN을 보내며 이전의 입력 전 표시 제외 규칙보다 우선한다.
 4.3.8 K41의 보관 문구는 4.3.14 J47/K47 및 기존 사용자 승인9번과 충돌하여 정렬 대기다.
 
 [이슈 #123](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/123)의 사진 픽과 캡션 전환은

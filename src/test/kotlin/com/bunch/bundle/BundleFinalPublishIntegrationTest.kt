@@ -331,7 +331,7 @@ class BundleFinalPublishIntegrationTest : BunchIntegrationSupport() {
         assetIds += asset.id
         val photo = photos.saveAndFlush(Photo(bunch = bunchRepository.findById(bunchId).orElseThrow(),
             imageAsset = asset, fileHash = "a".repeat(64), processingStatus = ProcessingStatus.READY))
-        val draft = service.create(actor(creator), bunchId, UUID.randomUUID(), CreateBundleRequest(listOf(photo.id)))
+        val draft = service.create(actor(creator), bunchId, UUID.randomUUID(), CreateBundleRequest(listOf(photo.id), participantMemberIds = listOf(publisher)))
         service.addParticipant(actor(creator), bunchId, draft.id, publisher, "add")
         service.title(actor(creator), bunchId, draft.id,
             BundleTextRequest("제목", 0, BundleStatus.DRAFT), "title")

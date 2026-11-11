@@ -186,24 +186,17 @@ STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
 인증 세션을 사용하며, WebSocket 연결의 URL에 토큰을 넣지 않는다.
 
 번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
-상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션의 `DRAFT` 저장은
-단독 사용자도 먼저 해당 target lease를 STOMP로 획득한 뒤, 현재 `leaseToken`과 최신
-`expectedVersion`을 REST 요청에 함께 보내야 한다. 장소 목록은 [장소 계약](docs/specs/bundle-locations.md)의
-전용 요청을 사용하며 같은 편집권 정책을 따른다. 편집권 target은 `TITLE`, `DATE`, `LOCATION`,
-`PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
-private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
-서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
-사진 픽은 `PUT /api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{photoId}/pick`에서
-`picked`와 `expectedVersion`을 모두 받아 처리한다. DRAFT 참여자만 변경할 수 있고,
-비참여 멤버는 상세 snapshot에서 읽기만 가능하다. 같은 상태는 stale version이어도 no-op이며,
-상태가 달라지는 stale 요청은 `BUNDLE_003`과 현재 picks 요약을 반환한다. 픽은 전용 STOMP
-이벤트·알림 없이 revision만 올리므로 화면 재진입·재연결 시 snapshot을 다시 읽는다.
-발행본의 `photos[].picks`는 상세 응답에서만 제공하며, 피드 카드에는 추가하지 않는다.
-Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
-`bundle_edit_leases.screen_id`를 삭제한다.
-사진 픽 저장은 별도 `V2026111111280__bundle_photo_picks.sql` 마이그레이션으로 관리하며,
-참여자의 고정 초기 픽 버전은 `V2026111111281__bundle_pick_initial_versions.sql`로 추가한다.
-적용된 마이그레이션 파일은 수정하거나 기존 번호를 재사용하지 않는다.
+상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다.
+제목은 [제목 CRDT](docs/specs/bundle-title-crdt.md)로 글자 단위 병합하고,
+날짜는 마지막 저장값, 사진·장소는 ID 기반 의도를 서버에서 재적용한다.
+[편집 상태](docs/specs/bundle-realtime-107.md)는 BEGIN/END로 필드 작업을,
+TYPE로 제목·본인 코멘트의 실제 입력을 알리는 비독점 신호다.
+편집 상태는 내용 저장 권한·잠금이 아니며 내용 revision과 활동을 바꾸지 않는다.
+원격 내용을 받아도 편집할 수 있으며, 연결이 끊기면 읽기 전용으로 전환하고 재연결 때
+서버 snapshot을 다시 읽어 미전송 입력을 버린다. legacy lease는 구 클라이언트·캡션 호환용이다.
+최초 발행은 선택한 공개 범위와 최신 저장 내용을 한 트랜잭션으로 확정하며 실제 발행자를 기록한다.
+발행본 내용과 공개 범위는 별도 경로로 저장하고, 픽은 발행 후 고정한다.
+기존 적용 Flyway 이력은 보존하며, 새 번들·콕 마이그레이션은 선행 PR 순서대로 적용한다.
 사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
 테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 

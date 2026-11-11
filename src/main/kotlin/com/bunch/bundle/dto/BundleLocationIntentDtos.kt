@@ -19,9 +19,7 @@ data class BundleLocationIntentPlace(
     @param:JsonSetter(nulls = Nulls.FAIL)
     val name: String,
 
-    @param:JsonProperty(value = "address", required = true)
-    @param:JsonSetter(nulls = Nulls.FAIL)
-    val address: String
+    val address: String?
 )
 
 data class BundleLocationIntentRequest(

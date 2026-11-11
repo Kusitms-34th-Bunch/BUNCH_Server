@@ -384,6 +384,36 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.data.locations[2].externalId").value("first"))
     }
 
+    @Test
+    fun `HTTP location intents preserve null address while rejecting blank replacements atomically`() {
+        val f = fixture()
+        val path = "/api/v1/bunches/${f.bunchId}/bundles/${f.bundleId}/locations/intents"
+        val pair = tokens.generateToken(f.actor.memberId, "ROLE_USER", f.actor.sessionId)
+        sessions.save(f.actor.sessionId, f.actor.memberId, pair.refreshToken, tokens.getRefreshTokenValiditySeconds())
+        credentials.add(f.actor.memberId to f.actor.sessionId)
+        val authorization = "Bearer ${pair.accessToken}"
+        val response = mvc.perform(post(path).header("Authorization", authorization)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"intent":"ADD","locations":[{"provider":"kakao","externalId":"region","name":"여의도","address":null}]}"""))
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsByteArray
+        val saved = mapper.readTree(response).path("data")
+        assertThat(saved.path("locations").single().has("address")).isTrue()
+        assertThat(saved.path("locations").single().path("address").isNull).isTrue()
+        val before = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
+        val id = before.locations.single().id
+        listOf("", "   ").forEach { address ->
+            mvc.perform(post(path).header("Authorization", authorization)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsBytes(BundleLocationIntentRequest(
+                    BundleLocationIntent.REPLACE,
+                    targetLocationId = id,
+                    location = BundleLocationIntentPlace("kakao", "new", "성수동", address)
+                )))).andExpect(status().isBadRequest)
+        }
+        assertThat(locations.get(f.actor.memberId, f.bunchId, f.bundleId)).isEqualTo(before)
+    }
+
     private fun assertReplacementNoOp(f: Fixture, targetId: Long, replacement: BundleLocationIntentPlace) {
         val before = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
         val metadataSql = "SELECT revision, location_version, created_at, updated_at FROM bundles WHERE id = ?"

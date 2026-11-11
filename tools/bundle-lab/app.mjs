@@ -140,6 +140,7 @@ class Client {
       if (!card || !this.editable) { event.preventDefault(); return; }
       this.pointerPhoto = null;
       this.dragging = card.dataset.photoId;
+      this.nativeDragging = true;
       event.dataTransfer.setData('text/plain', this.dragging);
       event.dataTransfer.effectAllowed = 'move';
       this.beginEditing(`PHOTO:${this.dragging}`);
@@ -186,7 +187,10 @@ class Client {
       const card = document.elementFromPoint(event.clientX, event.clientY)?.closest('.photo-drag-card');
       this.finishPhotoDrag(pointer.moved ? pointer.id : null, card && this.root.contains(card) ? card.dataset.photoId : null);
     });
-    window.addEventListener('pointercancel', () => { if (this.pointerPhoto) this.finishPhotoDrag(); });
+    // Native HTML drag dispatches pointercancel itself; dragend owns its cancellation.
+    window.addEventListener('pointercancel', () => {
+      if (this.pointerPhoto || (this.dragging && !this.nativeDragging)) this.finishPhotoDrag();
+    });
     window.addEventListener('blur', () => { this.endEditing(); this.dragging = null; this.pointerPhoto = null; });
     this.root.addEventListener('click', event => {
       const button = event.target.closest('button');
@@ -421,6 +425,7 @@ class Client {
   finishPhotoDrag(photoId, beforeId) {
     this.endEditing();
     this.dragging = null;
+    this.nativeDragging = false;
     this.pointerPhoto = null;
     this.render();
     if (!photoId || !beforeId || photoId === beforeId || !this.editable) return;

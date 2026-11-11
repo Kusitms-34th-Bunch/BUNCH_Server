@@ -180,10 +180,17 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     fun `photo picker accepts explicit reselection order and preserves existing row IDs over HTTP`() {
         val f = fixture(photoCount = 3)
         val created = createRequest(
-            f.owner, f.bunchId, createBody(f.photoIds), UUID.randomUUID().toString()
+            f.owner, f.bunchId, createBody(f.photoIds, listOf(f.participant.memberId)), UUID.randomUUID().toString()
         ).andExpect(status().isOk).andReturn().data()
         val id = created.path("id").asLong()
         val originalRow = created.path("photos")[0].path("id").asLong()
+
+        mvc.perform(put("${bundlePath(f.bunchId, id)}/photos/$originalRow/pick")
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"picked":true,"expectedVersion":0}"""))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.count").value(1))
 
         mvc.perform(post("${bundlePath(f.bunchId, id)}/photos/changes")
             .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
@@ -199,6 +206,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.data.photos[1].photoId").value(f.photoIds[2]))
             .andExpect(jsonPath("$.data.photos[2].photoId").value(f.photoIds[0]))
             .andExpect(jsonPath("$.data.photos[2].id").value(originalRow))
+            .andExpect(jsonPath("$.data.photos[2].picks.count").value(1))
+            .andExpect(jsonPath("$.data.photos[2].picks.pickedByMe").value(true))
     }
 
     @Test
