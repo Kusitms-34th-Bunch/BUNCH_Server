@@ -46,8 +46,8 @@ topic과 endpoint는 서버 설정을 사용하며 앱이 지정하지 않는다
 
 | 카테고리 | 화면 제목(7.3.3) | 알림 번호 | 알림 종류 |
 | --- | --- | --- | --- |
-| `BUNDLE_NEWS` | 번들 소식(제안) | 1~8 | `DRAFT_PARTICIPANT_ADDED`, `DRAFT_ACTIVITY`, `COMMENT_REMINDER`, `DRAFT_PARTICIPANT_REMOVED`, `DRAFT_READY_TO_PUBLISH`, `DRAFT_PARTICIPANTS_INSUFFICIENT`, `BUNDLE_PUBLISHED`, `CANDIDATE_CREATED` |
-| `MEMBER_ROLE` | 멤버 및 권한 소식 | 10~13, 16(제안) | `MEMBER_JOINED`, `CO_OWNER_GRANTED`, `CO_OWNER_REVOKED`, `OWNER_TRANSFERRED`, `BUNCH_VISIBILITY_CHANGED` |
+| `BUNDLE_NEWS` | 번들 소식 | 1~8 | `DRAFT_PARTICIPANT_ADDED`, `DRAFT_ACTIVITY`, `COMMENT_REMINDER`, `DRAFT_PARTICIPANT_REMOVED`, `DRAFT_READY_TO_PUBLISH`, `DRAFT_PARTICIPANTS_INSUFFICIENT`, `BUNDLE_PUBLISHED`, `CANDIDATE_CREATED` |
+| `MEMBER_ROLE` | 멤버 및 권한 소식 | 10~13 | `MEMBER_JOINED`, `CO_OWNER_GRANTED`, `CO_OWNER_REVOKED`, `OWNER_TRANSFERRED` |
 | `FOLLOW` | 팔로우 | 17~19 | `BUNCH_FOLLOWED`, `FOLLOW_REQUESTED`, `FOLLOW_REQUEST_APPROVED` |
 | `REACTION` | 좋아요 및 댓글 | 20~22 | `SOCIAL_COMMENT_CREATED`(20·22), `BUNDLE_LIKED` |
 
@@ -59,11 +59,12 @@ topic과 endpoint는 서버 설정을 사용하며 앱이 지정하지 않는다
 - **마스터 끄기·켜기(7.3.2):** 끄면 모든 푸시를 보내지 않지만 카테고리 값은 지우지 않는다. 다시 켜면 끄기 전 값 그대로다.
   마스터가 꺼진 동안 도착한 카테고리 PATCH도 값은 저장하고 마스터는 그대로 둔다(앱은 이때 토글을 막지만 서버는 연타·지연
   요청을 실패시키지 않는다).
-- **자동 OFF(7.3.3):** 네 카테고리가 모두 꺼지면 서버가 `enabled`도 `false`로 만든다. 한 요청이 카테고리를 모두 끄면서
-  `enabled:true`를 같이 보내도 결과는 `enabled:false`다. 반대로 `enabled:true`만 보냈는데 네 카테고리가 모두 꺼져 있으면
-  "켜졌는데 받을 것이 없는" 상태를 만들지 않도록 네 카테고리를 모두 켠다(명세서가 정하지 않아 정한 규칙, 기획 확인 대상).
-- **항상 발송(7.3.2 로직 4):** 내보내짐(14번 `MEMBER_REMOVED`)과 번치 삭제(15번 `BUNCH_DELETED`)는 카테고리가 없고 개별로 끌 수
-  없다. 마스터가 켜져 있으면 항상 보내고, 마스터나 기기 자체의 알림 권한이 꺼져 있으면 보내지 않는다.
+- **자동 변경 없음(7.3.3 상세 3):** 「앱 푸시 알림」은 사용자가 직접 눌렀을 때만 바뀐다. 네 카테고리를 모두 꺼도 서버는 `enabled`를
+  바꾸지 않고, 마스터를 껐다 켜도 카테고리 값을 건드리지 않는다. 서버는 요청에 담긴 값만 저장하며 마스터와 카테고리는
+  서로 영향을 주지 않는다. 네 카테고리가 모두 꺼진 채 마스터가 켜져 있으면 항상 발송 종류(14~16번)만 푸시로 받는다.
+- **항상 발송(7.3.2 로직 4):** 내보내짐(14번 `MEMBER_REMOVED`), 번치 삭제(15번 `BUNCH_DELETED`), 번치 공개 범위 바뀜
+  (16번 `BUNCH_VISIBILITY_CHANGED`)은 카테고리가 없고 개별로 끌 수 없다. 마스터가 켜져 있으면 항상 보내고, 마스터나 기기 자체의
+  알림 권한이 꺼져 있으면 보내지 않는다.
 - **카테고리가 없는 종류:** 푸시하지 않는다. 메인 명세서 5.12.3 9번(뭉치 성장)이 삭제되어 `CHARACTER_GROWN`이 여기에 해당한다.
   이 알림을 **만드는** 코드는 메인(번들) 담당 범위라 이 변경에서 건드리지 않았고, 인박스에는 남지만 푸시는 나가지 않는다.
 - **적용 시점:** 알림을 만들 때(job 생성)와 전송 직전 두 번 같은 판단(`PushPreference.allows`)으로 확인한다. 설정을 끈 뒤에는
@@ -72,16 +73,19 @@ topic과 endpoint는 서버 설정을 사용하며 앱이 지정하지 않는다
 - **최초 가입 시 초기값(7.3.1 로직 3):** 알림을 허용했으면 모두 켜짐(저장된 값이 없을 때의 기본값과 같다), 거부했으면 모두 꺼짐이다.
   거부한 사용자는 기기 토큰이 없어 서버에 기기를 등록할 수 없으므로, 앱이 가입 직후 권한 결과로 `PATCH`를 한 번 보낸다.
   거부면 `{"enabled":false,"categories":{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}}`다.
+  서버는 카테고리를 모두 꺼도 마스터를 자동으로 끄지 않으므로 **`enabled:false`를 반드시 함께 보내야** 한다.
   서버가 권한 결과를 직접 받는 방식은 이 이슈에서 만들지 않았다(앱 담당과 확인 필요).
 
 **호환성:** 응답·요청의 `types`(21개 알림 종류) 필드가 사라지고 `categories`로 바뀐다. 이전 `types`로 연동한 앱은 맞춰야 한다.
-V35는 `categories` 컬럼을 추가하고 기존 종류별 값을 이관한다. 한 카테고리의 알림 종류 중 하나라도 꺼져 있었으면 그 카테고리를 끄고,
-네 카테고리가 모두 꺼지게 된 계정은 `enabled`도 끈다. 예전 `types` 컬럼은 지우지 않고 더 이상 읽지 않는다. 운영 DB에
+V35는 `categories` 컬럼을 추가하고 기존 종류별 값을 이관한다. 한 카테고리의 알림 종류 중 하나라도 꺼져 있었으면 그 카테고리를 끈다.
+`enabled`는 바꾸지 않고, 항상 발송하는 16번(`BUNCH_VISIBILITY_CHANGED`)의 예전 값은 이관하지 않는다. 예전 `types` 컬럼은 지우지 않고
+더 이상 읽지 않는다. 운영 DB에
 `SELECT count(*) FROM push_preferences WHERE types <> '{}'`가 0이면 이후 정리 마이그레이션으로 삭제할 수 있다.
 
-검증 기준: 실제 PostgreSQL·Redis로 카테고리 조회·병합 저장·동시 PATCH·마스터 보존/복원·자동 OFF·모두 꺼진 상태에서 마스터 켜기·
-`types` 무시·세션 간 공유·미가입/미인증, 카테고리 분류표와 `allows` 규칙, 대기열 생성 시점과 전송 직전의 카테고리 적용,
-14·15번의 마스터 의존, 카테고리 없는 종류 미발송, V35의 종류별 값 이관과 자동 OFF 정규화를 확인한다.
+검증 기준: 실제 PostgreSQL·Redis로 카테고리 조회·병합 저장·동시 PATCH·마스터 보존/복원·모두 꺼도 마스터 유지·모두 꺼진 상태에서
+마스터를 껐다 켜면 같은 값·`types` 무시·세션 간 공유·미가입/미인증, 카테고리 분류표와 `allows` 규칙, 대기열 생성 시점과 전송
+직전의 카테고리 적용, 14·15·16번의 마스터 의존과 카테고리 무관 발송, 카테고리 없는 종류 미발송, V35의 종류별 값 이관과 마스터·
+16번 값 미이관을 확인한다.
 
 ## 저장·트랜잭션
 
