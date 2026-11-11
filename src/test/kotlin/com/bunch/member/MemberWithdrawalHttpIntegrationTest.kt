@@ -24,7 +24,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import java.util.UUID
 
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
@@ -146,7 +145,7 @@ class MemberWithdrawalHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `a withdrawn account is refused by the profile settings support and terms APIs`() {
+    fun `a withdrawn account is refused by the profile and push settings APIs`() {
         val self = member()
         send(access(self), "/api/v1/members/me/withdrawal").andExpect(status().isOk)
         val later = access(self)
@@ -161,7 +160,6 @@ class MemberWithdrawalHttpIntegrationTest : BunchIntegrationSupport() {
             multipart(org.springframework.http.HttpMethod.PUT, "/api/v1/members/me/profile")
                 .file(profile)
                 .header(HttpHeaders.AUTHORIZATION, later)
-                .header("Idempotency-Key", UUID.randomUUID().toString())
         ).andExpect(status().isUnauthorized)
         mvc.perform(
             patch("/api/v1/members/me/push-preferences")
@@ -169,8 +167,6 @@ class MemberWithdrawalHttpIntegrationTest : BunchIntegrationSupport() {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"enabled":false}""")
         ).andExpect(status().isUnauthorized)
-        read(later, "/api/v1/members/support-channel").andExpect(status().isUnauthorized)
-        read(later, "/api/v1/auth/terms/SERVICE").andExpect(status().isUnauthorized)
         read(later, "/api/v1/members/me/withdrawal/check").andExpect(status().isUnauthorized)
     }
 

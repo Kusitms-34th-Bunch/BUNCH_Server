@@ -68,7 +68,5 @@ class Member(
         gender = null
         profileImageAsset = null
         registrationFingerprint = null
-        profileRequestKey = null
-        profileRequestFingerprint = null
     }
 }

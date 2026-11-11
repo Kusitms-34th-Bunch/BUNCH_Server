@@ -132,8 +132,8 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         val image = asset("profile")
         jdbc.update(
             "UPDATE members SET birth_year = 1999, gender = 'FEMALE', profile_image_asset_id = ?, " +
-                "registration_fingerprint = ?, profile_request_key = ?, profile_request_fingerprint = ? WHERE id = ?",
-            image.id, "a".repeat(64), UUID.randomUUID(), "b".repeat(64), memberId
+                "registration_fingerprint = ? WHERE id = ?",
+            image.id, "a".repeat(64), memberId
         )
         jdbc.update(
             "INSERT INTO member_consents(member_id, type, version, agreed_at) VALUES (?, 'SERVICE', 'v1', now())",
@@ -145,14 +145,13 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
 
         val row = jdbc.queryForMap(
             "SELECT account_status, signup_status, nickname, birth_year, gender, profile_image_asset_id, " +
-                "registration_fingerprint, profile_request_key, profile_request_fingerprint FROM members WHERE id = ?",
+                "registration_fingerprint FROM members WHERE id = ?",
             memberId
         )
         assertThat(row["account_status"]).isEqualTo("WITHDRAWN")
         assertThat(row["signup_status"]).isEqualTo("COMPLETED")
         listOf(
-            "nickname", "birth_year", "gender", "profile_image_asset_id", "registration_fingerprint",
-            "profile_request_key", "profile_request_fingerprint"
+            "nickname", "birth_year", "gender", "profile_image_asset_id", "registration_fingerprint"
         ).forEach { assertThat(row[it]).describedAs(it).isNull() }
         assertThat(identityCount(memberId)).isZero()
         assertThat(count("member_consents WHERE member_id = $memberId")).isEqualTo(1)
