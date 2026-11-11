@@ -80,7 +80,7 @@ class KokMigrationIntegrationTest @Autowired constructor(private val dataSource:
     }
 
     @Test
-    fun `V35 adds current bunch and member keyset indexes without changing existing pins`() {
+    fun `V2026111111250 adds current bunch and member keyset indexes without changing existing pins`() {
         val schema = "pin_list_" + UUID.randomUUID().toString().replace("-", "")
         try {
             configure(schema, "32").migrate()
@@ -99,10 +99,10 @@ class KokMigrationIntegrationTest @Autowired constructor(private val dataSource:
                     VALUES (?, 'kakao', 'external', 'retained', 'address', 'BUNDLE', ?, CURRENT_TIMESTAMP)
                     RETURNING id""", Long::class.java, bunch, member
             )!!
-            val migration = configure(schema, "35")
-            // Other UT issues may add V33/V34 before this migration is integrated.
+            val migration = configure(schema, "2026111111250")
+            // Keep the existing V35 push migration and apply this issue after it.
             assertThat(migration.migrate().migrationsExecuted).isPositive()
-            assertThat(migration.info().current().version.toString()).isEqualTo("35")
+            assertThat(migration.info().current().version.toString()).isEqualTo("2026111111250")
             migration.validate()
             assertThat(migration.migrate().migrationsExecuted).isZero()
             assertThat(jdbc.queryForObject("SELECT name FROM $schema.pinned_places WHERE id = ?",
