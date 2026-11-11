@@ -3,6 +3,7 @@ package com.bunch.notification
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.flywaydb.core.Flyway
+import org.flywaydb.core.api.MigrationVersion
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
@@ -27,7 +28,7 @@ class PushPreferenceMigrationIntegrationTest @Autowired constructor(
     private val jdbc = JdbcTemplate(dataSource)
 
     @Test
-    fun `V35 folds per type settings into categories and keeps the app push off when every category is off`() {
+    fun `V35 folds per type settings into categories and leaves the app push toggle as it was`() {
         withSchemaBeforeV35 { schema ->
             val onlyLiked = preference(schema, true, """{"BUNDLE_LIKED": false}""")
             val twoBundleTypes = preference(schema, true, """{"DRAFT_ACTIVITY": false, "BUNDLE_PUBLISHED": false}""")
@@ -45,6 +46,7 @@ class PushPreferenceMigrationIntegrationTest @Autowired constructor(
                 true,
                 """{"CHARACTER_GROWN": false, "MEMBER_REMOVED": false, "BUNCH_DELETED": false}"""
             )
+            val onlyVisibility = preference(schema, true, """{"BUNCH_VISIBILITY_CHANGED": false}""")
 
             assertThat(configure(schema, "35").migrate().migrationsExecuted).isEqualTo(1)
 
@@ -54,6 +56,7 @@ class PushPreferenceMigrationIntegrationTest @Autowired constructor(
             assertThat(categories(schema, allTrue)).isEqualTo("{}")
             assertThat(categories(schema, alreadyOff)).isEqualTo("""{"MEMBER_ROLE": false}""")
             assertThat(categories(schema, ignoredTypes)).isEqualTo("{}")
+            assertThat(categories(schema, onlyVisibility)).isEqualTo("{}")
             assertThat(parsed(categories(schema, everyCategory))).containsExactlyInAnyOrder(
                 "BUNDLE_NEWS", "MEMBER_ROLE", "FOLLOW", "REACTION"
             )
@@ -62,8 +65,9 @@ class PushPreferenceMigrationIntegrationTest @Autowired constructor(
             assertThat(enabled(schema, twoBundleTypes)).isTrue()
             assertThat(enabled(schema, untouched)).isTrue()
             assertThat(enabled(schema, ignoredTypes)).isTrue()
+            assertThat(enabled(schema, onlyVisibility)).isTrue()
             assertThat(enabled(schema, alreadyOff)).isFalse()
-            assertThat(enabled(schema, everyCategory)).isFalse()
+            assertThat(enabled(schema, everyCategory)).isTrue()
         }
     }
 
@@ -109,11 +113,26 @@ class PushPreferenceMigrationIntegrationTest @Autowired constructor(
     private fun withSchemaBeforeV35(block: (String) -> Unit) {
         val schema = "push_preference_migration_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            assertThat(configure(schema, "34").migrate().migrationsExecuted).isPositive()
+            assertThat(configure(schema, versionBeforeV35()).migrate().migrationsExecuted).isPositive()
             block(schema)
         } finally {
             jdbc.execute("DROP SCHEMA IF EXISTS $schema CASCADE")
         }
+    }
+
+    // The highest migration below V35, so the test does not depend on which version numbers exist before it.
+    private fun versionBeforeV35(): String {
+        val v35 = MigrationVersion.fromVersion("35")
+        return Flyway.configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration")
+            .load()
+            .info()
+            .all()
+            .mapNotNull { it.version }
+            .filter { it < v35 }
+            .max()
+            .version
     }
 
     private fun configure(schema: String, target: String): Flyway = Flyway.configure()
