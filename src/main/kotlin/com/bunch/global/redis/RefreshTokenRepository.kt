@@ -1,4 +1,4 @@
-git add src/main/kotlin/com/bunch/global/redis/RefreshTokenRepository.ktpackage com.bunch.global.redis
+package com.bunch.global.redis
 
 interface RefreshTokenRepository {
     fun save(sessionId: String, userId: Long, refreshToken: String, expiresInSeconds: Long)
