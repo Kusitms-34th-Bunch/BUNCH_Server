@@ -519,7 +519,6 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
             EditPublishedBundleRequest(
                 expectedRevision = published.revision,
                 title = "edited without picks",
-                visibility = Visibility.PUBLIC,
                 date = published.date,
                 photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = published.photos.single().id)),
                 locations = emptyList()
@@ -641,13 +640,20 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
             .isFalse()
     }
 
-    private fun createDraft(owner: Long, bunchId: Long, sources: List<Photo>): BundleSnapshot =
+    private fun createDraft(
+        owner: Long,
+        bunchId: Long,
+        sources: List<Photo>,
+        selectedMembers: List<Long> = uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(sources.map { it.id })
+            .map { it.member.id }.distinct().filter { it != owner }.ifEmpty {
+                listOf(memberships.findAllByBunchIdAndStatus(bunchId).first { it.member.id != owner }.member.id)
+            }
+    ): BundleSnapshot =
         bundleService.create(
             actor(owner),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(sources.map { it.id }, participantMemberIds =
-                memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.filter { it != owner })
+            CreateBundleRequest(sources.map { it.id }, participantMemberIds = selectedMembers)
         )
 
     private fun preparePublishableDraft(
@@ -657,7 +663,7 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         sources: List<Photo>,
         label: String
     ): BundleSnapshot {
-        val draft = createDraft(owner, bunchId, sources)
+        val draft = createDraft(owner, bunchId, sources, listOf(guest))
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "$label-add-participant")
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
             .comments.first { it.memberId == guest }.version
