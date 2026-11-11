@@ -29,8 +29,8 @@ class PinnedPlace(
     @Column(nullable = false, columnDefinition = "text")
     val name: String,
 
-    @Column(nullable = false, columnDefinition = "text")
-    val address: String,
+    @Column(columnDefinition = "text")
+    val address: String?,
 
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, length = 16)

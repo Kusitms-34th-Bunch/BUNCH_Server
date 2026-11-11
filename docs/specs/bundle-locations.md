@@ -15,7 +15,7 @@
 | provider | trim 후 소문자. ASCII `[a-z0-9_-]` 1~32자 |
 | externalId | trim 후 1~128 Unicode code point. 대소문자 유지 |
 | name | trim 후 비어 있지 않은 1~200 grapheme |
-| address | trim 후 비어 있지 않은 1~500 grapheme |
+| address | 필드 필수. 주소가 없으면 null, 문자열이면 trim 후 비어 있지 않은 1~500 grapheme |
 | position | 0부터 시작하는 연속 정수. 목록이 `[0, ..., size-1]`이어야 함 |
 
 문자열의 NUL은 거부한다. 목록 내 정규화한 `(provider, externalId)`는 중복할 수 없다.
@@ -23,6 +23,9 @@
 `com.bunch.place.domain.PlaceDetails.of`를 광고·콕하기에서도 공통 검증에 재사용한다.
 잘못된 값은 `IllegalArgumentException`이며 유스케이스에서 `INVALID_INPUT`으로 변환한다.
 검색 공급자 결과의 진위 검증은 후속이다. 이번에는 구조 검증한 장소 입력을 저장한다.
+최신 4.3.10의 검색·공급자 호출은 프론트가 맡고 서버는 결과값만 받는다.
+서버 검색 API는 추가하지 않는다. 주소 없는 지역은 `address: null`로 저장하며
+상세 입력·호환성은 [#126 장소 검색 계약](place-search.md)을 따른다.
 
 ## HTTP
 
