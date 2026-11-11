@@ -290,17 +290,17 @@ class PushDeviceIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `concurrent preference patches merge different types and preserve existing enabled value`() {
+    fun `concurrent preference patches merge different categories and preserve existing enabled value`() {
         val memberId = member()
         val auth = sessionFor(memberId)
-        patchPreferences(auth, """{"enabled":false,"types":{"MEMBER_JOINED":false}}""")
+        patchPreferences(auth, """{"enabled":false,"categories":{"MEMBER_ROLE":false}}""")
             .expectSuccessEnvelope()
             .andExpect(jsonPath("$.data.enabled").value(false))
 
         val results = concurrently(
             listOf(
-                { patchPreferences(auth, """{"types":{"OWNER_TRANSFERRED":false}}""").andReturn() },
-                { patchPreferences(auth, """{"types":{"BUNDLE_PUBLISHED":false}}""").andReturn() }
+                { patchPreferences(auth, """{"categories":{"FOLLOW":false}}""").andReturn() },
+                { patchPreferences(auth, """{"categories":{"BUNDLE_NEWS":false}}""").andReturn() }
             )
         )
         results.forEach { result ->
@@ -311,22 +311,25 @@ class PushDeviceIntegrationTest : BunchIntegrationSupport() {
         getPreferences(auth)
             .expectSuccessEnvelope()
             .andExpect(jsonPath("$.data.enabled").value(false))
-            .andExpect(jsonPath("$.data.types.MEMBER_JOINED").value(false))
-            .andExpect(jsonPath("$.data.types.OWNER_TRANSFERRED").value(false))
-            .andExpect(jsonPath("$.data.types.BUNDLE_PUBLISHED").value(false))
+            .andExpect(jsonPath("$.data.categories.MEMBER_ROLE").value(false))
+            .andExpect(jsonPath("$.data.categories.FOLLOW").value(false))
+            .andExpect(jsonPath("$.data.categories.BUNDLE_NEWS").value(false))
+            .andExpect(jsonPath("$.data.categories.REACTION").value(true))
     }
 
     @Test
-    fun `preference patch rejects unknown notification type and non boolean value`() {
+    fun `preference patch rejects unknown category and non boolean value`() {
         val auth = sessionFor(member())
 
-        patchPreferences(auth, """{"types":{"NOT_A_NOTIFICATION_TYPE":true}}""")
+        patchPreferences(auth, """{"categories":{"NOT_A_CATEGORY":true}}""")
             .expectError(ErrorCode.INVALID_INPUT)
-        patchPreferences(auth, """{"types":{"MEMBER_JOINED":"false"}}""")
+        patchPreferences(auth, """{"categories":{"MEMBER_JOINED":true}}""")
+            .expectError(ErrorCode.INVALID_INPUT)
+        patchPreferences(auth, """{"categories":{"FOLLOW":"false"}}""")
             .expectError(ErrorCode.INVALID_JSON)
-        patchPreferences(auth, """{"types":{"MEMBER_JOINED":0}}""")
+        patchPreferences(auth, """{"categories":{"FOLLOW":0}}""")
             .expectError(ErrorCode.INVALID_JSON)
-        patchPreferences(auth, """{"types":{"MEMBER_JOINED":null}}""")
+        patchPreferences(auth, """{"categories":{"FOLLOW":null}}""")
             .expectError(ErrorCode.INVALID_JSON)
         patchPreferences(auth, """{"enabled":"false"}""")
             .expectError(ErrorCode.INVALID_JSON)
