@@ -38,6 +38,7 @@ import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.LocalDate
@@ -101,6 +102,39 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `title CRDT accepts authenticated base64 state without a lease and rejects malformed binary`() {
+        val f = fixture(photoCount = 1)
+        val draft = createDraft(f.owner, f.bunchId, f.photoIds.single())
+        val id = draft.path("id").asLong()
+        val state = java.util.Base64.getDecoder().decode(draft.path("titleCrdtState").asText())
+        val document = org.automerge.Document.load(state)
+        val changed = try {
+            val text = (document.get(org.automerge.ObjectId.ROOT, "title").get() as org.automerge.AmValue.Text).id
+            document.startTransaction().use {
+                it.spliceText(text, 0, 0, "공동 제목")
+                it.commit()
+            }
+            document.save()
+        } finally {
+            document.free()
+        }
+        val path = "/api/v1/bunches/${f.bunchId}/bundles/$id/title/crdt"
+        mvc.perform(patch(path)
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(mapOf("state" to changed))))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.title").value("공동 제목"))
+            .andExpect(jsonPath("$.data.titleTooLong").value(false))
+            .andExpect(jsonPath("$.data.titleCrdtState").isString)
+        mvc.perform(patch(path)
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"state\":\"AA==\"}"))
+            .expectError(ErrorCode.INVALID_INPUT)
+    }
+
+    @Test
     fun `create validates headers malformed JSON and idempotency fingerprints`() {
         val fixture = fixture(photoCount = 2)
         val body = createBody(listOf(fixture.photoIds.first()))
@@ -140,6 +174,31 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
                 fixture.bunchId
             )
         ).isEqualTo(1L)
+    }
+
+    @Test
+    fun `photo picker accepts explicit reselection order and preserves existing row IDs over HTTP`() {
+        val f = fixture(photoCount = 3)
+        val created = createRequest(
+            f.owner, f.bunchId, createBody(f.photoIds), UUID.randomUUID().toString()
+        ).andExpect(status().isOk).andReturn().data()
+        val id = created.path("id").asLong()
+        val originalRow = created.path("photos")[0].path("id").asLong()
+
+        mvc.perform(post("${bundlePath(f.bunchId, id)}/photos/changes")
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(mapOf(
+                "addPhotoIds" to listOf(f.photoIds[0]),
+                "reselectedPhotoIds" to listOf(f.photoIds[0]),
+                "mode" to "DRAFT"
+            ))))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.photos[0].photoId").value(f.photoIds[1]))
+            .andExpect(jsonPath("$.data.photos[1].photoId").value(f.photoIds[2]))
+            .andExpect(jsonPath("$.data.photos[2].photoId").value(f.photoIds[0]))
+            .andExpect(jsonPath("$.data.photos[2].id").value(originalRow))
     }
 
     @Test
@@ -184,7 +243,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `draft title requires the lease actor session and token`() {
+    fun `legacy title ignores lease identity but keeps optimistic field version`() {
         val fixture = fixture(photoCount = 1)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
@@ -201,19 +260,19 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             wrongSession,
             fixture.bunchId,
             bundleId,
-            value = "wrong sid",
+            value = "",
             expectedVersion = 0,
             leaseToken = grant.token
-        ).expectError(ErrorCode.BUNDLE_LEASE_CONFLICT)
+        ).andExpect(status().isOk)
 
         titleRequest(
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            value = "wrong token",
+            value = "",
             expectedVersion = 0,
             leaseToken = UUID.randomUUID()
-        ).expectError(ErrorCode.BUNDLE_LEASE_CONFLICT)
+        ).andExpect(status().isOk)
 
         titleRequest(
             fixture.owner,

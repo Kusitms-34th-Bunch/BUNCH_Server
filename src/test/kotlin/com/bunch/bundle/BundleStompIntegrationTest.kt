@@ -5,6 +5,9 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.dto.BundleChangedEvent
+import com.bunch.bundle.service.BundlePresenceService
+import org.springframework.context.ApplicationEventPublisher
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.PublishBundleRequest
@@ -14,6 +17,7 @@ import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.dto.BundleLocationsRequest
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
+import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.image.domain.ImageAsset
@@ -41,6 +45,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
@@ -56,6 +61,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     @LocalServerPort
     private var port: Int = 0
 
+    @Autowired private lateinit var presence: BundlePresenceService
+    @Autowired private lateinit var events: ApplicationEventPublisher
     @Autowired private lateinit var bundles: BundleService
     @Autowired private lateinit var locations: BundleLocationService
     @Autowired private lateinit var tokenProvider: TokenProvider
@@ -262,7 +269,10 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
             UUID.randomUUID(),
             PublishBundleRequest(ready.revision)
         )
-        coOwner.json { it.path("type").asText() == "PUBLISHED" }
+        val event = coOwner.json { it.path("type").asText() == "PUBLISHED" }
+        assertThat(event.path("data").path("publishedBy").asLong()).isEqualTo(fixture.guest.memberId)
+        assertThat(event.path("data").path("publisherNickname").asText()).isNotBlank()
+        assertThat(published.publishedBy).isEqualTo(fixture.guest.memberId)
         owner.json { it.path("type").asText() == "PUBLISHED" }
         assertThat(published.permissions.canEdit).isFalse()
         assertThat(getSnapshot(fixture, fixture.guest).path("status").asText()).isEqualTo("PUBLISHED")
@@ -464,6 +474,338 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         assertThat(snapshot.path("revision").asLong()).isEqualTo(saved.revision)
     }
 
+    @Test
+    fun `presence sends actual authenticated title and comment previews and restores fresh REST state`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        val before = getSnapshot(fixture, fixture.owner)
+        val activityBefore = jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )
+        owner.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+        val ack = owner.presenceAck()
+        assertThat(ack.path("data").path("members").size()).isEqualTo(1)
+        assertThat(ack.path("revision").isNull).isTrue()
+        assertThat(ack.toString()).doesNotContain("sessionId", "connectionId", "token")
+        guest.json { it.path("type").asText() == "PRESENCE" }
+        guest.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "실제 입력 👨‍👩‍👧‍👦",
+            "memberId" to fixture.owner.memberId
+        ))
+        val preview = owner.json {
+            it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 1
+        }
+        assertThat(preview.path("data").path("typing").single().path("memberId").asLong())
+            .isEqualTo(fixture.guest.memberId)
+        assertThat(preview.path("data").path("typing").single().path("text").asText())
+            .isEqualTo("실제 입력 👨‍👩‍👧‍👦")
+        owner.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "TITLE", "text" to "a".repeat(41)
+        ))
+        owner.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 2 }
+        assertThat(getPresence(fixture, fixture.owner).path("typing").size()).isEqualTo(2)
+        val after = getSnapshot(fixture, fixture.owner)
+        assertThat(after.path("revision")).isEqualTo(before.path("revision"))
+        assertThat(after.path("updatedAt")).isEqualTo(before.path("updatedAt"))
+        assertThat(after.path("title")).isEqualTo(before.path("title"))
+        assertThat(jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )).isEqualTo(activityBefore)
+
+        guest.send(command(fixture, "presence"), mapOf("action" to "BLUR"))
+        owner.json {
+            it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 1
+        }
+        assertThat(getPresence(fixture, fixture.owner).path("members").size()).isEqualTo(2)
+        guest.send(command(fixture, "presence"), mapOf("action" to "BACKGROUND"))
+        owner.json {
+            it.path("type").asText() == "PRESENCE" && it.path("data").path("members").size() == 1
+        }
+        val unauthorized = http.send(HttpRequest.newBuilder(URI(
+            "http://localhost:$port/api/v1/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/presence"
+        )).GET().build(), HttpResponse.BodyHandlers.ofString())
+        assertThat(unauthorized.statusCode()).isEqualTo(401)
+    }
+
+    @Test
+    fun `field editing presence is nonexclusive target scoped and leaves content and activity unchanged`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        val before = getSnapshot(fixture, fixture.owner)
+        val activityBefore = jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )
+        val startedAt = Instant.now()
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.owner.memberId to "DATE")
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "LOCATION"))
+        assertThat(editingTargets(guest.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "DATE", fixture.guest.memberId to "LOCATION"
+        )
+        val editing = owner.json {
+            it.path("type").asText() == "PRESENCE" && it.path("data").path("editing").size() == 2
+        }
+        assertThat(editing.path("revision").isNull).isTrue()
+        assertThat(editing.path("requestId").isNull).isTrue()
+        assertThat(editingTargets(editing.path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "DATE", fixture.guest.memberId to "LOCATION"
+        )
+        editing.path("data").path("editing").forEach { state ->
+            assertThat(state.fieldNames().asSequence().toSet())
+                .containsExactlyInAnyOrder("memberId", "target", "expiresAt")
+            assertThat(Instant.parse(state.path("expiresAt").asText()))
+                .isBetween(startedAt.plusSeconds(15), Instant.now().plusSeconds(15))
+        }
+        assertThat(getPresence(fixture, fixture.owner).path("editing")).isEqualTo(editing.path("data").path("editing"))
+        assertThat(getPresence(fixture, fixture.guest).path("typing")).isEmpty()
+
+        guest.clear()
+        guest.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "DATE"))
+        assertThat(editingTargets(guest.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "DATE", fixture.guest.memberId to "LOCATION"
+        )
+        owner.clear()
+        owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "DATE"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.guest.memberId to "LOCATION")
+
+        val photoTarget = "PHOTO:${before.path("photos").single().path("id").asLong()}"
+        for ((target, endAction) in listOf(
+            photoTarget to "END", "TITLE" to "BLUR", "COMMENT" to "END", "LOCATION" to "END",
+            "PHOTOS" to "END", "VISIBILITY" to "END", "PARTICIPANTS" to "END",
+            photoTarget.replace("PHOTO:", "PICK:") to "END"
+        )) {
+            owner.clear()
+            owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
+            val focused = owner.presenceAck().path("data")
+            assertThat(editingTargets(focused)).containsExactlyInAnyOrder(
+                fixture.owner.memberId to target, fixture.guest.memberId to "LOCATION"
+            )
+            assertThat(focused.path("typing")).isEmpty()
+            owner.send(command(fixture, "presence"), mapOf("action" to endAction, "target" to target))
+            assertThat(editingTargets(owner.presenceAck().path("data")))
+                .containsExactly(fixture.guest.memberId to "LOCATION")
+        }
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "TITLE"))
+        owner.presenceAck()
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "COMMENT"))
+        assertThat(editingTargets(owner.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "COMMENT", fixture.guest.memberId to "LOCATION"
+        )
+        owner.send(command(fixture, "presence"), mapOf("action" to "END"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.guest.memberId to "LOCATION")
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "TITLE"))
+        owner.presenceAck()
+        owner.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "TITLE", "text" to "focus and preview are separate"
+        ))
+        assertThat(owner.presenceAck().path("data").path("typing").size()).isEqualTo(1)
+        owner.send(command(fixture, "presence"), mapOf("action" to "STOP"))
+        val stopped = owner.presenceAck().path("data")
+        assertThat(stopped.path("typing")).isEmpty()
+        assertThat(editingTargets(stopped)).containsExactly(fixture.guest.memberId to "LOCATION")
+        guest.clear()
+        guest.send(command(fixture, "presence"), mapOf("action" to "BACKGROUND"))
+        assertThat(guest.presenceAck().path("data").path("editing")).isEmpty()
+        assertThat(getPresence(fixture, fixture.owner).path("editing")).isEmpty()
+        val after = getSnapshot(fixture, fixture.owner)
+        assertThat(after.path("revision")).isEqualTo(before.path("revision"))
+        assertThat(after.path("updatedAt")).isEqualTo(before.path("updatedAt"))
+        assertThat(jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )).isEqualTo(activityBefore)
+    }
+
+    @Test
+    fun `field editing presence rejects foreign and unknown bundle photo targets without replacing valid state`() {
+        val fixture = fixture()
+        val foreign = fixture()
+        val foreignPhoto = getSnapshot(foreign, foreign.owner).path("photos").single().path("id").asLong()
+        val owner = connect(fixture.owner)
+        subscribe(owner, fixture)
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        owner.presenceAck()
+        for (target in listOf(
+            "PHOTO:$foreignPhoto", "PHOTO:${Long.MAX_VALUE}", "PICK:$foreignPhoto", "PICK:${Long.MAX_VALUE}"
+        )) {
+            owner.clear()
+            owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
+            val rejection = owner.json { it.path("type").asText() == "COMMAND_REJECTED" }
+            assertThat(rejection.path("data").path("code").asText()).isNotBlank()
+            assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+                .containsExactly(fixture.owner.memberId to "DATE")
+        }
+        val photoId = getSnapshot(fixture, fixture.owner).path("photos").single().path("id").asLong()
+        val target = "PHOTO:$photoId"
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.owner.memberId to target)
+        jdbc.update("DELETE FROM bundle_photos WHERE id = ?", photoId)
+        owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to target))
+        assertThat(owner.presenceAck().path("data").path("editing")).isEmpty()
+    }
+
+    @Test
+    fun `presence permits view but rejects nonparticipant input and revoked REST access`() {
+        val fixture = fixture()
+        val viewerCredential = credential(member())
+        join(viewerCredential.memberId, issue(fixture.owner.memberId, fixture.bunchId))
+        val viewer = connect(viewerCredential)
+        val owner = connect(fixture.owner)
+        subscribe(owner, fixture)
+        subscribe(viewer, fixture)
+        viewer.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+        viewer.presenceDeliveries()
+        viewer.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "not my participant field"
+        ))
+        viewer.assertNoEvent("PRESENCE")
+        assertThat(getPresence(fixture, fixture.owner).path("typing")).isEmpty()
+        viewer.clear()
+        owner.clear()
+        viewer.send(command(fixture, "presence"), mapOf("action" to " begin ", "target" to "DATE"))
+        assertThat(viewer.frames.poll(500, TimeUnit.MILLISECONDS)).isNull()
+        owner.assertNoEvent("PRESENCE")
+        assertThat(getPresence(fixture, fixture.owner).path("editing")).isEmpty()
+        jdbc.update(
+            "UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?",
+            fixture.bunchId, viewerCredential.memberId
+        )
+        val response = http.send(HttpRequest.newBuilder(URI(
+            "http://localhost:$port/api/v1/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/presence"
+        )).header("Authorization", "Bearer ${viewerCredential.access}").GET().build(),
+            HttpResponse.BodyHandlers.ofString())
+        assertThat(response.statusCode()).isBetween(400, 499)
+    }
+
+    @Test
+    fun `presence cleanup follows commit and ignores rolled back bundle events`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        subscribe(owner, fixture)
+        owner.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+        owner.json { it.path("type").asText() == "PRESENCE" }
+        val transaction = TransactionTemplate(transactionManager)
+        transaction.executeWithoutResult { tx ->
+            events.publishEvent(BundleChangedEvent(
+                fixture.bunchId, fixture.bundleId, fixture.revision, "rollback-presence", BundleEventType.DELETED, null
+            ))
+            assertThat(presence.get(fixture.owner.memberId, fixture.bunchId, fixture.bundleId).members).hasSize(1)
+            tx.setRollbackOnly()
+        }
+        assertThat(getPresence(fixture, fixture.owner).path("members").size()).isEqualTo(1)
+        transaction.executeWithoutResult {
+            events.publishEvent(BundleChangedEvent(
+                fixture.bunchId, fixture.bundleId, fixture.revision, "commit-presence", BundleEventType.PUBLISHED, null
+            ))
+            assertThat(presence.get(fixture.owner.memberId, fixture.bunchId, fixture.bundleId).members).hasSize(1)
+        }
+        assertThat(getPresence(fixture, fixture.owner).path("members")).isEmpty()
+    }
+
+    @Test
+    fun `committed participation removal and deletion clear presence while rolled back removal preserves it`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        val secondGuest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        subscribe(secondGuest, fixture)
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(guest.presenceAck().path("data")))
+            .containsExactly(fixture.guest.memberId to "DATE")
+        secondGuest.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "both connections leave after commit"
+        ))
+        secondGuest.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 1 }
+        val transaction = TransactionTemplate(transactionManager)
+        transaction.executeWithoutResult { tx ->
+            bundles.removeParticipant(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+                fixture.guest.memberId, "rollback-removal")
+            assertThat(presence.get(fixture.owner.memberId, fixture.bunchId, fixture.bundleId).members).hasSize(1)
+            tx.setRollbackOnly()
+        }
+        assertThat(getPresence(fixture, fixture.owner).path("members").size()).isEqualTo(1)
+        assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+            .contains(fixture.guest.memberId to "DATE")
+        bundles.removeParticipant(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+            fixture.guest.memberId, "commit-removal")
+        assertThat(getPresence(fixture, fixture.owner).path("members")).isEmpty()
+        assertThat(getPresence(fixture, fixture.owner).path("editing")).isEmpty()
+        secondGuest.clear()
+        secondGuest.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "removed input"
+        ))
+        secondGuest.assertNoEvent("PRESENCE")
+        owner.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+        owner.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("members").size() == 1 }
+        bundles.delete(actor(fixture.owner), fixture.bunchId, fixture.bundleId, "delete-presence")
+        // The bundle no longer exists, so REST correctly rejects reads. The cleared
+        // in-memory state is also verified by the unit cleanup test.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM bundles WHERE id = ?", Long::class.java,
+            fixture.bundleId)).isZero()
+    }
+
+    @Test
+    fun `actual publish clears preview and refuses subsequent presence commands`() {
+        val fixture = fixture()
+        bundles.title(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+            BundleTextRequest("발행할 제목", 0, BundleStatus.DRAFT), "presence-title")
+        listOf(fixture.owner, fixture.guest).forEach { author ->
+            bundles.comment(actor(author), fixture.bunchId, fixture.bundleId,
+                BundleTextRequest("발행 코멘트", 0, BundleStatus.DRAFT), "presence-comment-${author.memberId}")
+        }
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        guest.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "미저장 preview"
+        ))
+        guest.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 1 }
+        owner.clear()
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .contains(fixture.owner.memberId to "DATE")
+        bundles.publish(actor(fixture.owner), fixture.bunchId, fixture.bundleId, UUID.randomUUID(),
+            PublishBundleRequest(visibility = Visibility.PRIVATE))
+        assertThat(getPresence(fixture, fixture.owner).path("members")).isEmpty()
+        assertThat(getPresence(fixture, fixture.owner).path("typing")).isEmpty()
+        assertThat(getPresence(fixture, fixture.owner).path("editing")).isEmpty()
+        owner.clear()
+        owner.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+        val rejection = owner.json { it.path("type").asText() == "COMMAND_REJECTED" }
+        assertThat(rejection.path("data").path("code").asText())
+            .isEqualTo(ErrorCode.BUNDLE_STATE_CONFLICT.code)
+        assertThat(getPresence(fixture, fixture.owner).path("members")).isEmpty()
+    }
+
+    private fun editingTargets(data: JsonNode): List<Pair<Long, String>> {
+        assertThat(data.path("editing").isArray).isTrue()
+        return data.path("editing").map { it.path("memberId").asLong() to it.path("target").asText() }
+    }
+
+    private fun getPresence(fixture: Fixture, credential: Credential): JsonNode {
+        val response = http.send(HttpRequest.newBuilder(URI(
+            "http://localhost:$port/api/v1/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/presence"
+        )).header("Authorization", "Bearer ${credential.access}").GET().build(), HttpResponse.BodyHandlers.ofString())
+        assertThat(response.statusCode()).withFailMessage(response.body()).isEqualTo(200)
+        return mapper.readTree(response.body()).path("data")
+    }
+
     private fun fixture(): Fixture {
         val owner = credential(member())
         val guest = credential(member())
@@ -574,6 +916,22 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         fun subscribe(destination: String, id: String) {
             sendRaw("SUBSCRIBE\nid:$id\ndestination:$destination\nack:auto\n\n\u0000")
         }
+        fun presenceDeliveries() {
+            val subscriptions = mutableSetOf<String>()
+            while (subscriptions.size < 2) {
+                val delivery = frame {
+                    it.command == "MESSAGE" && mapper.readTree(it.body).path("type").asText() == "PRESENCE"
+                }
+                subscriptions.add(delivery.headers.getValue("subscription"))
+            }
+            assertThat(subscriptions).containsExactlyInAnyOrder("topic", "activity")
+        }
+
+        fun presenceAck(): JsonNode = mapper.readTree(frame {
+            it.command == "MESSAGE" && it.headers["subscription"] == "activity" &&
+                mapper.readTree(it.body).path("type").asText() == "PRESENCE"
+        }.body)
+
         fun json(predicate: (JsonNode) -> Boolean): JsonNode = mapper.readTree(frame {
             if (it.command != "MESSAGE") false else {
                 val message = mapper.readTree(it.body)

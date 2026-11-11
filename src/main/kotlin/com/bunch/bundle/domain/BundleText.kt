@@ -24,6 +24,14 @@ object BundleText {
         }
     }
 
+    fun mergedTitle(value: String): String {
+        val normalized = normalize(value)
+        require(!lineBreakPattern.containsMatchIn(normalized) && '\u0000' !in normalized)
+        return normalized.trim()
+    }
+
+    fun titleTooLong(value: String): Boolean = graphemeLength(normalize(value).trim()) > TITLE_MAX_GRAPHEMES
+
     fun comment(value: String): String = validate(value, COMMENT_MAX_GRAPHEMES, "comment")
 
     fun caption(value: String): String = validate(value, CAPTION_MAX_GRAPHEMES, "caption")

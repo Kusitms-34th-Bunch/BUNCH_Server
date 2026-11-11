@@ -6,6 +6,8 @@ enum class BundleEventType {
     VISIBILITY,
     DATE,
     LOCATION,
+    DATE_CHIPS,
+    PERMISSIONS,
     COMMENT,
     CAPTION,
     PARTICIPANTS,
@@ -18,5 +20,6 @@ enum class BundleEventType {
     LEASE_HEARTBEAT,
     LEASE_RELEASED,
     ACTIVITY,
+    PRESENCE,
     COMMAND_REJECTED
 }

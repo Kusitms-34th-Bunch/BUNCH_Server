@@ -1,0 +1,6 @@
+{
+  "name": "bunch-bundle-lab",
+  "private": true,
+  "type": "module",
+  "dependencies": {"@automerge/automerge": "3.2.1"}
+}

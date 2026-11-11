@@ -1,5 +1,9 @@
 # 번들 REST·STOMP 클라이언트 계약
 
+2026-11-10 #107의 [제목 CRDT](bundle-title-crdt.md)·[typing/presence](bundle-realtime-107.md)·
+[장소 의도 작업](bundle-locations.md)을 초안 계약의 최신 기준으로 따른다.
+아래 lease 절차는 구 클라이언트·캡션 호환용이며 제목/날짜/위치/사진 작업의 필수조건이 아니다.
+
 2026-11-07 승인한 [발행본 일괄 저장](published-bundle-edit.md)을 우선한다.
 `PUT /{bundleId}/published`로만 발행본을 저장하며 아래 개별 저장 API는 DRAFT 전용이다.
 발행 후 참여자·멤버별 코멘트는 변경할 수 없다. 기존 comments 필드는 참여자 코멘트로 유지한다.
@@ -88,9 +92,9 @@ STOMP `CONNECT` frame의 native `Authorization` header에만 같은 Bearer acces
 
 모든 요청의 `BundleActor`는 인증된 `memberId`와 `sessionId`로만 구성한다. STOMP lease에
 보관하는 `connectionId`는 서버가 연결에서 얻는 값이며 client body·header로 받지 않는다.
-REST에는 socket ID가 없으므로 초안 제목·날짜·캡션 저장에서 서버가 검증하는 값은
-경로의 target, 현재 회원·session, 현재 `leaseToken`, lease 만료 여부와
-`expectedVersion`이다. private token과 connectionId는 REST 응답·공개 상태에 포함하지 않는다.
+REST에는 socket ID를 받지 않는다. 제목·날짜·사진·장소는 독점 lease가 필요 없다.
+legacy 캡션만 target·현재 회원/session·leaseToken·만료·expectedVersion을 검사한다.
+private token과 connectionId는 REST 응답·공개 상태에 포함하지 않는다.
 
 Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존한다. 이번 변경의 V8 마이그레이션은
 V7 파일을 수정하지 않고 별도 migration으로 `bundle_edit_leases.screen_id`를 삭제한다. 새
@@ -121,7 +125,9 @@ client 식별자를 추가하지 않는다.
 | `captionVersion` | 한 `BundlePhoto`의 캡션 |
 | `BundleCommentResponse.version` | 한 회원의 코멘트 |
 
-`expectedVersion` 또는 `expectedRevision`이 서버 값과 다르면 변경하지 않고 현재 값과
+CRDT 제목과 사진/위치 작업은 최신 상태에 병합하고, 날짜는 마지막 저장을 적용한다.
+최종 발행의 expectedRevision은 호환용으로만 받으며 stale revision을 거부 사유로 쓰지 않는다.
+그 밖에 버전 검증을 사용하는 경로는 서버 값과 다르면 변경하지 않고 현재 값과
 현재 버전을 오류 `detail`로 반환한다. 같은 값을 다시 보내는 no-op 저장은 해당 필드
 버전과 `revision`을 증가시키지 않는다. 클라이언트는 응답에 없는 버전을 추측하지
 않는다.
@@ -200,7 +206,7 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 }
 ```
 
-`leaseToken`은 제목·날짜·캡션의 `DRAFT` 저장에만 필요하다. 코멘트에는 보내지 않으며,
+`leaseToken`은 legacy 캡션의 `DRAFT` 저장에만 필요하다. 제목·날짜·코멘트에는 필요 없으며,
 `PUBLISHED`는 이 경로로 저장할 수 없다. `mode`는 모든 text
 요청에 포함하며 실제 bundle 상태와 일치해야 한다.
 
@@ -209,12 +215,11 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 - 캡션은 NFC 정규화하며 최대 200 grapheme이다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
 
-장소 목록 lease target은 `LOCATION`이며 전용 저장 요청은 [장소 계약](bundle-locations.md)을 따른다.
-제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`, 캡션 lease target은
-`PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
-받지 않고 현재 회원·session·target·`leaseToken`·미만료 상태·`expectedVersion`을 같은
-트랜잭션에서 검사한다. REST 저장이 성공한 뒤 서버가 DB commit 후 해당 내용 이벤트를
-STOMP로 한 번 발행한다. 클라이언트는 같은 내용을 STOMP 명령으로 다시 보내지 않는다.
+새 공동 편집은 [제목 CRDT](bundle-title-crdt.md), [장소 작업](bundle-locations.md),
+[typing/presence](bundle-realtime-107.md)를 쓴다. 기존 문자열 제목 저장은 expectedVersion을
+검사한 후 CRDT 문서도 갱신한다. 제목·날짜·위치·사진은 leaseToken을 무시한다.
+캡션 호환 경로만 PHOTO:{bundlePhotoId} lease와 expectedVersion을 검사한다.
+REST 커밋 후 STOMP 변경 이벤트를 한 번 전파한다.
 
 #### `BundleVisibilityRequest`
 
@@ -240,6 +245,7 @@ STOMP로 한 번 발행한다. 클라이언트는 같은 내용을 STOMP 명령�
 }
 ```
 
+날짜 expectedVersion·leaseToken은 호환용으로만 받으며 마지막 서버 저장값을 적용한다.
 `value`는 null일 수 있다. 서울 시간 기준 오늘보다 미래인 날짜는 거부한다. 날짜가
 null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 날짜가 지정되면
 `dateChips`는 빈 목록이다.
@@ -273,6 +279,32 @@ PUBLISHED에서 현재 OWNER만 호출한다. 번들·번들 사진·참여자·
 
 #### `BundlePhotoChangesRequest`
 
+`capacityMode` 기본값은 `ATOMIC_APPLY`다. 사진함 선택 화면의 add/remove 차이를
+최신 목록에 병합하고 초과하면 전체 거부한다. 일반·갤러리 추가는 `PARTIAL_ADD`를
+명시한다. removeBundlePhotoIds는 이 모드에서 빈 목록이어야 한다. 남은 정원까지
+선택 순으로 수락하고 나머지 원본 사진은 사진함에 남긴다. 업로드 결과 자체와는 별개다.
+모든 제출 원본의 번치/READY를 먼저 검사하므로 잘못된 ID를 정원 초과로 숨기지 않는다.
+
+이 요청의 snapshot에는 `photoChangeResult: {addedPhotoIds, rejectedPhotoIds, replayed}`를
+포함한다. 추가·거부 ID는 photos.id(원본)이며 재시도는 최신 snapshot과 replayed=true,
+빈 결과 배열을 반환한다. 재시도는 사진을 복원하거나 토스트를 다시 표시하지 않는다.
+결과 정보는 요청자 응답에만 있고 공용 PHOTOS 이벤트에는 없다.
+
+사진함에서 기존 사진의 선택을 풀었다 다시 고르면 번호가 뒤로 붙는다. 이때
+`reselectedPhotoIds`에 해당 **원본 Photo ID**를 넣고, `addPhotoIds`에는 이번에 새로
+고른 사진과 재선택한 사진을 **고른 순서대로 함께** 넣는다. 예를 들어 기존 `[A,B,C]`에서
+새 D, 기존 A, 새 E 순으로 선택했다면 addPhotoIds는 `[D,A,E]`, reselectedPhotoIds는
+`[A]`이며 결과는 `[B,C,D,A,E]`다. 재선택한 기존 BundlePhoto 행·캡션은 유지한다.
+다른 멤버가 추가/이동한 사진 중 본인이 재선택하지 않은 항목의 최신 상대 순서는 유지한다.
+이미 삭제된 재선택 사진은 추가 대상으로 바꾸지 않으며 복원하지 않는다.
+
+`reselectedPhotoIds` 기본값은 빈 목록이다. 최대 20개·양수·중복 없음이며 모두 addPhotoIds에
+포함되어야 한다. `ATOMIC_APPLY`만 허용한다. reselectedPhotoIds가 비어 있으면 기존과
+같이 이미 들어 있는 addPhotoIds는 중복 추가 no-op이다. 재선택·추가·삭제와 정원 검사는
+한 트랜잭션이며 순서만 바뀌어도 PHOTOS/revision을 한 번 갱신한다. 같은 키 재시도는
+뒤에 온 이동을 취소하지 않는다.
+
+
 ```json
 {
   "addPhotoIds": [103, 104],
@@ -286,11 +318,19 @@ ID는 양수이고 중복될 수 없다. 추가 Photo는 같은 번치의 `READY
 현재 존재하는 제거 ID가 다른 번들 소속이면 거부한다. 이미 사라진 제거 ID는
 최신 구성에서 제외된 것으로 보고 다시 적용하지 않는다. 같은 원본 Photo를 한 요청에서 동시에 추가·제거하면 거부한다. 최종 사진 수는 1~20장이어야 한다.
 
+기본 ATOMIC_APPLY의 fingerprint는 기존 addPhotoIds/removeBundlePhotoIds/mode 형태를 유지한다.
+PARTIAL_ADD만 capacityMode를 포함해 다른 작업으로 구분한다. reselectedPhotoIds는 비어 있지
+않을 때만 fingerprint에 포함하므로 기존 두 모드의 저장된 요청 키와 호환된다.
 사진 구성 변경은 `Idempotency-Key`를 사용한다. 같은 key와 같은 request body는 저장
 결과를 재생하고, 같은 key에 다른 body를 보내면 `REQUEST_001`이다. 실제 추가·삭제가
 없으면 `revision`과 이벤트를 만들지 않고 현재 snapshot을 반환한다.
 
 #### `MoveBundlePhotoRequest`
+
+[사진 이동 계약](bundle-photo-order.md)을 따른다. 비인접 기준을 최신 목록에 재적용하고
+삭제 기준의 과거 이웃으로 위치를 보정한다. 같은 사진은 나중 서버 처리 이동이 최종이다.
+같은 X-Request-Id 재시도는 오래된 이동을 다시 실행하지 않는다.
+
 
 ```json
 {
@@ -301,12 +341,12 @@ ID는 양수이고 중복될 수 없다. 추가 Photo는 같은 번치의 `READY
 ```
 
 `previousBundlePhotoId`와 `nextBundlePhotoId`는 새 위치의 양옆 anchor다. 둘 다 null인
-요청은 사진이 하나뿐인 경우를 제외하면 유효한 위치가 아니며, anchor가 현재 목록에
-없거나 서로 인접하지 않으면 `BUNDLE_006`이다. 순서 변경은 `PHOTOS` 이벤트를 만들고
+요청은 사진이 하나뿐인 경우를 제외하면 유효한 위치가 아니다. 불명확한 외부/미확인 anchor는
+`BUNDLE_006`이며 비인접·이전에 삭제된 기준은 최신 위치로 보정한다. 순서 변경은 `PHOTOS` 이벤트를 만들고
 변경된 사진 목록과 date chips를 보낸다.
 
-초안의 사진 변경·이동은 참여자가 할 수 있다. 다른 회원이 해당 Photo lease를 보유한
-동안에는 그 lease를 빼앗아 변경할 수 없다. 사진 구성·순서 변경도 REST 저장으로 처리하고,
+초안의 사진 변경·이동은 참여자가 할 수 있다. 다른 회원의 legacy Photo lease는 이를 막지 않는다.
+사진 구성·순서 변경도 REST 저장으로 처리하고,
 DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 
 #### 캡션
@@ -319,42 +359,35 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 ### 발행
 
 ```json
-{
-  "expectedRevision": 12
-}
+{"visibility": "PUBLIC", "expectedRevision": 12}
 ```
 
-발행은 생성자 또는 참여 중인 OWNER/CO_OWNER가 호출해야 하며, 초안에서는 호출자도 참여자여야 한다.
-`expectedRevision`이 현재 `revision`과 다르면 `BUNDLE_003`이며 `detail`은 현재
-번들 내용과 `version`을 포함한다.
+visibility는 최종 선택 값이다. expectedRevision은 선택 호환 필드로 stale여도 거부하지 않는다.
+구 클라이언트가 visibility를 생략하면 저장된 초안 범위를 사용하며 둘 다 없으면 BUNDLE_005다.
+새 클라이언트는 범위 화면에서 뒤로 갈 때 저장하지 않고 최종 요청에만 범위를 전달한다.
+발행 준비 snapshot.publishBlockers는 VISIBILITY_REQUIRED를 포함하지 않는다.
 
-발행 조건이 충족되지 않으면 `BUNDLE_005`와 다음 `detail.reasons`를 반환한다.
+번치→번들 잠금 아래 현재 참여·생성자/관리자 권한, 사진 원본 READY, 아래 조건을 재검사한다.
+선택 범위·최신 내용·참여자·publishedAt·publishedBy를 한 번에 저장하고 PUBLISHED로 전파한다.
+실패하면 범위 선택도 롤백한다. 같은 시점의 다른 편집은 이 잠금 순서 전후로 직렬 처리되며
+발행 뒤 도착한 DRAFT 저장은 BUNDLE_002다.
 
 | reason | 조건 |
 | --- | --- |
-| `TITLE_REQUIRED` | 제목이 비어 있다. |
-| `VISIBILITY_REQUIRED` | 공개 범위를 선택하지 않았다. |
-| `PARTICIPANTS_REQUIRED` | 참여자가 두 명보다 적다. |
-| `PARTICIPANT_INACTIVE` | 참여자 중 현재 번치 멤버가 아닌 회원이 있다. |
-| `COMMENTS_REQUIRED` | 참여자 전원이 비어 있지 않은 코멘트를 작성하지 않았다. |
-| `PHOTOS_REQUIRED` | 사진 수가 1~20장이 아니다. |
+| TITLE_REQUIRED | 빈 제목 |
+| TITLE_TOO_LONG | CRDT 병합 제목이 40 grapheme 초과 |
+| VISIBILITY_REQUIRED | 최종 범위도 기존 범위도 없음 (최종 발행 전용) |
+| PARTICIPANTS_REQUIRED | 참여자 2명 미만 |
+| PARTICIPANT_INACTIVE | 비활성 참여자 |
+| COMMENTS_REQUIRED | 코멘트 미작성 참여자 |
+| PHOTOS_REQUIRED | 사진 1~20장 조건 실패 |
 
-발행은 사진 원본이 여전히 같은 번치의 `READY` 상태인지 다시 잠그고, 상태를
-`PUBLISHED`로 바꾸며 `publishedAt`을 기록하고 active lease를 해제한다. 발행 후
-현재 메인 관리자 OWNER만 공용 내용·사진을 수정할 수 있고, `mode: "DRAFT"` 저장은
-허용하지 않는다.
-
-발행 재시도 규칙은 다음과 같다.
-
-1. 같은 `Idempotency-Key`와 같은 body는 최초 결과를 재생한다.
-2. 같은 key에 다른 `expectedRevision`을 보내면 `REQUEST_001`이다.
-3. 이미 발행된 번들에 다른 key로 재시도할 때는 `bundle_requests`에 저장된 최초
-   `PUBLISH:{bundleId}` 요청의 fingerprint와 body fingerprint가 같아야 한다.
-4. fingerprint가 같으면 다른 key도 같은 발행 결과를 반환하고 해당 key를 기록한다.
-   fingerprint가 다르면 `BUNDLE_002`다.
-5. 발행 뒤 제목·날짜·캡션을 수정해 `bundle.revision`이 변해도, 원래 발행 요청의
-   fingerprint가 같으면 이 재시도는 허용된다. 재시도 판단에 `bundle.revision - 1`을
-   사용하지 않는다.
+실제 발행자의 `publishedBy`와 `publisherNickname`은 snapshot·PUBLISHED에 포함한다.
+이탈자는 기존 익명화 규칙으로 이름을 표시하며 과거 알 수 없는 발행자는 null이다.
+같은 Idempotency-Key와 같은 body는 기존 결과를 반환한다. 같은 key의 다른 body는 REQUEST_001,
+다른 key는 최초 body fingerprint와 같을 때만 같은 발행을 반환한다.
+visibility를 생략한 legacy 요청은 expectedRevision-only fingerprint를 보존한다. 재시도는 내용을 재발행하지 않는다.
+발행 후 OWNER 수정·삭제 계약은 기존 발행본 문서를 따른다.
 
 ### Idempotency-Key와 fingerprint
 
@@ -435,8 +468,13 @@ error.message = error.idempotency_conflict
 }
 ```
 
-`BundleParticipantResponse`는 참여자 member ID와 참여 시각을 가진다. 발행본에는
-`nickname/imageUrl/profileAvailable`이 추가된다. 나간/탈퇴 멤버는 작성자·기본 이미지이며
+`BundleParticipantResponse`는 참여자 member ID와 참여 시각,
+`nickname/imageUrl/profileAvailable`을 가진다. 초안은 현재 프로필과 참여자별 `role`
+(`OWNER | CO_OWNER | MEMBER`) 및 `creator`(초안 생성자 여부)를 별도로 내려준다.
+관리자와 생성자가 겹쳐도 두 정보는 독립적이며 앱이 배지 우선순위를 결정한다.
+`PARTICIPANTS` 이벤트도 같은 정보를 제공한다. `PERMISSIONS` 수신 후 상세 재조회하면
+현재 역할을 반영한다. 발행본의 role은 null, creator는 false이며 역할 배지 계약 대상이 아니다.
+나간/탈퇴 멤버는 작성자·기본 이미지이며
 profileAvailable은 false다. 참조 ID는 기존 값으로 유지하고 원문 코멘트는 응답에서 숨긴다.
 
 ```json
@@ -594,17 +632,12 @@ client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 enve
    인증된 `memberId`·`sessionId`와 서버 connectionId를 연결 문맥에 둔다.
 2. 번들 topic과 필요한 private queue를 `SUBSCRIBE`한 뒤, REST `GET`으로 현재
    `BundleSnapshot`과 revision·공개 lease 상태를 조회한다.
-3. 내용 변경은 REST endpoint로만 보낸다. 모든 요청에는 최신 `expectedVersion`을 넣는다.
-   `DRAFT` 제목·날짜·캡션 저장은 단독 사용자라도 저장 전에 해당 target lease를
-   acquire하고, 그 응답의 현재 `leaseToken`도 넣는다. visibility·comment처럼 lease가
-   필요하지 않은 저장은 해당 DTO의 버전·상태 검증만 적용한다.
-4. 서버가 권한·member/session·target과 필요한 lease·버전을 같은 저장 경계에서 확인하고 DB
-   commit을 완료한 뒤, 저장된 실제 변경값을 담은 STOMP 내용 이벤트를 한 번 발행한다.
-   클라이언트는 같은 내용을 STOMP `SEND`로 보내거나 서버 이벤트를 다시 반사하지 않는다.
-
-연결·구독과 REST 저장은 snapshot·이벤트 수신과 내용 변경을 위한 기본 절차다. `DRAFT`
-제목·날짜·캡션 저장에는 단독 사용자도 `TITLE`·`DATE`·`PHOTO:{bundlePhotoId}` 중 해당
-target의 lease 획득·heartbeat·release가 필요하며, 재연결 복구도 아래 절차를 따른다.
+3. 내용 변경은 REST로 보낸다. 제목 CRDT는 라이브러리 상태, 사진·장소는 ID 의도를
+   보내고 날짜는 저장할 값을 보낸다. 전체 문자열·전체 장소 목록 호환 경로와 코멘트는
+   해당 expectedVersion을 사용한다. legacy 캡션만 lease를 요구한다.
+4. 서버가 현재 권한·상태·정원을 DB 잠금 아래 확인하고 커밋 후 변경 이벤트를 보낸다.
+5. 실제 입력·입장·이탈과 필드 focus/날짜 선택/장소 편집/사진 드래그의 BEGIN/END는
+   비독점 typing/presence로 전송한다. 내용 저장과 별도이며 수정 가능한 필드를 잠그지 않는다.
 
 ### 서버 공통 메시지
 
@@ -644,7 +677,7 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 | `type` | `data` |
 | --- | --- |
 | `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, locations/locationVersion, publishedAt, photos, dateChips, participants, comments |
-| `TITLE` | `{value, version}` |
+| `TITLE` | `{value, version, title, titleVersion, titleCrdtState, titleTooLong}` |
 | `VISIBILITY` | `{value, version}` |
 | `DATE` | `{value, version, dateChips}` |
 | `LOCATION` | `{locations: BundleLocationResponse[], version: locationVersion}` |
@@ -660,7 +693,9 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 
 | `type` | `data` | 전달 경로 |
 | --- | --- | --- |
-| `LEASES` | `{states: LeaseState[]}` | 번들 topic |
+| `PERMISSIONS` | `null`. snapshot/현재 역할 재조회 | 번들 topic |
+| `DATE_CHIPS` | `{dateChips}`. 날짜 미지정 초안만 | 번들 topic |
+| `LEASES` | `{states: LeaseState[]}`. legacy 호환 | 번들 topic |
 | `LEASE_GRANTED` | `{target, token, leaseVersion, expiresAt}` | 요청 연결 lease queue |
 | `LEASE_HEARTBEAT` | `{target, token, leaseVersion, expiresAt}` | 요청 연결 lease queue |
 | `LEASE_RELEASED` | `{target}` | 요청 연결 lease queue |
@@ -671,12 +706,12 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 `type: "ACTIVITY"`와 `data.activity: "COMMENT"`다. `data.activity`는 별도의
 `BundleActivityType` enum으로 정의하며 `COMMENT`, `VIEW`만 사용한다.
 
-### DRAFT 저장 편집권 절차: 획득·heartbeat·해제
+### Legacy 캡션/구 클라이언트 편집권 절차: 획득·heartbeat·해제
 
-이 lease 절차는 `DRAFT` 제목·날짜·캡션 REST 저장에 필수인 전 단계다. 단독 사용자도
+이 lease 절차는 legacy 캡션 REST 저장에만 필수다. 해당 호환 경로의 단독 사용자도
 예외 없이 저장할 target을 먼저 acquire하고, 받은 현재 `leaseToken`을 저장 요청에 넣어야
 한다. 편집 중에는 5초마다 heartbeat를 보내고, 저장을 마치거나 화면을 이탈할 때 release한다.
-`visibility`·`comment` 저장은 lease 없이 DTO의 버전·상태만 검증한다.
+제목·날짜·위치·사진 작업은 이 절차를 거치지 않는다. 코멘트·공개범위는 기존 버전·상태를 검사한다.
 
 획득 명령 body에는 target만 포함한다.
 
@@ -816,12 +851,12 @@ GET /api/v1/bunches/{bunchId}/bundles/{bundleId}
 - 내용 이벤트의 revision이 로컬 값 이하이면 중복/이전 이벤트로 무시한다.
 - 다음 revision이면 `type`에 맞춰 `data`의 실제 값을 적용한다.
 - revision이 건너뛰면 snapshot으로 복구하고, heartbeat에서 더 최신 revision을 확인했을 때도 복구한다.
-- 재연결한 connection은 이전 connection의 leaseToken을 재사용하지 않는다. snapshot을
-  확인한 뒤 필요한 target을 새로 acquire하고, 새 token과 최신 expectedVersion으로만
-  보류 REST 저장을 재시도한다.
-- `LEASES`, `LEASE_GRANTED`, `LEASE_HEARTBEAT`, `LEASE_RELEASED`, `ACTIVITY`, `COMMAND_REJECTED`에는 내용 중복 제거 규칙을 적용하지 않는다. 같은 revision에서도 새 편집권/활동 정보가 올 수 있다.
+- 재연결한 connection은 서버 최신 snapshot과 CRDT 상태로 교체한다. 서버 미반영 입력은
+  버리고 재전송하지 않는다. 이전 연결의 leaseToken이나 오프라인 입력 큐를 재사용하지 않는다.
+- `PERMISSIONS`, `DATE_CHIPS`, `PRESENCE`, `TYPING`, `LEASES`, `LEASE_GRANTED`, `LEASE_HEARTBEAT`, `LEASE_RELEASED`, `ACTIVITY`, `COMMAND_REJECTED`에는 내용 중복 제거 규칙을 적용하지 않는다. 같은 revision에서도 새 편집권/활동 정보가 올 수 있다.
 - topic과 private queue 양쪽에서 받은 동일 활동은 회원별 활동 표시를 갱신한다.
-- 다른 회원의 이벤트나 snapshot을 적용할 때 본인의 미저장 입력을 유지한다.
+- 연결 중 원격 제목 변경은 CRDT로 현재 입력과 합친다. 드래그 중 원격 순서는 드롭 후 반영한다.
+  연결 복구 snapshot에는 서버 미반영 입력을 다시 합치지 않는다.
 - 발행·삭제·참여 제외로 거부된 저장은 무한 재시도하지 않고 현재 상태로 화면을 전환한다.
 
 사진함 HTTP API 없이 Photo fixture만으로 실제 업로드·목록·중복 병합 연동까지

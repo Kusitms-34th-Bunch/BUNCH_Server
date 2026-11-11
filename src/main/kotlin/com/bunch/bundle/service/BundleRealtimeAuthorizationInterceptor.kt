@@ -85,7 +85,11 @@ class BundleRealtimeAuthorizationInterceptor(
         val parsed = BundleRealtimeDestinations.parseCommand(accessor.destination) ?: return null
         val bundle = access.read(memberId, parsed.bunchId, parsed.bundleId)
         // Reject unauthorized commands before dispatch to preserve silent frame dropping.
-        if (parsed.command != BundleRealtimeCommand.ACTIVITY) {
+        if (parsed.command == BundleRealtimeCommand.PRESENCE) {
+            if (activityType(message, "action") in setOf("TYPE", "BEGIN")) {
+                access.requireParticipant(memberId, bundle)
+            }
+        } else if (parsed.command != BundleRealtimeCommand.ACTIVITY) {
             access.requireParticipant(memberId, bundle)
         } else if (activityType(message) == BundleActivityType.COMMENT.name) {
             access.requireParticipant(memberId, bundle)
@@ -93,12 +97,12 @@ class BundleRealtimeAuthorizationInterceptor(
         return message
     }
 
-    private fun activityType(message: Message<*>): String = runCatching {
+    private fun activityType(message: Message<*>, field: String = "type"): String = runCatching {
         val body = when (val payload = message.payload) {
             is ByteArray -> mapper.readTree(payload)
             is String -> mapper.readTree(payload)
             else -> mapper.valueToTree(payload)
         }
-        body.path("type").asText().trim().uppercase(Locale.ROOT)
+        body.path(field).asText().trim().uppercase(Locale.ROOT)
     }.getOrDefault("")
 }

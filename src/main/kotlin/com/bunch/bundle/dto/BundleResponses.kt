@@ -1,5 +1,6 @@
 package com.bunch.bundle.dto
 
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
 import java.time.Instant
@@ -24,7 +25,9 @@ data class BundleParticipantResponse(
     val joinedAt: Instant,
     val nickname: String? = null,
     val imageUrl: String? = null,
-    val profileAvailable: Boolean = false
+    val profileAvailable: Boolean = false,
+    val role: MembershipRole? = null,
+    val creator: Boolean = false
 )
 
 data class BundleCommentResponse(
@@ -98,7 +101,12 @@ data class BundleSnapshot(
     val locations: List<BundleLocationResponse>,
     val likeCount: Long = 0,
     val likedByCurrentBunch: Boolean = false,
-    val commentCount: Long = 0
+    val commentCount: Long = 0,
+    val publishedBy: Long? = null,
+    val publisherNickname: String? = null,
+    val titleCrdtState: ByteArray? = null,
+    val titleTooLong: Boolean = false,
+    val photoChangeResult: BundlePhotoChangeResult? = null
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
@@ -109,4 +117,10 @@ data class BundleSummary(val draftCount: Long, val publishedCount: Long, val sta
 data class BundleAttribution(
     val participants: List<BundleParticipantResponse>,
     val comments: List<BundleCommentResponse>
+)
+
+data class BundlePhotoChangeResult(
+    val addedPhotoIds: List<Long>,
+    val rejectedPhotoIds: List<Long>,
+    val replayed: Boolean = false
 )

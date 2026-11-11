@@ -98,6 +98,19 @@ class BundleRealtimeMessageTest {
         assertThat(json.toString()).doesNotContain("Authorization", "token", "sessionId")
     }
 
+    @Test
+    fun `presence uses existing envelope without content revision or credentials`() {
+        val data = BundlePresenceData(
+            listOf(BundlePresenceMember(5, expiresAt)),
+            listOf(BundleTypingState(5, "COMMENT", "actual input", expiresAt))
+        )
+        val json = envelope(data.toMessage(1, 2), BundleEventType.PRESENCE)
+        assertThat(json.path("revision").isNull).isTrue()
+        assertThat(json.path("requestId").isNull).isTrue()
+        assertThat(json.path("data").path("typing").single().path("text").asText()).isEqualTo("actual input")
+        assertThat(json.toString()).doesNotContain("sessionId", "connectionId", "token")
+    }
+
     private fun envelope(value: Any, type: BundleEventType): JsonNode {
         val json = mapper.readTree(mapper.writeValueAsBytes(value))
         assertThat(json.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(

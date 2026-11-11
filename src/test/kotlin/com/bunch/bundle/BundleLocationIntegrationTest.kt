@@ -221,25 +221,15 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `requires lease token ownership freshness and optimistic location version`() {
+    fun `legacy whole list saves are lease free and retain optimistic location version`() {
         val f = fixture()
-        fun rejected(actor: BundleActor, token: UUID?) = assertError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            locations.saveDraft(actor, f.bunchId, f.bundleId,
-                BundleLocationsRequest(listOf(place("a", 0)), 0, token), "lease")
-        }
-        rejected(f.owner, null)
-        rejected(f.owner, UUID.randomUUID())
-        rejected(f.owner.copy(sessionId = UUID.randomUUID().toString()), f.token)
-        rejected(f.guest, f.token)
-        val first = save(f, listOf(place("a", 0)))
-        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, emptyList()) }
-        assertThat(locations.get(f.owner.memberId, f.bunchId, f.bundleId)).isEqualTo(first)
-        leases.release(f.owner, f.bunchId, f.bundleId, "LOCATION", f.token, "owner-location")
-        val granted = leases.acquire(f.owner, f.bunchId, f.bundleId, "LOCATION", "new-location")
-        rejected(f.owner, f.token)
-        jdbc.update("UPDATE bundle_edit_leases SET last_heartbeat_at = ? WHERE bundle_id = ? AND target = 'LOCATION'",
-            java.sql.Timestamp.from(Instant.now().minusSeconds(16)), f.bundleId)
-        rejected(f.owner, granted.token)
+        val first = locations.saveDraft(f.guest, f.bunchId, f.bundleId,
+            BundleLocationsRequest(listOf(place("a", 0)), 0, null), "no-lease")
+        val second = locations.saveDraft(f.owner.copy(sessionId = UUID.randomUUID().toString()),
+            f.bunchId, f.bundleId, BundleLocationsRequest(listOf(place("b", 0)), 1, UUID.randomUUID()), "ignored-token")
+        assertThat(second.locationVersion).isEqualTo(first.locationVersion + 1)
+        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, emptyList(), 1) }
+        assertThat(locations.get(f.owner.memberId, f.bunchId, f.bundleId)).isEqualTo(second)
     }
 
     @Test

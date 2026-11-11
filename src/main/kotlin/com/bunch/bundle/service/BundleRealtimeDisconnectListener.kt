@@ -9,7 +9,8 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent
 @Component
 class BundleRealtimeDisconnectListener(
     private val registry: BundleRealtimeSessionRegistry,
-    private val leases: BundleLeaseService
+    private val leases: BundleLeaseService,
+    private val presence: BundlePresenceService
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -17,6 +18,7 @@ class BundleRealtimeDisconnectListener(
     fun disconnected(event: SessionDisconnectEvent) {
         val connectionId = StompHeaderAccessor.wrap(event.message).sessionId ?: return
         registry.remove(connectionId)
+        presence.disconnected(connectionId)
         try {
             leases.clearConnection(connectionId)
         } catch (ex: RuntimeException) {

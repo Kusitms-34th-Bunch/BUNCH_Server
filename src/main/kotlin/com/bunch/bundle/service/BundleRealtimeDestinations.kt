@@ -9,7 +9,7 @@ object BundleRealtimeDestinations {
     private val topicPattern = Regex("^/topic/bunches/([1-9][0-9]*)/bundles/([1-9][0-9]*)$")
     private val commandPattern = Regex(
         "^/app/bunches/([1-9][0-9]*)/bundles/([1-9][0-9]*)/" +
-            "(lease/acquire|lease/heartbeat|lease/release|activity)$"
+            "(lease/acquire|lease/heartbeat|lease/release|activity|presence)$"
     )
 
     fun topic(bunchId: Long, bundleId: Long): String =
@@ -34,6 +34,7 @@ object BundleRealtimeDestinations {
             "lease/heartbeat" -> BundleRealtimeCommand.HEARTBEAT
             "lease/release" -> BundleRealtimeCommand.RELEASE
             "activity" -> BundleRealtimeCommand.ACTIVITY
+            "presence" -> BundleRealtimeCommand.PRESENCE
             else -> return null
         }
         return BundleRealtimeCommandDestination(

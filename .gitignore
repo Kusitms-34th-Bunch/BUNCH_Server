@@ -24,3 +24,8 @@ logs/
 # Local work plans and verification records
 /docs/plans/
 /docs/verification/
+
+# Local A/B browser lab
+/tools/bundle-lab/node_modules/
+/output/playwright/
+/.playwright-cli/

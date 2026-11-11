@@ -1,5 +1,8 @@
 package com.bunch.bundle.controller
 
+import com.bunch.bundle.dto.BundlePresenceCommand
+import com.bunch.bundle.dto.BundlePresenceData
+import com.bunch.bundle.service.BundlePresenceService
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.domain.BundleActivityType
 import com.bunch.bundle.dto.BundleRealtimeMessage
@@ -34,7 +37,8 @@ class BundleSocketController(
     private val access: BundleAccessService,
     private val leases: BundleLeaseService,
     private val events: ApplicationEventPublisher,
-    private val registry: BundleRealtimeSessionRegistry
+    private val registry: BundleRealtimeSessionRegistry,
+    private val presence: BundlePresenceService
 ) {
     @MessageMapping("/bunches/{bunchId}/bundles/{bundleId}/lease/acquire")
     @SendToUser(destinations = ["/queue/bundle-leases"], broadcast = false)
@@ -127,6 +131,21 @@ class BundleSocketController(
         events.publishEvent(event)
         return event.toMessage()
     }
+
+    @MessageMapping("/bunches/{bunchId}/bundles/{bundleId}/presence")
+    @SendToUser(destinations = ["/queue/bundle-activity"], broadcast = false)
+    fun presence(
+        headers: StompHeaderAccessor,
+        @DestinationVariable("bunchId") bunchId: Long,
+        @DestinationVariable("bundleId") bundleId: Long,
+        command: BundlePresenceCommand
+    ): BundleRealtimeMessage<BundlePresenceData> = presence.command(
+        actor(headers),
+        connectionId(headers),
+        bunchId,
+        bundleId,
+        command
+    ).toMessage(bunchId, bundleId)
 
     @MessageExceptionHandler(Exception::class)
     @SendToUser(destinations = ["/queue/bundle-leases"], broadcast = false)

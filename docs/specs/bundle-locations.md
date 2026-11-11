@@ -2,6 +2,7 @@
 
 이슈 #27, DRAFT-17·BUNDLE-04·FEED-10. 2026-11-07 승인한 피드 원문
 6.2.3·6.2.12·6.3.1과 보완 결정을 따른다. 기존 장소 1개·검색 공급자 선행 계약을 대체한다.
+#107은 장소 ID 의도 처리와 사용자 lease 없는 저장을 추가한다. 아래 계약이 이전 lease 설명보다 우선한다.
 공개 접근은 [피드 공통 계약](feed-api.md), 초안 프로토콜은 [번들 API](bundle-api.md)를 재사용한다.
 
 ## 저장·입력
@@ -35,7 +36,8 @@
   읽기 트랜잭션은 REPEATABLE_READ로 버전과 장소 목록을 같은 스냅샷에서 읽는다.
   두 조회 사이에 일괄 편집이 커밋되어도 이전 버전과 새 장소를 섞어 반환하지 않는다.
 - `PUT`: **DRAFT 참여자만** 전체 목록을 교체한다. 삭제할 장소를 제외하고 전송하며 전체 삭제는 빈 목록이다.
-  단독 편집도 STOMP의 `LOCATION` lease가 필요하다. `X-Request-Id`는 선택 UUID다.
+  `expectedVersion`으로 전체 목록의 덮어쓰기를 방지하며 사용자 lease는 요구하지 않는다.
+  기존 `leaseToken`은 선택 호환 필드로만 받고 검증하지 않는다. `X-Request-Id`는 선택 UUID다.
   PUBLISHED는 OWNER라도 이 경로로 저장할 수 없고 `BUNDLE_002`로 거부한다.
 
 ```json
@@ -74,19 +76,75 @@
 | RESOURCE_001 / 404 | 없는 번들·경로 불일치·숨겨진 발행본 |
 | BUNDLE_002 / 409 | 발행본 개별 저장 시도 |
 | BUNDLE_003 / 409 | version 불일치. detail: `{locations: [...], version: 현재값}` |
-| BUNDLE_004 / 409 | LOCATION lease 없음·만료·member/session/token 불일치 |
 
 내보내짐/삭제 안내와 외부 발행본 정책 오류는 기존 번들·피드 공통 코드를 유지한다.
 
+## 위치 의도 요청 (#107)
+
+`POST /api/v1/bunches/{bunchId}/bundles/{bundleId}/locations/intents`는 ACTIVE 초안 참여자만 호출한다.
+`BundleLocationIntent`는 `com.bunch.bundle.domain`의 독립 enum이다.
+`expectedVersion`·`leaseToken` 없이 서버가 번치→번들을 잠근 뒤 최신 목록에 적용한다.
+`X-Request-Id`는 추적용 UUID이며 중복 실행 방지 키가 아니다.
+
+| intent | 입력 | 최신 목록 적용 |
+| --- | --- | --- |
+| ADD | `locations`: 1~3개 장소, position 제외 | 정규화 키를 중복 제거하고 기존 키를 제외한 뒤 남은 정원까지 선택 순서로 뒤에 추가 |
+| REPLACE | `targetLocationId`, `location`: 장소 1개 | 새 키면 대상 자리에 교체. 대상 자신이나 다른 행의 기존 키면 원래 목록을 유지하는 no-op |
+| REMOVE | `targetLocationId` | 대상 삭제. 이 번들에서 이미 삭제한 대상은 no-op |
+| MOVE | `targetLocationId`, 선택 `previousLocationId`·`nextLocationId` | 대상을 뺀 최신 목록에서 next 앞, 없으면 previous 뒤, 둘 다 없으면 끝에 배치 |
+
+각 intent에 해당하지 않는 입력 필드는 거부한다. 요청 배열은 **최대 3개**만 받고 초과는 부분 처리 없이
+`INVALID_INPUT`으로 거부한다. 이름·주소 등은 기존 PlaceDetails 검증을 그대로 적용하며,
+남은 정원 밖의 항목도 먼저 검증한다. target·anchor ID는 양수이고 target 자신이나 같은 두 anchor를 받을 수 없다.
+
+존재하는 ID는 대상 번들 소속을 검증한다. 없는 ID도 **이 번들에서 삭제한 기록이 있는지** 확인한다.
+알 수 없는 ID·다른 번들의 현재/삭제 ID는 `RESOURCE_NOT_FOUND`이며 목록을 변경하지 않는다.
+같은 번들에서 삭제한 target의 MOVE/REMOVE는 no-op이다. 삭제된 target의 REPLACE는
+새 키이고 정원이 남으면 끝에 추가하며, 정원이 찼거나 같은 키가 있으면 no-op이다.
+삭제된 anchor는 건너뛰고 남아 있는 anchor를 사용한다. 둘 다 사라지면 끝에 배치한다.
+현재 anchor 사이가 인접하지 않아도 최신 next 위치를 우선하여 적용한다.
+
+K43의 중복 선택 규칙에 따라 REPLACE의 정규화한 `(provider, externalId)`가 현재 목록에 있으면
+`changed=false`, `acceptedCount=0`을 반환한다. 대상 자신의 키도 동일하며, 입력한 이름·주소가 달라도
+기존 행 ID·순서·이름·주소·핀과 버전·시각을 그대로 유지한다. 중복 위치를 대상 자리로 옮기거나
+원래 대상을 삭제하지 않는다. 클라이언트는 시트를 닫고 「이미 추가한 위치에요.」를 안내한다.
+
+삭제 ID 출처는 기존 `bundle_requests`에 `operation=LOCATION_REMOVED`,
+`request_key=UUID(0, locationId)`, 해당 `bundle_id`와 함께 남긴다. 원문 장소나 토큰은 남기지 않는다.
+`replaceLocked`의 기존 동기 핀 정리 callback을 실행한 뒤 같은 트랜잭션에 기록하므로
+기존 PUT·발행본 일괄 수정의 삭제도 같은 검증 근거를 남기며 실패 시 함께 롤백한다.
+이 기록은 새 이벤트 재생 체계나 클라이언트 오프라인 큐가 아니다.
+전환 이전에 삭제되어 기록이 없는 ID는 알 수 없는 ID로 처리하므로 클라이언트는 최신 GET으로 복구한다.
+
+응답은 `{bundleId, revision, locationVersion, changed, acceptedCount, locations}`다.
+`acceptedCount`는 ADD에서 실제 새로 추가한 수이고 REPLACE/REMOVE/MOVE는 변경되면 1, no-op이면 0이다.
+정원이 가득 찼어도 유효한 요청은 200과 변경 없는 최신 목록을 반환한다.
+`changed=false`이면 내용 revision·locationVersion·updatedAt·활동 시각과 LOCATION 이벤트를 갱신하지 않는다.
+다른 요청은 DB 잠금으로 직렬 적용하며 한 요청 안에서는 선택 순서를 유지한다.
+
+```json
+{
+  "intent": "ADD",
+  "locations": [
+    {"provider": "kakao", "externalId": "123", "name": "애월 한담해변", "address": "제주시 애월읍"}
+  ]
+}
+```
+
+발행 후 도착한 의도 요청은 OWNER도 `BUNDLE_STATE_CONFLICT`로 거부한다.
+클라이언트는 부분 수락 결과의 acceptedCount와 최신 locations로 본인 안내와 목록을 갱신한다.
+재연결은 기존 GET snapshot 복구를 사용하며 서버에 반영되지 않은 오프라인 입력을 재생하지 않는다.
+권한·추천 날짜 칩 갱신은 [번들 갱신 신호](bundle-refresh.md)를 따른다.
+
 ## 잠금·이벤트·발행본 연결
 
-초안 저장은 기존 번치→번들→lease 잠금 순서를 따른다. LOCATION은 목록 전체의 단일 target이다.
-기존 5초 heartbeat·15초 만료·연결별 private token·재획득 token 무효화 정책을 적용한다.
-같은 회원/session의 다른 socket도 활성 lease를 빼앗을 수 없다.
+초안 저장은 기존 번치→번들 DB 잠금 순서를 따른다. 사용자 lease의 보유·만료·토큰은
+위치 저장의 전제가 아니며 다른 참여자의 편집을 차단하지 않는다. 내부 DB 잠금으로 정원과 원자성을 보장한다.
 
 실제 장소·메타데이터·순서 변경은 locationVersion과 revision을 각각 한 번 증가시키며
 updatedAt과 편집자의 번치 활동을 갱신한다. 정규화 후 같은 요청은 버전·시간·이벤트를 변경하지 않는다.
-stale version 재요청은 no-op 여부와 관계없이 거부한다.
+기존 전체 `PUT`의 stale version 재요청은 no-op 여부와 관계없이 거부한다.
+의도 요청은 최신 목록에 적용하므로 version을 받지 않는다.
 커밋 후 기존 번들 topic에 `LOCATION` 이벤트를 전달한다. 공통 envelope의 revision/requestId와
 `data: {locations: [...], version: locationVersion}`를 포함한다. 롤백하면 전달하지 않는다.
 별도 STOMP 내용 저장 명령은 없고 재연결은 GET snapshot으로 복구한다.
@@ -127,7 +185,8 @@ location의 bundle FK는 ON DELETE CASCADE다. position 0~2 CHECK와 `(bundle_id
 `(bundle_id, provider, external_id)` UNIQUE는 즉시 검사한다. 이름·주소는 grapheme 경계 보존을 위해
 TEXT로 저장하고 애플리케이션에서 상한을 검사한다. 적용된 마이그레이션은 수정하지 않는다.
 
-자동 검증 범위는 입력 경계·HTTP·권한·동시 저장·lease/token/version·ID 보존·동기 listener 실패 롤백·
+자동 검증 범위는 입력 경계·HTTP·권한·동시 저장·legacy version/lease 비의존·부분 정원 수락·
+삭제 ID 출처·동시 삭제/이동·ID 보존·실제 핀 정리와 동기 listener 실패 롤백·
 실제 STOMP 커밋/롤백/재연결·기존 발행 조건·PostgreSQL migration·JPA validate다.
 C의 실제 일괄 편집과 G의 실제 콕 writer 연결은 각각의 구현 통합 시 추가 검증한다.
 검색 공급자·실제 iOS/WebView 연동은 후속이며 자동 검증과 구분한다.

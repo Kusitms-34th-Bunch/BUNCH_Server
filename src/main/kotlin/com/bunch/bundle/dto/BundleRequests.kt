@@ -2,6 +2,7 @@ package com.bunch.bundle.dto
 
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.domain.BundlePhotoCapacityMode
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSetter
 import com.fasterxml.jackson.annotation.Nulls
@@ -58,7 +59,10 @@ data class BundleParticipantRequest(val memberId: Long)
 data class BundlePhotoChangesRequest(
     val addPhotoIds: List<Long> = emptyList(),
     val removeBundlePhotoIds: List<Long> = emptyList(),
-    val mode: BundleStatus
+    val mode: BundleStatus,
+    val capacityMode: BundlePhotoCapacityMode = BundlePhotoCapacityMode.ATOMIC_APPLY,
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
+    val reselectedPhotoIds: List<Long> = emptyList()
 )
 
 data class MoveBundlePhotoRequest(
@@ -67,7 +71,10 @@ data class MoveBundlePhotoRequest(
     val mode: BundleStatus
 )
 
-data class PublishBundleRequest(val expectedRevision: Long)
+data class PublishBundleRequest(
+    val expectedRevision: Long? = null,
+    val visibility: Visibility? = null
+)
 
 
 data class EditPublishedBundleRequest(

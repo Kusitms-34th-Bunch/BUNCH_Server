@@ -4,5 +4,6 @@ enum class BundleRealtimeCommand {
     ACQUIRE,
     HEARTBEAT,
     RELEASE,
-    ACTIVITY
+    ACTIVITY,
+    PRESENCE
 }
