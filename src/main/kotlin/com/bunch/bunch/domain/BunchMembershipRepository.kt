@@ -28,6 +28,15 @@ interface BunchMembershipRepository : JpaRepository<BunchMembership, Long> {
         status: MembershipStatus = MembershipStatus.ACTIVE
     ): Long
 
+    @Query("""select membership from BunchMembership membership
+        join fetch membership.bunch
+        where membership.member.id = :memberId and membership.status = :status
+        order by membership.bunch.id asc""")
+    fun findAllByMemberIdAndStatusOrderByBunchId(
+        memberId: Long,
+        status: MembershipStatus = MembershipStatus.ACTIVE
+    ): List<BunchMembership>
+
     fun countByBunchIdAndStatus(
         bunchId: Long,
         status: MembershipStatus = MembershipStatus.ACTIVE

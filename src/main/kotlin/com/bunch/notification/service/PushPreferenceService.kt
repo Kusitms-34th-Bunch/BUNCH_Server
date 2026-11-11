@@ -9,6 +9,7 @@ import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.PushPreferencePatchRequest
 import com.bunch.notification.dto.PushPreferenceResponse
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 
@@ -54,6 +55,12 @@ class PushPreferenceService(
             preference.updatedAt = now
         }
         return PushPreferenceResponse(enabled, categories)
+    }
+
+    // Called when the account is withdrawn: the settings belong to the person (7.6.4).
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllOf(memberId: Long) {
+        preferences.deleteById(memberId)
     }
 
     // A category without a saved value is on.
