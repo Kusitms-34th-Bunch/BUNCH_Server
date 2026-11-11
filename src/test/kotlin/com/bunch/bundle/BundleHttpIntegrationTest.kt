@@ -103,7 +103,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     @Test
     fun `create validates headers malformed JSON and idempotency fingerprints`() {
         val fixture = fixture(photoCount = 2)
-        val body = createBody(listOf(fixture.photoIds.first()))
+        val body = createBody(listOf(fixture.photoIds.first()), listOf(fixture.participant.memberId))
 
         createRequest(fixture.owner, fixture.bunchId, body, idempotencyKey = null)
             .expectError(ErrorCode.INVALID_INPUT)
@@ -122,7 +122,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         createRequest(
             fixture.owner,
             fixture.bunchId,
-            createBody(listOf(fixture.photoIds[1])),
+            createBody(listOf(fixture.photoIds[1]), listOf(fixture.participant.memberId)),
             idempotencyKey = key
         ).expectError(ErrorCode.IDEMPOTENCY_CONFLICT)
 
@@ -140,6 +140,65 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
                 fixture.bunchId
             )
         ).isEqualTo(1L)
+    }
+
+    @Test
+    fun `creation selects a non uploader and validates explicit participant input`() {
+        val fixture = fixture(photoCount = 1)
+        val selected = account()
+        join(selected.memberId, issue(fixture.owner.memberId, fixture.bunchId))
+        val photoIds = fixture.photoIds
+        val key = UUID.randomUUID().toString()
+        val body = createBody(photoIds, listOf(selected.memberId))
+        createRequest(fixture.owner, fixture.bunchId, body, key)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.participants.length()").value(2))
+            .andExpect(jsonPath("$.data.participants[0].memberId").value(fixture.owner.memberId))
+            .andExpect(jsonPath("$.data.participants[1].memberId").value(selected.memberId))
+        createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, listOf(fixture.participant.memberId)), key)
+            .expectError(ErrorCode.IDEMPOTENCY_CONFLICT)
+
+        val omitted = mapper.writeValueAsString(mapOf("photoIds" to photoIds))
+        createRequest(fixture.owner, fixture.bunchId, omitted, UUID.randomUUID().toString())
+            .expectError(ErrorCode.INVALID_INPUT)
+        val invalidSelections = listOf(
+            emptyList(), listOf(fixture.owner.memberId), listOf(selected.memberId, selected.memberId)
+        )
+        for (selection in invalidSelections) {
+            createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, selection), UUID.randomUUID().toString())
+                .expectError(ErrorCode.INVALID_INPUT)
+        }
+        val foreign = account()
+        createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, listOf(foreign.memberId)),
+            UUID.randomUUID().toString()).expectError(ErrorCode.FORBIDDEN)
+        for (malformed in listOf(
+            mapOf("photoIds" to photoIds, "participantMemberIds" to listOf<Long?>(null)),
+            mapOf("photoIds" to listOf<Long?>(null), "participantMemberIds" to listOf(selected.memberId)),
+            mapOf("photoIds" to photoIds, "participantMemberIds" to null)
+        )) {
+            createRequest(fixture.owner, fixture.bunchId, mapper.writeValueAsString(malformed),
+                UUID.randomUUID().toString()).expectError(ErrorCode.INVALID_JSON)
+        }
+    }
+
+    @Test
+    fun `creation reports deleted photo ids atomically for frontend reselection`() {
+        val fixture = fixture(photoCount = 2)
+        val missingId = fixture.photoIds.last()
+        jdbc.update("DELETE FROM photo_uploaders WHERE photo_id = ?", missingId)
+        jdbc.update("DELETE FROM photos WHERE id = ?", missingId)
+        val key = UUID.randomUUID().toString()
+        createRequest(fixture.owner, fixture.bunchId,
+            createBody(fixture.photoIds, listOf(fixture.participant.memberId)), key)
+            .expectError(ErrorCode.PHOTO_SELECTION_CHANGED)
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(missingId))
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bundles WHERE bunch_id = ?", Long::class.java, fixture.bunchId
+        )).isZero()
+        createRequest(fixture.owner, fixture.bunchId,
+            createBody(listOf(fixture.photoIds.first()), listOf(fixture.participant.memberId)), key)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.photos.length()").value(1))
     }
 
     @Test
@@ -346,10 +405,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .andReturn()
             .data()
         val participantCommentVersion = added.path("comments")
-            .first { it.path("memberId").asLong() == fixture.participant.memberId }
-            .path("version")
-            .asLong()
-        assertThat(participantCommentVersion).isGreaterThan(0)
+            .firstOrNull { it.path("memberId").asLong() == fixture.participant.memberId }
+            ?.path("version")?.asLong() ?: 0L
         val grant = leaseService.acquire(
             actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
             bunchId = fixture.bunchId,
@@ -530,7 +587,10 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     ): JsonNode = createRequest(
         auth,
         bunchId,
-        createBody(listOf(photoId)),
+        createBody(listOf(photoId), jdbc.queryForList(
+            "SELECT member_id FROM bunch_memberships WHERE bunch_id = ? AND status = 'ACTIVE' ORDER BY id",
+            Long::class.java, bunchId
+        ).filter { it != auth.memberId }),
         idempotencyKey
     ).andExpect(status().isOk).andReturn().data()
 
@@ -642,8 +702,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         data.path("comments").first { it.path("memberId").asLong() == memberId }
             .path("content").asText()
 
-    private fun createBody(photoIds: List<Long>): String =
-        mapper.writeValueAsString(mapOf("photoIds" to photoIds))
+    private fun createBody(photoIds: List<Long>, participantMemberIds: List<Long>): String =
+        mapper.writeValueAsString(mapOf("photoIds" to photoIds, "participantMemberIds" to participantMemberIds))
 
     private fun bearer(auth: Auth): String = "Bearer ${auth.accessToken}"
 

@@ -176,7 +176,7 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
             BundleActor(owner, "atomic-owner"),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(photo(bunchId, guest)))
+            CreateBundleRequest(listOf(photo(bunchId, guest)), participantMemberIds = listOf(guest))
         )
         val firstKey = UUID.randomUUID()
         val firstChange = BundlePhotoChangesRequest(
