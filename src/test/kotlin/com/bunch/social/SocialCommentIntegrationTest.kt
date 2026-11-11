@@ -489,8 +489,8 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val bundle = published(owner, bunch)
         val root = write(owner, bundle.id)
         device(owner)
-        jdbc.update("INSERT INTO push_preferences(member_id,enabled,types,updated_at) " +
-            "VALUES (?,true,'{\"SOCIAL_COMMENT_CREATED\":false}'::jsonb,CURRENT_TIMESTAMP)", owner)
+        jdbc.update("INSERT INTO push_preferences(member_id,enabled,categories,updated_at) " +
+            "VALUES (?,true,'{\"REACTION\":false}'::jsonb,CURRENT_TIMESTAMP)", owner)
         val actor = member()
         publicBunch(actor)
         write(actor, bundle.id, root.id)

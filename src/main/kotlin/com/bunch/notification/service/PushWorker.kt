@@ -17,6 +17,7 @@ import com.bunch.notification.domain.push.PushDeviceRepository
 import com.bunch.notification.domain.push.PushJob
 import com.bunch.notification.domain.push.PushJobRepository
 import com.bunch.notification.domain.push.PushJobStatus
+import com.bunch.notification.domain.push.PushPreference
 import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.ApnsResponse
 import com.bunch.notification.dto.NotificationTarget
@@ -111,7 +112,7 @@ class PushWorker(
             return null
         }
         val preference = preferences.findById(job.recipientMemberId).orElse(null)
-        if (preference?.enabled == false || preference?.types?.get(job.type.name) == false || !eligible(job)) {
+        if (!PushPreference.allows(preference, job.type) || !eligible(job)) {
             cancel(job, "RecipientUnavailable")
             return null
         }

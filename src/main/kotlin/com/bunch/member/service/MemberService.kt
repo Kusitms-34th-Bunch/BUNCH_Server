@@ -26,8 +26,6 @@ class MemberService(
             member.id,
             member.nickname,
             member.imageUrl,
-            member.birthYear,
-            member.gender,
             if (member.signupStatus == SignupStatus.COMPLETED) bunches.defaultBunch(member.id) else null
         )
     }
