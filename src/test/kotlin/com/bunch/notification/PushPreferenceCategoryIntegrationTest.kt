@@ -119,61 +119,68 @@ class PushPreferenceCategoryIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `switching the last category off turns the app push toggle off`() {
+    fun `switching every category off one by one keeps the app push toggle on`() {
         val access = access(member())
 
-        listOf("BUNDLE_NEWS", "MEMBER_ROLE", "FOLLOW").forEach {
+        listOf("BUNDLE_NEWS", "MEMBER_ROLE", "FOLLOW", "REACTION").forEach {
             change(access, """{"categories":{"$it":false}}""")
                 .expectOk()
                 .andExpect(jsonPath("$.data.enabled").value(true))
         }
-        change(access, """{"categories":{"REACTION":false}}""")
-            .expectOk()
-            .andExpect(jsonPath("$.data.enabled").value(false))
+
+        read(access)
+            .andExpect(jsonPath("$.data.enabled").value(true))
             .andExpect(jsonPath("$.data.categories.BUNDLE_NEWS").value(false))
             .andExpect(jsonPath("$.data.categories.MEMBER_ROLE").value(false))
             .andExpect(jsonPath("$.data.categories.FOLLOW").value(false))
             .andExpect(jsonPath("$.data.categories.REACTION").value(false))
-        read(access).andExpect(jsonPath("$.data.enabled").value(false))
     }
 
     @Test
-    fun `switching every category off in one request turns the app push toggle off even if it asks for on`() {
+    fun `a request with every category off leaves the app push toggle as the request says`() {
         val access = access(member())
         val everyCategoryOff = """{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}"""
 
+        change(access, """{"categories":$everyCategoryOff}""")
+            .expectOk()
+            .andExpect(jsonPath("$.data.enabled").value(true))
         change(access, """{"enabled":true,"categories":$everyCategoryOff}""")
+            .expectOk()
+            .andExpect(jsonPath("$.data.enabled").value(true))
+        // The initial values of a member who denied notifications at sign up (7.3.1).
+        change(access, """{"enabled":false,"categories":$everyCategoryOff}""")
             .expectOk()
             .andExpect(jsonPath("$.data.enabled").value(false))
             .andExpect(jsonPath("$.data.categories.FOLLOW").value(false))
     }
 
     @Test
-    fun `turning the app push on while every category is off turns every category on`() {
+    fun `turning the app push off and on with every category off gives the same values back`() {
         val access = access(member())
         change(
             access,
             """{"categories":{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}}"""
-        ).expectOk().andExpect(jsonPath("$.data.enabled").value(false))
+        ).expectOk().andExpect(jsonPath("$.data.enabled").value(true))
+        change(access, """{"enabled":false}""").expectOk().andExpect(jsonPath("$.data.enabled").value(false))
 
         change(access, """{"enabled":true}""")
             .expectOk()
             .andExpect(jsonPath("$.data.enabled").value(true))
-            .andExpect(jsonPath("$.data.categories.BUNDLE_NEWS").value(true))
-            .andExpect(jsonPath("$.data.categories.MEMBER_ROLE").value(true))
-            .andExpect(jsonPath("$.data.categories.FOLLOW").value(true))
-            .andExpect(jsonPath("$.data.categories.REACTION").value(true))
+            .andExpect(jsonPath("$.data.categories.BUNDLE_NEWS").value(false))
+            .andExpect(jsonPath("$.data.categories.MEMBER_ROLE").value(false))
+            .andExpect(jsonPath("$.data.categories.FOLLOW").value(false))
+            .andExpect(jsonPath("$.data.categories.REACTION").value(false))
     }
 
     @Test
-    fun `turning one category on again after the app push toggle went off keeps the others off`() {
+    fun `turning one category on again after every category was off keeps the others off`() {
         val access = access(member())
         change(
             access,
             """{"categories":{"BUNDLE_NEWS":false,"MEMBER_ROLE":false,"FOLLOW":false,"REACTION":false}}"""
         ).expectOk()
 
-        change(access, """{"enabled":true,"categories":{"FOLLOW":true}}""")
+        change(access, """{"categories":{"FOLLOW":true}}""")
             .expectOk()
             .andExpect(jsonPath("$.data.enabled").value(true))
             .andExpect(jsonPath("$.data.categories.FOLLOW").value(true))

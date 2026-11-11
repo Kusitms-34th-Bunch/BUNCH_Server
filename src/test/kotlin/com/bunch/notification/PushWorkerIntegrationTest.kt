@@ -238,8 +238,11 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
     }
 
     @ParameterizedTest
-    @EnumSource(value = NotificationType::class, names = ["MEMBER_REMOVED", "BUNCH_DELETED"])
-    fun `removal and bunch deletion are sent while the app push is on even if every category is off`(
+    @EnumSource(
+        value = NotificationType::class,
+        names = ["MEMBER_REMOVED", "BUNCH_DELETED", "BUNCH_VISIBILITY_CHANGED"]
+    )
+    fun `always sent notices are sent while the app push is on even if every category is off`(
         type: NotificationType
     ) {
         val job = fixture(type = type)
@@ -255,8 +258,11 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
     }
 
     @ParameterizedTest
-    @EnumSource(value = NotificationType::class, names = ["MEMBER_REMOVED", "BUNCH_DELETED"])
-    fun `removal and bunch deletion are cancelled when the app push is off`(type: NotificationType) {
+    @EnumSource(
+        value = NotificationType::class,
+        names = ["MEMBER_REMOVED", "BUNCH_DELETED", "BUNCH_VISIBILITY_CHANGED"]
+    )
+    fun `always sent notices are cancelled when the app push is off`(type: NotificationType) {
         val job = fixture(type = type)
         preference(job.recipientMemberId, enabled = false, categories = "{}")
 

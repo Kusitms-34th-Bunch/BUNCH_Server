@@ -21,8 +21,7 @@ enum class PushCategory(val types: Set<NotificationType>) {
             NotificationType.MEMBER_JOINED,
             NotificationType.CO_OWNER_GRANTED,
             NotificationType.CO_OWNER_REVOKED,
-            NotificationType.OWNER_TRANSFERRED,
-            NotificationType.BUNCH_VISIBILITY_CHANGED
+            NotificationType.OWNER_TRANSFERRED
         )
     ),
     FOLLOW(
@@ -40,10 +39,12 @@ enum class PushCategory(val types: Set<NotificationType>) {
     );
 
     companion object {
-        // Pushed whenever the app push toggle is on and never switched off one by one (7.3.2).
+        // Pushed whenever the app push toggle is on and never switched off one by one (7.3.2):
+        // removed from a bunch (14), bunch deleted (15) and bunch visibility changed (16).
         val ALWAYS: Set<NotificationType> = setOf(
             NotificationType.MEMBER_REMOVED,
-            NotificationType.BUNCH_DELETED
+            NotificationType.BUNCH_DELETED,
+            NotificationType.BUNCH_VISIBILITY_CHANGED
         )
 
         fun of(type: NotificationType): PushCategory? = entries.firstOrNull { type in it.types }
