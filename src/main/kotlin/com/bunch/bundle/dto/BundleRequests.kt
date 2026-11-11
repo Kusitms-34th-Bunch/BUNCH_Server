@@ -82,5 +82,16 @@ data class EditPublishedBundleRequest(
 data class PublishedBundlePhotoInput(
     val bundlePhotoId: Long? = null,
     val photoId: Long? = null,
-    val caption: String
+    val caption: String? = null
+)
+
+
+data class BundlePhotoPickRequest(
+    @param:JsonProperty(value = "picked", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val picked: Boolean,
+
+    @param:JsonProperty(value = "expectedVersion", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val expectedVersion: Long
 )

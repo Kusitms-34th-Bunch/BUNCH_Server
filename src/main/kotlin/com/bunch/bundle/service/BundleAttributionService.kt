@@ -22,6 +22,19 @@ class BundleAttributionService(
     @Transactional(readOnly = true)
     fun published(bundle: Bundle): BundleAttribution = publishedAll(listOf(bundle)).getValue(bundle.id)
 
+    @Transactional(readOnly = true)
+    fun draftParticipants(bundle: Bundle): List<BundleParticipantResponse> {
+        if (bundle.status != BundleStatus.DRAFT) throw BusinessException(ErrorCode.BUNDLE_STATE_CONFLICT)
+        val profiles = memberships.findActiveProfilesForBunches(listOf(bundle.bunchId))
+            .associateBy { it.member.id }
+        return participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id).map { row ->
+            val profile = profiles[row.memberId]?.member
+            BundleParticipantResponse(
+                row.memberId, row.joinedAt, profile?.nickname ?: "작성자", profile?.imageUrl, profile != null
+            )
+        }
+    }
+
     /** Internal assembler: caller must authorize all bundles before passing them here. Three bounded queries. */
     @Transactional(readOnly = true)
     fun publishedAll(bundles: Collection<Bundle>): Map<Long, BundleAttribution> {

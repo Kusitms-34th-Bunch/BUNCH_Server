@@ -37,6 +37,7 @@ class BundleService(
     private val access: BundleAccessService,
     private val feedAccess: FeedAccessService,
     private val attribution: BundleAttributionService,
+    private val picks: BundlePhotoPickService,
     private val likes: SocialLikeService,
     private val socialComments: SocialCommentService,
     private val bunches: BunchRepository,
@@ -439,7 +440,7 @@ class BundleService(
             request.date?.isAfter(LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))) == true) {
             fail(ErrorCode.INVALID_INPUT)
         }
-        val captions = request.photos.map { validateText { BundleText.caption(it.caption) } }
+        val captions = request.photos.map { input -> input.caption?.let { validateText { BundleText.caption(it) } } }
         request.photos.forEach {
             if ((it.bundlePhotoId == null) == (it.photoId == null)) fail(ErrorCode.INVALID_INPUT)
         }
@@ -469,8 +470,9 @@ class BundleService(
                 row.position = index
                 edited = true
             }
-            if (row.caption != captions[index]) {
-                row.caption = captions[index]
+            val caption = captions[index]
+            if (caption != null && row.caption != caption) {
+                row.caption = caption
                 row.captionVersion++
                 row.captionUpdatedBy = actor.memberId
                 row.captionUpdatedAt = clock.instant()
@@ -701,15 +703,18 @@ class BundleService(
     ): BundleSnapshot {
         val draft = bundle.status == BundleStatus.DRAFT
         val publishedPeople = if (draft) null else attribution.published(bundle)
+        val people = publishedPeople?.participants ?: attribution.draftParticipants(bundle)
+        val photoPicks = picks.summaries(bundle, userId, people)
         val social = if (draft) SocialLikeSummary() else
             likeSummary ?: likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
         val count = if (draft) 0 else commentTotal ?: socialComments.counts(userId, listOf(bundle.id))[bundle.id] ?: 0
         return BundleSnapshot(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
-            photoRows(bundle.id).map(::photoResponse),
-            publishedPeople?.participants ?: participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
-                .map { BundleParticipantResponse(it.memberId, it.joinedAt) },
+            photoRows(bundle.id).map {
+                photoResponse(it).copy(picks = photoPicks[it.id] ?: BundlePhotoPicks(version = bundle.revision))
+            },
+            people,
             publishedPeople?.comments ?: comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
             access.permissions(userId, bundle),

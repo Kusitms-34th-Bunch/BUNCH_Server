@@ -16,8 +16,8 @@
   "visibility": "PUBLIC",
   "date": "2026-07-09",
   "photos": [
-    {"bundlePhotoId": 201, "caption": "남겨 둔 사진"},
-    {"photoId": 302, "caption": "사진함에서 추가"}
+    {"bundlePhotoId": 201},
+    {"photoId": 302}
   ],
   "locations": [
     {"provider": "kakao", "externalId": "123", "name": "해변", "address": "제주시", "position": 0}
@@ -25,14 +25,21 @@
 }
 ```
 
-모든 최종 값을 보낸다. 날짜 null·장소 빈 배열·빈 캡션은 허용한다. 사진은 배열 순서대로
-1~20장, 장소는 [장소 계약](bundle-locations.md)에 따라 최대 3개다. 제목은 NFC·trim 후
-1~40 grapheme, 캡션은 NFC 후 최대 200 grapheme, 날짜는 서울 기준 미래 날짜를 거부한다.
+모든 최종 값을 보내되 사진 입력의 `caption`은 optional nullable이다. 날짜 null·장소 빈 배열·
+빈 캡션은 허용한다. 사진은 배열 순서대로 1~20장, 장소는 [장소 계약](bundle-locations.md)에
+따라 최대 3개다. 제목은 NFC·trim 후 1~40 grapheme, 캡션은 NFC 후 최대 200 grapheme,
+날짜는 서울 기준 미래 날짜를 거부한다.
 사진마다 `bundlePhotoId`(보존할 번들 사진)와 `photoId`(새 사진함 사진) 중 정확히 하나를
 보낸다. 기존 사진 ID는 해당 번들 소속이어야 하며 중복 ID·중복 원본 사진을 거부한다.
-원본 Photo가 삭제된 기존 번들 사진도 ID·이미지 참조·추가자·시각을 유지한다.
+원본 Photo가 삭제된 기존 번들 사진도 ID·이미지 참조·추가자·시각·픽을 유지한다.
 새 사진은 같은 번치의 READY 사진이어야 한다. 기존 사진함 업로드 한도를 추가로 소비하지 않는다.
 참여 멤버와 멤버별 코멘트는 입력 대상이 아니며 발행 후 변경할 수 없다.
+
+보존 입력(`bundlePhotoId`)의 `caption`을 생략하거나 null로 보내면 기존 캡션을 유지한다.
+새 입력(`photoId`)의 caption이 생략되거나 null이면 빈 캡션으로 시작한다. 명시적인 non-null
+caption은 NFC·길이 검증 후 저장하며, 기존 caption에 빈 문자열을 명시하면 기존 캡션을 지운다.
+새 픽·발행본 수정 화면은 이 legacy caption 입력을 사용하지 않지만, 기존 API·응답 필드·데이터는
+삭제하거나 재해석하지 않는다.
 
 서버는 번치→번들을 잠근 뒤 expectedRevision과 전체 입력을 검증한다. 불일치는
 409 `BUNDLE_003`, detail `{revision: 현재값, version: 현재값}`이다. 잘못된 입력은 400 `COMMON_001`,
@@ -48,6 +55,8 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 실제 변경에만 revision·updatedAt을 한 번 갱신하고 `EDITED` 전체 내용 이벤트를 커밋 후 보낸다.
 변경된 필드 버전만 증가한다. 동일한 정규화 결과는 revision·시각·이벤트를 변경하지 않는다.
 발행 시각·참여자 순서·코멘트·좋아요·소셜 댓글과 피드 순서를 보존하고 수정 알림은 보내지 않는다.
+보존한 `bundlePhotoId`는 기존 사진 row와 그 픽을 유지하며, 배열에서 빠진 사진은 사진 row와
+그 사진의 픽을 함께 cascade한다. 새 `photoId`로 만든 사진에는 픽을 만들지 않는다.
 장소 교체는 MANDATORY `BundleLocationService.replaceLocked`를 호출한다. 동기 출처 제거
 이벤트의 실제 핀 정리는 #92 소유이며 별도 임시 writer를 만들지 않는다. listener 실패도 전체 롤백한다.
 
@@ -58,15 +67,18 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 ## 상세·권한·집계
 
 내부 GET과 외부 `published-bundles` GET 모두 FeedAccessService의 최신 접근 판정을 적용한다.
-외부 상세는 사진·캡션 순서, `locations`, `revision`, `visibility`, `permissions`를 제공한다.
+외부 상세는 사진·기존 caption 필드·사진별 `picks` 순서, `locations`, `revision`, `visibility`,
+`permissions`를 제공한다. 새 상세 흐름은 caption을 표시하지 않아도 `picks`와 기존 데이터의
+보존 규칙을 바꾸지 않는다.
 내부·외부 상세는 참여자를 전원 제공하며 발행 당시 joinedAt/id 순서를 유지한다.
 참여자 코멘트 `comments`도 같은 참여자 순서다. 기존 필드 이름은 유지한다.
 
-참여자의 현재 계정과 번치 ACTIVE 소속이 모두 유효하면 닉네임·프로필 이미지와 코멘트를
+참여자의 현재 계정과 번치 ACTIVE 소속이 모두 유효하면 닉네임·프로필 이미지와 코멘트·픽 표시를
 보여준다. 나가기·내보내짐·탈퇴는 `nickname: "작성자"`, `imageUrl: null`,
-`profileAvailable: false`, `content: "삭제된 코멘트입니다"`로 응답하고 원문은 보존한다.
-같은 계정 재참여 시 기존 순서·코멘트를 복구한다. `profileAvailable: true`일 때
-`GET /api/v1/members/{memberId}/social-profile`(#94)로 이동한다.
+`profileAvailable: false`, `content: "삭제된 코멘트입니다"`로 응답하고 원문과 픽 row는 보존한다.
+같은 계정의 번치 재참여 시 기존 순서·코멘트를 복구한다. `profileAvailable: true`일 때
+`GET /api/v1/members/{memberId}/social-profile`(#94)로 이동한다. WITHDRAWN 계정이나 새
+계정은 같은 member ID가 아니므로 복구하지 않는다.
 
 `canEdit/canDelete`는 현재 OWNER만 true다. `canReport`는 현재 번치가 있고 OWNER 관리
 대상이 아닐 때 true, `canLike/canComment`는 현재 번치가 있을 때 true다. 화면 진입 시점의
@@ -77,7 +89,7 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 
 ## 삭제·검증
 
-OWNER 삭제 시 번들 하위 사진 연결·참여자 코멘트·반응·소셜 댓글은 FK CASCADE로 정리한다.
+OWNER 삭제 시 번들 하위 사진 연결·사진 픽·참여자 코멘트·반응·소셜 댓글은 FK CASCADE로 정리한다.
 사진함 원본은 보존한다. #92의 핀은 source FK SET NULL과 장소 스냅샷으로 보존한다.
 Stage는 삭제 후 발행본 수로 계산한다. 삭제 알림은 없다.
 실제 PostgreSQL·Redis로 동시 저장, 커밋 전/후 조회, 롤백, 권한·접근 재검사, 원본 보존,
