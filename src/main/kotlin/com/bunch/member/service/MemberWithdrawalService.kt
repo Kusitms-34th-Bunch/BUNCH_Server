@@ -59,7 +59,7 @@ class MemberWithdrawalService(
             .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
             .requireCompleted()
         val owned = memberships.findAllByMemberIdAndStatusOrderByBunchId(memberId)
-            .filter { it.role == MembershipRole.OWNER && memberships.countByBunchIdAndStatus(it.bunch.id) > 1 }
+            .filter { it.role == MembershipRole.OWNER && hasOtherMembers(it.bunch.id) }
         return WithdrawalCheckResponse(owned.map { it.toOwnerBunch() })
     }
 
@@ -77,7 +77,7 @@ class MemberWithdrawalService(
                 membershipId = membership.id,
                 role = membership.role,
                 membershipVersion = bunch.membershipVersion,
-                alone = memberships.countByBunchIdAndStatus(bunch.id) <= 1,
+                alone = !hasOtherMembers(bunch.id),
                 owner = membership.toOwnerBunch()
             )
         }
@@ -149,6 +149,10 @@ class MemberWithdrawalService(
             }
         })
     }
+
+    // A bunch with nobody else in it has nobody to hand over to, so the check skips it and the withdrawal deletes it.
+    private fun hasOtherMembers(bunchId: Long): Boolean =
+        memberships.countByBunchIdAndStatus(bunchId) > 1
 
     private fun BunchMembership.toOwnerBunch() = WithdrawalOwnerBunch(
         bunchId = bunch.id,
