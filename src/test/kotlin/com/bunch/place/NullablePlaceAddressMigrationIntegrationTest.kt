@@ -25,7 +25,7 @@ class NullablePlaceAddressMigrationIntegrationTest @Autowired constructor(privat
     private val jdbc = JdbcTemplate(dataSource)
 
     @Test
-    fun `nullable address migration preserves V32 rows and checks allows null independently and reruns safely`() {
+    fun `nullable address migration preserves existing rows and checks allows null independently and reruns safely`() {
         val schema = "nullable_place_" + UUID.randomUUID().toString().replace("-", "")
         val addressColumns = mapOf(
             "bundle_locations" to "address",
@@ -33,7 +33,7 @@ class NullablePlaceAddressMigrationIntegrationTest @Autowired constructor(privat
             "feed_advertisements" to "place_address"
         )
         try {
-            flyway(schema, "32").migrate()
+            flyway(schema, "35").migrate()
             val member = jdbc.queryForObject(
                 "INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id",
                 Long::class.java
@@ -74,7 +74,8 @@ class NullablePlaceAddressMigrationIntegrationTest @Autowired constructor(privat
             }
 
             val migration = flyway(schema, "2026111111260")
-            assertThat(migration.migrate().migrationsExecuted).isEqualTo(1)
+            assertThat(migration.migrate().migrationsExecuted).isPositive()
+            assertThat(migration.info().current().version.toString()).isEqualTo("2026111111260")
             previousRows.forEach { (table, rows) ->
                 assertThat(jdbc.queryForList("SELECT * FROM $schema.$table")).isEqualTo(rows)
             }
