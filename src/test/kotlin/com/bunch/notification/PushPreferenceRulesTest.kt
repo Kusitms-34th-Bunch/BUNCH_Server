@@ -26,8 +26,7 @@ class PushPreferenceRulesTest {
             NotificationType.MEMBER_JOINED,
             NotificationType.CO_OWNER_GRANTED,
             NotificationType.CO_OWNER_REVOKED,
-            NotificationType.OWNER_TRANSFERRED,
-            NotificationType.BUNCH_VISIBILITY_CHANGED
+            NotificationType.OWNER_TRANSFERRED
         )
         assertThat(PushCategory.FOLLOW.types).containsExactlyInAnyOrder(
             NotificationType.BUNCH_FOLLOWED,
@@ -40,7 +39,8 @@ class PushPreferenceRulesTest {
         )
         assertThat(PushCategory.ALWAYS).containsExactlyInAnyOrder(
             NotificationType.MEMBER_REMOVED,
-            NotificationType.BUNCH_DELETED
+            NotificationType.BUNCH_DELETED,
+            NotificationType.BUNCH_VISIBILITY_CHANGED
         )
     }
 
@@ -103,6 +103,14 @@ class PushPreferenceRulesTest {
         val settings = preference(categories = PushCategory.entries.associate { it.name to false })
 
         PushCategory.ALWAYS.forEach { assertThat(PushPreference.allows(settings, it)).isTrue() }
+    }
+
+    @Test
+    fun `the bunch visibility notice is sent even when the member and role toggle is off`() {
+        val settings = preference(categories = mapOf(PushCategory.MEMBER_ROLE.name to false))
+
+        assertThat(PushPreference.allows(settings, NotificationType.BUNCH_VISIBILITY_CHANGED)).isTrue()
+        assertThat(PushPreference.allows(settings, NotificationType.MEMBER_JOINED)).isFalse()
     }
 
     private fun preference(

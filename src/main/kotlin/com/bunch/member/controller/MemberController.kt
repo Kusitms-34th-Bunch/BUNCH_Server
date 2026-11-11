@@ -13,12 +13,10 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PutMapping
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
-import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/members")
@@ -39,11 +37,10 @@ class MemberController(
     fun updateProfile(
         @AuthenticationPrincipal memberId: String,
         authentication: Authentication,
-        @RequestHeader("Idempotency-Key") requestKey: UUID,
         @RequestPart("profile") request: MemberProfileRequest,
         @RequestPart("photo", required = false) photo: MultipartFile?
     ): ApiResponse<MemberResponse> {
-        profileEdits.update(memberId.toLong(), requestKey, request, photo)
+        profileEdits.update(memberId.toLong(), request, photo)
         return ApiResponse.ok(
             members.get(memberId.toLong(), (authentication.details as JwtSessionDetails).sessionId)
         )

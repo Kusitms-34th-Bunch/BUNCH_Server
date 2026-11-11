@@ -24,6 +24,7 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
+import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -56,130 +57,115 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
 
     @Test
     fun `edit returns the same member shape as the profile lookup`() {
-        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
+        val (member, access) = account()
         val nickname = "수정${UUID.randomUUID().toString().take(6)}"
         val uploaded = StoredImage("profiles/http-${UUID.randomUUID()}", "https://res.cloudinary.com/test/http.jpg")
             .also { publicIds += it.publicId }
         val photo = MockMultipartFile("photo", "p.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
         `when`(images.upload(photo)).thenReturn(uploaded)
 
-        put(access, UUID.randomUUID().toString(), body(nickname, 1999, "FEMALE", "REPLACE"), photo)
+        put(access, body(nickname, "REPLACE"), photo)
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.memberId").value(member.id))
             .andExpect(jsonPath("$.data.nickname").value(nickname))
-            .andExpect(jsonPath("$.data.birthYear").value(1999))
-            .andExpect(jsonPath("$.data.gender").value("FEMALE"))
             .andExpect(jsonPath("$.data.imageUrl").value(uploaded.url))
             .andExpect(jsonPath("$.error").isEmpty)
         assertThat(assets.findAll().map { it.publicId }).contains(uploaded.publicId)
     }
 
     @Test
-    fun `null birth year and gender are cleared`() {
-        val (_, access) = account(birthYear = 1990, gender = Gender.MALE)
+    fun `birth year and gender are ignored in the request and not returned`() {
+        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
 
-        put(access, UUID.randomUUID().toString(), """{"nickname":"비움${hex()}","imageAction":"KEEP"}""")
+        put(access, """{"nickname":"무시${hex()}","birthYear":2000,"gender":"FEMALE","imageAction":"KEEP"}""")
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.birthYear").isEmpty)
-            .andExpect(jsonPath("$.data.gender").isEmpty)
+            .andExpect(jsonPath("$.data.birthYear").doesNotExist())
+            .andExpect(jsonPath("$.data.gender").doesNotExist())
+        val saved = members.findById(member.id).get()
+        assertThat(saved.birthYear).isEqualTo(1990)
+        assertThat(saved.gender).isEqualTo(Gender.MALE)
     }
 
     @Test
     fun `request without a token is unauthorized`() {
-        mvc.perform(
-            multipart(HttpMethod.PUT, "/api/v1/members/me/profile")
-                .file(profilePart(body("무토큰${hex()}", null, null, "KEEP")))
-                .header("Idempotency-Key", UUID.randomUUID().toString())
-        )
+        mvc.perform(profileRequest(body("무토큰${hex()}", "KEEP")))
             .andExpect(status().isUnauthorized)
             .andExpect(jsonPath("$.error.code").value("AUTH_001"))
     }
 
     @Test
-    fun `missing key or profile part and a bad key are invalid input`() {
+    fun `a missing profile part is invalid input`() {
         val (_, access) = account()
 
-        mvc.perform(
-            multipart(HttpMethod.PUT, "/api/v1/members/me/profile")
-                .file(profilePart(body("키없음${hex()}", null, null, "KEEP")))
-                .header("Authorization", "Bearer $access")
-        )
+        put(access, null)
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value("COMMON_001"))
+    }
+
+    @Test
+    fun `a request key from an older app is ignored and the edit is applied`() {
+        val (_, access) = account()
+        val nickname = "키무시${hex()}"
 
         mvc.perform(
-            multipart(HttpMethod.PUT, "/api/v1/members/me/profile")
+            profileRequest(body(nickname, "KEEP"))
                 .header("Authorization", "Bearer $access")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
         )
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.error.code").value("COMMON_001"))
-
-        put(access, "not-a-uuid", body("키오류${hex()}", null, null, "KEEP"))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.error.code").value("COMMON_001"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.nickname").value(nickname))
     }
 
     @Test
     fun `malformed profile json and an unknown image action are rejected`() {
         val (_, access) = account()
 
-        put(access, UUID.randomUUID().toString(), "{")
+        put(access, "{")
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value("COMMON_002"))
-        put(access, UUID.randomUUID().toString(), body("액션${hex()}", null, null, "DELETE"))
+        put(access, body("액션${hex()}", "DELETE"))
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value("COMMON_002"))
     }
 
     @Test
-    fun `duplicate nickname is a conflict and a stale key with other content conflicts`() {
+    fun `duplicate nickname is a conflict`() {
         val (other, _) = account()
         val (_, access) = account()
 
-        put(access, UUID.randomUUID().toString(), body(other.nickname!!, null, null, "KEEP"))
+        put(access, body(other.nickname!!, "KEEP"))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.error.code").value("USER_002"))
-
-        val key = UUID.randomUUID().toString()
-        put(access, key, body("첫번째${hex()}", null, null, "KEEP")).andExpect(status().isOk)
-        put(access, key, body("두번째${hex()}", null, null, "KEEP"))
-            .andExpect(status().isConflict)
-            .andExpect(jsonPath("$.error.code").value("REQUEST_001"))
     }
 
     @Test
     fun `unfinished signup is forbidden`() {
         val (_, access) = account(signup = SignupStatus.IN_PROGRESS)
 
-        put(access, UUID.randomUUID().toString(), body("미완료${hex()}", null, null, "KEEP"))
+        put(access, body("미완료${hex()}", "KEEP"))
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.error.code").value("AUTH_015"))
     }
 
     private fun put(
         access: String,
-        key: String,
-        profile: String,
+        profile: String?,
         photo: MockMultipartFile? = null
-    ): ResultActions {
+    ): ResultActions = mvc.perform(profileRequest(profile, photo).header("Authorization", "Bearer $access"))
+
+    // A null profile leaves the profile part out of the request.
+    private fun profileRequest(
+        profile: String?,
+        photo: MockMultipartFile? = null
+    ): MockMultipartHttpServletRequestBuilder {
         val request = multipart(HttpMethod.PUT, "/api/v1/members/me/profile")
-            .file(profilePart(profile))
+        profile?.let { request.file(MockMultipartFile("profile", "", "application/json", it.toByteArray())) }
         photo?.let { request.file(it) }
-        return mvc.perform(
-            request
-                .header("Authorization", "Bearer $access")
-                .header("Idempotency-Key", key)
-        )
+        return request
     }
 
-    private fun profilePart(json: String) =
-        MockMultipartFile("profile", "", "application/json", json.toByteArray())
-
-    private fun body(nickname: String, birthYear: Int?, gender: String?, action: String): String =
-        """{"nickname":"$nickname","birthYear":${birthYear ?: "null"},""" +
-            """"gender":${gender?.let { "\"$it\"" } ?: "null"},"imageAction":"$action"}"""
+    private fun body(nickname: String, action: String): String = """{"nickname":"$nickname","imageAction":"$action"}"""
 
     private fun account(
         birthYear: Int? = null,

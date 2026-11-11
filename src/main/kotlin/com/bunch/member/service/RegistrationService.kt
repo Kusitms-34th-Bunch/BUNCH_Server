@@ -102,7 +102,12 @@ class RegistrationService(
                 member.completedAt = Instant.now()
                 member.registrationFingerprint = fingerprint
 
-                if (request.demographicsConsentVersion != null) {
+                if (
+                    request.demographicsConsentVersion != null &&
+                        consents.findAllByMemberId(memberId).none {
+                            it.type == TermType.DEMOGRAPHICS && it.version == request.demographicsConsentVersion
+                        }
+                ) {
                     consents.save(
                         MemberConsent(
                             memberId = memberId,
