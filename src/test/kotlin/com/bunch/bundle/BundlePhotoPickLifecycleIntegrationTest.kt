@@ -178,8 +178,9 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
     fun `cached first pick versions are independent of other photos members and draft edits`() {
         val owner = member()
         val guest = member()
-        val bunchId = bunchWithMembers(owner, guest)
-        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, owner), photo(bunchId, owner)))
+        val selected = member()
+        val bunchId = bunchWithMembers(owner, guest, selected)
+        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, owner), photo(bunchId, owner)), listOf(selected))
         val added = bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "initial-pick-guest")
         val ownerBefore = bundleService.get(owner, bunchId, draft.id)
         val guestBefore = bundleService.get(guest, bunchId, draft.id)
