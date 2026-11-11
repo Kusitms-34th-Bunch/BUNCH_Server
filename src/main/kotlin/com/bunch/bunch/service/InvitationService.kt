@@ -151,7 +151,8 @@ class InvitationService(
             bunch.introduction,
             bunch.imageUrl,
             memberships.inviterNickname(invitation.issuerMemberId, invitation.bunchId),
-            invitation.code
+            invitation.code,
+            bunch.characterType
         )
     }
 
