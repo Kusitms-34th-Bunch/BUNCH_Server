@@ -7,6 +7,7 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.kok.service.KokService
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -48,6 +49,9 @@ class AdvertisementIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var pins: KokService
+
+    @Autowired
+    private lateinit var mapper: ObjectMapper
 
     private val ownSessions = mutableListOf<Pair<String, Long>>()
 
@@ -362,6 +366,48 @@ class AdvertisementIntegrationTest : BunchIntegrationSupport() {
         advertisements.hide(actor, ad)
         mvc.perform(put("$path/pin").header("Authorization", bearer)).andExpect(status().isNotFound)
         mvc.perform(get(path).header("Authorization", bearer)).andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `actual advertisement without address keeps region name and explicit null through reads and pinning`() {
+        val actor = member()
+        create(actor)
+        val ad = advertisement()
+        jdbc.update("UPDATE feed_advertisements SET place_name = '여의도', place_address = NULL WHERE id = ?", ad)
+        val stored = rows.findById(ad).orElseThrow().place()
+        assertThat(stored.name).isEqualTo("여의도")
+        assertThat(stored.address).isNull()
+        val card = advertisements.selectForFeed(actor, 6, listOf(6), null).placements.single().advertisement
+        assertThat(card.place.name).isEqualTo("여의도")
+        assertThat(card.place.address).isNull()
+
+        val path = "/api/v1/feed/advertisements/$ad"
+        val bearer = bearer(actor)
+        val readResult = mvc.perform(get(path).header("Authorization", bearer))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.place.name").value("여의도"))
+            .andReturn()
+        val placeJson = mapper.readTree(readResult.response.contentAsString).path("data").path("place")
+        assertThat(placeJson.has("address")).isTrue()
+        assertThat(placeJson.path("address").isNull).isTrue()
+
+        val pinResult = mvc.perform(put("$path/pin").header("Authorization", bearer))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.name").value("여의도"))
+            .andExpect(jsonPath("$.data.sourceAdvertisementId").value(ad))
+            .andReturn()
+        val pinJson = mapper.readTree(pinResult.response.contentAsString).path("data")
+        assertThat(pinJson.has("address")).isTrue()
+        assertThat(pinJson.path("address").isNull).isTrue()
+        val pinId = pinJson.path("id").asLong()
+        assertThat(jdbc.queryForMap("SELECT name, address FROM pinned_places WHERE id = ?", pinId))
+            .containsEntry("name", "여의도")
+            .containsEntry("address", null)
+        val pinnedCard = advertisements.read(actor, ad)
+        assertThat(pinnedCard.place.name).isEqualTo("여의도")
+        assertThat(pinnedCard.place.address).isNull()
+        assertThat(pinnedCard.pinned).isTrue()
+        assertThat(pinnedCard.pinId).isEqualTo(pinId)
     }
 
     private fun bearer(memberId: Long): String {

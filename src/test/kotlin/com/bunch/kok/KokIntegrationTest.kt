@@ -150,6 +150,78 @@ class KokIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `selected place fields survive normalized bundle storage and pin display without provider lookup`() {
+        val f = fixture()
+        val input = BundleLocationInput(
+            provider = " KAKAO ",
+            externalId = " Selected-ID ",
+            name = " 여의도 ",
+            address = " 서울특별시 영등포구 여의도동 ",
+            position = 0
+        )
+        replace(f, listOf(input))
+        val stored = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(stored.provider).isEqualTo("kakao")
+        assertThat(stored.externalId).isEqualTo("Selected-ID")
+        assertThat(stored.name).isEqualTo("여의도")
+        assertThat(stored.address).isEqualTo("서울특별시 영등포구 여의도동")
+        assertThat(stored.pinned).isFalse()
+
+        val pinned = pins.pinBundleLocation(f.actor, f.bundle, stored.id)
+        assertThat(pinned.provider).isEqualTo(stored.provider)
+        assertThat(pinned.externalId).isEqualTo(stored.externalId)
+        assertThat(pinned.name).isEqualTo(stored.name)
+        assertThat(pinned.address).isEqualTo(stored.address)
+        assertThat(pinned.sourceLocationId).isEqualTo(stored.id)
+        val displayed = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(displayed.pinned).isTrue()
+        assertThat(displayed.pinId).isEqualTo(pinned.id)
+        assertThat(displayed.address).isEqualTo(stored.address)
+    }
+
+    @Test
+    fun `selected region without address survives actual replacement pinning and source bundle deletion`() {
+        val f = fixture()
+        val input = BundleLocationInput(
+            provider = " KAKAO ",
+            externalId = " Region-ID ",
+            name = " 여의도 ",
+            address = null,
+            position = 0
+        )
+        replace(f, listOf(input))
+        val stored = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(stored.provider).isEqualTo("kakao")
+        assertThat(stored.externalId).isEqualTo("Region-ID")
+        assertThat(stored.name).isEqualTo("여의도")
+        assertThat(stored.address).isNull()
+        assertThat(jdbc.queryForMap("SELECT name, address FROM bundle_locations WHERE id = ?", stored.id))
+            .containsEntry("name", "여의도")
+            .containsEntry("address", null)
+
+        val pinned = pins.pinBundleLocation(f.actor, f.bundle, stored.id)
+        assertThat(pinned.name).isEqualTo("여의도")
+        assertThat(pinned.address).isNull()
+        assertThat(pinned.sourceLocationId).isEqualTo(stored.id)
+        val displayed = pins.forBundle(f.actor, f.bundle).locations.single()
+        assertThat(displayed.pinId).isEqualTo(pinned.id)
+        assertThat(displayed.pinned).isTrue()
+        assertThat(displayed.name).isEqualTo("여의도")
+        assertThat(displayed.address).isNull()
+
+        bundleService.delete(BundleActor(f.owner, "test-session"), f.sourceBunch, f.bundle, UUID.randomUUID().toString())
+        val snapshot = pinRows.findById(pinned.id).orElseThrow()
+        assertThat(snapshot.sourceBundleId).isNull()
+        assertThat(snapshot.sourceLocationId).isNull()
+        assertThat(snapshot.name).isEqualTo("여의도")
+        assertThat(snapshot.address).isNull()
+        assertThat(snapshot.pinnedAt).isEqualTo(pinned.pinnedAt)
+        assertThat(jdbc.queryForMap("SELECT name, address FROM pinned_places WHERE id = ?", pinned.id))
+            .containsEntry("name", "여의도")
+            .containsEntry("address", null)
+    }
+
+    @Test
     fun `provider separates otherwise identical external ids and batch matches exact keys`() {
         val f = fixture()
         val first = pins.pinBundleLocation(f.actor, f.bundle, f.location)
