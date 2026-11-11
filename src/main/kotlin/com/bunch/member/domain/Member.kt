@@ -5,7 +5,6 @@ import com.bunch.image.domain.ImageAsset
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import java.time.Instant
-import java.util.UUID
 
 @Entity
 @Table(name = "members")
@@ -42,12 +41,7 @@ class Member(
     var completedAt: Instant? = null,
 
     @Column(length = 64)
-    var registrationFingerprint: String? = null,
-
-    var profileRequestKey: UUID? = null,
-
-    @Column(length = 64)
-    var profileRequestFingerprint: String? = null
+    var registrationFingerprint: String? = null
 ) {
     val imagePublicId: String?
         get() = profileImageAsset?.publicId
