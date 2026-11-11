@@ -290,8 +290,8 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         val participant = member()
         val remaining = member()
         val bunchId = bunchWithMembers(owner, participant, remaining)
-        val firstDraft = createDraft(owner, bunchId, listOf(photo(bunchId, owner)))
-        val secondDraft = createDraft(owner, bunchId, listOf(photo(bunchId, owner)))
+        val firstDraft = createDraft(owner, bunchId, listOf(photo(bunchId, owner)), listOf(participant))
+        val secondDraft = createDraft(owner, bunchId, listOf(photo(bunchId, owner)), listOf(participant))
         listOf(firstDraft, secondDraft).forEachIndexed { index, draft ->
             bundleService.addParticipant(actor(owner), bunchId, draft.id, participant, "exit-add-$index")
             val row = bundlePhotos.findAllByBundleIdOrderByPositionAscIdAsc(draft.id).single()
@@ -647,7 +647,7 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         sources: List<Photo>,
         selectedMembers: List<Long> = uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(sources.map { it.id })
             .map { it.member.id }.distinct().filter { it != owner }.ifEmpty {
-                listOf(memberships.findAllByBunchIdAndStatus(bunchId).first { it.member.id != owner }.member.id)
+                listOf(memberships.findAllByBunchIdAndStatus(bunchId).filter { it.member.id != owner }.minBy { it.id }.member.id)
             }
     ): BundleSnapshot =
         bundleService.create(
