@@ -1,5 +1,6 @@
 package com.bunch.global.redis
 
+import org.springframework.data.redis.core.ScanOptions
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.stereotype.Repository
@@ -34,6 +35,17 @@ class RefreshTokenRedisRepository(
     override fun delete(sessionId: String, userId: Long): Boolean =
         redis.execute(DELETE, listOf(key(sessionId)), "$userId:") == 1L
 
+    // Sessions are stored by session ID only, so the keys are scanned. A withdrawal is rare and the scan never blocks.
+    override fun deleteAll(userId: Long): Int {
+        var deleted = 0
+        redis.scan(ScanOptions.scanOptions().match("$KEY_PREFIX*").count(SCAN_COUNT).build()).use { keys ->
+            keys.forEach { key ->
+                if (redis.execute(DELETE, listOf(key), "$userId:") == 1L) deleted++
+            }
+        }
+        return deleted
+    }
+
     override fun compareAndRotate(
         sessionId: String,
         userId: Long,
@@ -48,7 +60,7 @@ class RefreshTokenRedisRepository(
         expiresInSeconds.toString()
     ) == 1L
 
-    private fun key(sessionId: String) = "session:$sessionId"
+    private fun key(sessionId: String) = "$KEY_PREFIX$sessionId"
 
     private fun value(userId: Long, refreshToken: String): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(refreshToken.toByteArray(Charsets.UTF_8))
@@ -57,6 +69,8 @@ class RefreshTokenRedisRepository(
     }
 
     companion object {
+        private const val KEY_PREFIX = "session:"
+        private const val SCAN_COUNT = 500L
         private val ROTATE = DefaultRedisScript("""
             if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
             redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])

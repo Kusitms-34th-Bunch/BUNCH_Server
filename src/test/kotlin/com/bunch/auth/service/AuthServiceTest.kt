@@ -148,6 +148,11 @@ class AuthServiceTest {
             values.remove(sessionId)
             return true
         }
+        override fun deleteAll(userId: Long): Int {
+            val sessionIds = values.filterValues { it.first == userId }.keys
+            sessionIds.forEach(values::remove)
+            return sessionIds.size
+        }
         override fun compareAndRotate(sessionId: String, userId: Long, expectedToken: String, newToken: String, expiresInSeconds: Long): Boolean {
             beforeRotate?.invoke()
             if (values[sessionId] != (userId to expectedToken)) return false

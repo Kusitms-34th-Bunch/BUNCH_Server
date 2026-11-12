@@ -22,6 +22,7 @@ import jakarta.persistence.EntityManager
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.security.MessageDigest
 import java.time.Clock
@@ -122,6 +123,12 @@ class SocialCommentService(
             row.deletedAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
         }
         return items(userId, interaction.actor.bunch.id, listOf(row)).single()
+    }
+
+    // Called when the account is withdrawn: every comment and reply reads as a deleted one (6.2.7 rule 6).
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun deleteAllOf(memberId: Long) {
+        comments.deleteAllByAuthor(memberId, clock.instant().truncatedTo(ChronoUnit.MICROS))
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
