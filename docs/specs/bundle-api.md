@@ -422,7 +422,7 @@ WITHDRAWN 계정이나 새 계정은 복구하지 않는다.
 `ON DELETE CASCADE`를 적용한다. 참여자가 아닌 조회자는 초기 version 0을 받으며 쓰기는 거부된다.
 발행 후 내용·공개 범위 변경이나 원본 사진 삭제로 빈 픽의 version도 바뀌지 않는다.
 
-`V2026111111281__bundle_pick_initial_versions.sql`은 참여자에 non-null·0 이상인 초기 버전
+`V39__bundle_pick_initial_versions.sql`은 참여자에 non-null·0 이상인 초기 버전
 컬럼을 추가한다. 기존 픽 row·버전·캡션은 변경하지 않는다. 전환 전 row 없는 픽의 버전을
 캐시한 클라이언트는 한 번 상세를 새로 읽어 고정 초기값으로 전환한다.
 

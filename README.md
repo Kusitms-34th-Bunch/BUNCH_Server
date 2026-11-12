@@ -201,8 +201,8 @@ private lease token은 획득한 연결에만 전달한다. 내용 변경은 RES
 발행본의 `photos[].picks`는 상세 응답에서만 제공하며, 피드 카드에는 추가하지 않는다.
 Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
 `bundle_edit_leases.screen_id`를 삭제한다.
-사진 픽 저장은 별도 `V2026111111280__bundle_photo_picks.sql` 마이그레이션으로 관리하며,
-참여자의 고정 초기 픽 버전은 `V2026111111281__bundle_pick_initial_versions.sql`로 추가한다.
+사진 픽 저장은 별도 `V38__bundle_photo_picks.sql` 마이그레이션으로 관리하며,
+참여자의 고정 초기 픽 버전은 `V39__bundle_pick_initial_versions.sql`로 추가한다.
 적용된 마이그레이션 파일은 수정하거나 기존 번호를 재사용하지 않는다.
 사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
 테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
