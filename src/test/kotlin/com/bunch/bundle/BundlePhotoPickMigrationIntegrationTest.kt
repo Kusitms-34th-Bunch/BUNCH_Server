@@ -29,7 +29,7 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
     fun `migration preserves captions and constrains pick ownership with cascade cleanup and repeatable validation`() {
         val schema = "bundle_pick_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            val version = "2026111111280"
+            val version = "38"
             configure(schema, "32").migrate()
             val member = id("INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id")
             val other = id("INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id")
@@ -78,7 +78,7 @@ class BundlePhotoPickMigrationIntegrationTest @Autowired constructor(private val
             assertThatThrownBy { insert(second, other) }.isInstanceOf(DataIntegrityViolationException::class.java)
             assertThatThrownBy { insert(first, member, -1) }.isInstanceOf(DataIntegrityViolationException::class.java)
             insert(first, member)
-            val initialVersion = "2026111111281"
+            val initialVersion = "39"
             val initialVersions = configure(schema, initialVersion)
             initialVersions.migrate()
             assertThat(initialVersions.info().current()?.version)
