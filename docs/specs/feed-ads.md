@@ -80,7 +80,10 @@ WHERE id = :advertisement_id;
 ```
 
 provider는 trim/lowercase ASCII 1..32, 외부 ID는 trim 1..128 code point,
-이름은 trim 1..200 grapheme, 주소는 trim 1..500 grapheme이다.
+이름은 trim 1..200 grapheme, 주소는 null 또는 trim 후 비어 있지 않은 1..500 grapheme이다.
+주소 없는 지역은 place.address=null로 조회·콕 스냅샷에 보존하며 앱은 주소 복사 시 장소명을 쓴다.
+검색은 프론트가 담당한다. [#126 입력 계약](place-search.md)에 따라
+V36에서 place_address의 NOT NULL만 제거하고 빈 주소 금지 CHECK는 유지한다.
 사진과 선택적 외부 링크는 http(s) 절대 URL이다. 태그는 JSON 문자열 배열이다.
 운영 SQL 입력도 공용 길이 정책을 지킨다. DB는 기본 형식·빈 값·참조를 제약한다.
 

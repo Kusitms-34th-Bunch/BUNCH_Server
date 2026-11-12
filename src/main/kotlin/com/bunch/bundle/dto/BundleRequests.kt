@@ -37,7 +37,9 @@ data class BundleLocationInput(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+
+    @param:JsonProperty(value = "address", required = true)
+    val address: String?,
 
     @param:JsonProperty(value = "position", required = true)
     @param:JsonSetter(nulls = Nulls.FAIL)

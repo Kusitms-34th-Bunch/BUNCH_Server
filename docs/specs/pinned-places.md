@@ -2,7 +2,8 @@
 
 #92, FEED-10, 승인한 6.3.1 및 연계 8.1.3을 구현한다.
 [피드 접근](feed-api.md)과 [번들 장소](bundle-locations.md) 계약을 따른다.
-전체 8장 화면·목록·필터·검색 공급자는 후속이다.
+전체 8장 화면·목록·필터는 #125, 검색 공급자와 주소 없는 지역의 계약 정렬은
+[#126 장소 검색 계약](place-search.md)에서 추적한다.
 8.1.8의 되돌리기는 2026-11-08 승인으로 앱의 삭제 요청 지연 방식으로 처리한다.
 
 ## API
@@ -21,6 +22,10 @@
 - `DELETE /api/v1/pinned-places/{pinId}`: 현재 번치의 핀을 취소하고 data=null 반환.
   다른 멤버가 등록한 핀도 취소할 수 있다. 이미 없거나 다른 번치 소유 ID도 멱등 200이다.
   원본 번들 접근이 사라져도 저장된 핀의 취소는 가능하다.
+
+8.1.7의 주소 복사는 앱이 응답의 전체 주소를 클립보드에 넣는 동작이며 서버 요청이 없다.
+주소 없는 지역은 `address: null`로 저장·응답하고 앱은 장소명을 복사한다.
+장소명으로 저장된 주소를 채우지 않는다. 번들·광고의 동일 nullable 계약은 #126을 따른다.
 
 핀 응답: `{id, bunchId, provider, externalId, name, address, sourceType,
 sourceBundleId, sourceLocationId, sourceAdvertisementId, pinnedByMemberId, pinnedAt}`.
