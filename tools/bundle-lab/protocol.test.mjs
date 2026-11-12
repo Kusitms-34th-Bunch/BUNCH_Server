@@ -41,12 +41,6 @@ test('lease and activity events are never deduplicated by content revision', () 
   }
 });
 
-test('caption addresses BundlePhoto ID, not original Photo ID', () => {
-  const photo = {id:901, photoId:101, caption:'캡션', captionVersion:2};
-  const result = applyContent(snapshot, {type:'CAPTION', revision:9, data:photo});
-  assert.deepEqual(result.snapshot.photos, [photo]);
-});
-
 test('logs redact nested tokens and literal secrets, distinguish failures', () => {
   const result = redact({data:{token:'lease-secret', target:'TITLE'}, detail:'secret in error: local-secret',
     Authorization:'Bearer credential', leaseToken:'lease-secret'}, ['local-secret']);

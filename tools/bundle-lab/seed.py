@@ -218,11 +218,10 @@ INSERT INTO bundles (
 ) RETURNING id \gset bundle_
 
 INSERT INTO bundle_photos (
-    bundle_id, photo_id, image_asset_id, position, added_by, added_at,
-    caption, caption_version
+    bundle_id, photo_id, image_asset_id, position, added_by, added_at
 )
-SELECT :'bundle_id', p.id, :'asset_id', (p.id - 101), :'member_a_id', CURRENT_TIMESTAMP,
-    '', 4 FROM photos p WHERE p.id <= 106 ORDER BY p.id;
+SELECT :'bundle_id', p.id, :'asset_id', (p.id - 101), :'member_a_id', CURRENT_TIMESTAMP
+FROM photos p WHERE p.id <= 106 ORDER BY p.id;
 
 INSERT INTO bundle_participants (bundle_id, member_id, joined_at)
 VALUES

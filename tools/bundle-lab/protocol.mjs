@@ -45,7 +45,7 @@ export class Frames {
 }
 
 export const contentTypes = new Set([
-  'CREATED', 'TITLE', 'VISIBILITY', 'DATE', 'COMMENT', 'CAPTION', 'PARTICIPANTS', 'PHOTOS', 'PUBLISHED', 'DELETED', 'LOCATION', 'EDITED'
+  'CREATED', 'TITLE', 'VISIBILITY', 'DATE', 'COMMENT', 'PARTICIPANTS', 'PHOTOS', 'PUBLISHED', 'DELETED', 'LOCATION', 'EDITED'
 ]);
 
 export function applyContent(snapshot, event) {
@@ -62,7 +62,6 @@ export function applyContent(snapshot, event) {
     case 'LOCATION': next.locations = data.locations; next.locationVersion = data.version; break;
     case 'VISIBILITY': next.visibility = data.value; next.visibilityVersion = data.version; break;
     case 'COMMENT': next.comments = [...next.comments.filter(c => c.memberId !== data.memberId), data]; break;
-    case 'CAPTION': next.photos = next.photos.map(p => p.id === data.id ? data : p); break;
     case 'PHOTOS': next.photos = data.photos; next.dateChips = data.dateChips; break;
     // Permissions and publish blockers are requester dependent: obtain a fresh snapshot.
     case 'CREATED': case 'PARTICIPANTS': case 'PUBLISHED': case 'EDITED': return {action:'recover', snapshot};
