@@ -126,16 +126,25 @@ class PhotoService(
      * per member and per bunch, so the bunch lock alone serializes the uploads it protects. The batch limit is
      * counted per member and per batch across bunches, so it needs its own lock: two bunches never share a bunch
      * lock.
+     *
+     * A photo is the same as one of the bunch when the app sent the same original file hash, or, without that hash,
+     * when the shrunk file is the same (photo box 3.2.2 rule 5).
      */
     fun upload(command: PhotoUploadCommand, image: PhotoImage): PhotoUploadResult {
         // Photo rejects a time without a date, which would otherwise surface as a server error.
         if (command.capturedTime != null && command.capturedDate == null) fail(ErrorCode.INVALID_INPUT)
+        if (command.originalFileHash != null && !Photo.isSha256Hex(command.originalFileHash)) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
         val hash = sha256Hex(image.bytes)
+        // Decoding the image takes a while, so it is read outside the transactions that hold the locks: before the
+        // first one only when an original hash is to be checked against a stored photo, otherwise after it.
+        val checked = if (command.originalFileHash != null) ImageFingerprint.of(image.bytes) else null
 
-        val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash) }
+        val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash, checked) }
         if (shared != null) return shared
 
-        val fingerprint = ImageFingerprint.of(image.bytes)
+        val fingerprint = checked ?: ImageFingerprint.of(image.bytes)
         val file = storage.upload(image)
         val result = try {
             transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint) }!!
@@ -148,9 +157,9 @@ class PhotoService(
         return result
     }
 
-    private fun beforeUpload(command: PhotoUploadCommand, hash: String): PhotoUploadResult? {
+    private fun beforeUpload(command: PhotoUploadCommand, hash: String, fingerprint: Long?): PhotoUploadResult? {
         val locked = lockForUpload(command)
-        photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
+        findSamePhoto(command, hash, fingerprint).photo?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
         return null
     }
@@ -162,7 +171,8 @@ class PhotoService(
         fingerprint: Long?
     ): PhotoUploadResult {
         val locked = lockForUpload(command)
-        photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
+        val same = findSamePhoto(command, hash, fingerprint)
+        same.photo?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
 
         val photo = photos.save(
@@ -173,7 +183,9 @@ class PhotoService(
                 processingStatus = ProcessingStatus.READY,
                 capturedDate = command.capturedDate,
                 capturedTime = command.capturedTime,
-                dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF
+                dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF,
+                // A bunch keeps one photo per original hash, so a hash another photo already owns is not stored again.
+                originalFileHash = command.originalFileHash.takeUnless { same.originalHashTaken }
             )
         )
         fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
@@ -181,6 +193,42 @@ class PhotoService(
         locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))
         return PhotoUploadResult(photo.id, PhotoUploadKind.STORED)
+    }
+
+    /**
+     * The photo of the bunch this upload is the same as, if there is one. The original hash comes first, because the
+     * shrunk file of one original differs from device to device. It is the app's word and cannot be checked here, so
+     * it only counts when the pictures also look alike. Everything else is told apart by the shrunk file.
+     */
+    private fun findSamePhoto(command: PhotoUploadCommand, hash: String, fingerprint: Long?): SamePhoto {
+        val original = command.originalFileHash?.let { photos.findByBunchIdAndOriginalFileHash(command.bunchId, it) }
+        if (original != null && looksAlike(command.bunchId, original, fingerprint)) return SamePhoto(original, true)
+        return SamePhoto(photos.findByBunchIdAndFileHash(command.bunchId, hash), original != null)
+    }
+
+    // A wrong original hash must not join pictures that are plainly different. A photo without a stored fingerprint
+    // cannot be compared and is trusted.
+    private fun looksAlike(bunchId: Long, existing: Photo, incoming: Long?): Boolean {
+        val stored = fingerprints.findById(existing.id).orElse(null)?.fingerprint
+        if (stored == null || incoming == null) return true
+        val difference = java.lang.Long.bitCount(stored xor incoming)
+        if (difference <= PhotoUploadLimits.MAX_ORIGINAL_HASH_FINGERPRINT_DIFFERENCE) {
+            logger.debug(
+                "Original hash match accepted: bunchId={} photoId={} difference={}",
+                bunchId,
+                existing.id,
+                difference
+            )
+            return true
+        }
+        logger.warn(
+            "Original hash match rejected, the images differ: bunchId={} photoId={} difference={} limit={}",
+            bunchId,
+            existing.id,
+            difference,
+            PhotoUploadLimits.MAX_ORIGINAL_HASH_FINGERPRINT_DIFFERENCE
+        )
+        return false
     }
 
     // The existing photo is never changed; only the uploader list grows.
@@ -600,6 +648,9 @@ class PhotoService(
     private fun fail(errorCode: ErrorCode): Nothing = throw BusinessException(errorCode)
 
     private class UploadLocks(val member: Member, val bunch: Bunch, val membership: BunchMembership)
+
+    // The photo an upload is the same as, and whether the bunch already has a photo with the upload's original hash.
+    private class SamePhoto(val photo: Photo?, val originalHashTaken: Boolean)
 
     companion object {
         const val DEFAULT_SIZE = 60

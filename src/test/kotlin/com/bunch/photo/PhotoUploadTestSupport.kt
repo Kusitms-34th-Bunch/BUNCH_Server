@@ -60,8 +60,9 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         memberId: Long,
         batchId: UUID = UUID.randomUUID(),
         capturedDate: LocalDate? = null,
-        capturedTime: LocalTime? = null
-    ) = PhotoUploadCommand(bunchId, memberId, batchId, capturedDate, capturedTime)
+        capturedTime: LocalTime? = null,
+        originalFileHash: String? = null
+    ) = PhotoUploadCommand(bunchId, memberId, batchId, capturedDate, capturedTime, originalFileHash)
 
     protected fun image(seed: String) = PhotoImage(seed.toByteArray(), 1200, 800)
 

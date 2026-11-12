@@ -15,8 +15,10 @@ data class PhotoUploadRequest(
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
     val capturedDate: LocalDate? = null,
     @DateTimeFormat(iso = DateTimeFormat.ISO.TIME)
-    val capturedTime: LocalTime? = null
+    val capturedTime: LocalTime? = null,
+    // The SHA-256 of the original file in lowercase hexadecimal, computed by the app before it shrinks the photo.
+    val originalFileHash: String? = null
 ) {
     fun toCommand(bunchId: Long, memberId: Long) =
-        PhotoUploadCommand(bunchId, memberId, uploadBatchId, capturedDate, capturedTime)
+        PhotoUploadCommand(bunchId, memberId, uploadBatchId, capturedDate, capturedTime, originalFileHash)
 }
