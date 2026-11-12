@@ -116,6 +116,12 @@ async page => {
     await addLocation(a, 'A 테스트 장소');
     await addLocation(b, 'B 테스트 장소');
     const firstLocation = (await snapshot(a)).locations.find(p => p.name === 'A 테스트 장소');
+    const secondLocation = (await snapshot(a)).locations.find(p => p.name === 'B 테스트 장소');
+    await a.locator(`[data-edit-location="${firstLocation.id}"]`).click();
+    await wait(async () => await b.locator(`[data-edit-target="LOCATION:${firstLocation.id}"]`).getAttribute('data-active') === 'true', 'editing appears on selected location row');
+    if (await b.locator(`[data-edit-target="LOCATION:${secondLocation.id}"]`).getAttribute('data-active') === 'true') throw new Error('Location editing leaked into another row');
+    await click(a, 'refresh');
+    await wait(async () => await b.locator(`[data-edit-target="LOCATION:${firstLocation.id}"]`).getAttribute('data-active') === 'false', 'location row clears on blur');
     await a.locator('.location-intent').selectOption('REMOVE');
     await a.locator('.location-target').selectOption(String(firstLocation.id));
     await click(a, 'location');

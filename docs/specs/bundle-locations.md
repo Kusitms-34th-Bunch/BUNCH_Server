@@ -3,6 +3,8 @@
 이슈 #27, DRAFT-17·BUNDLE-04·FEED-10. 2026-11-07 승인한 피드 원문
 6.2.3·6.2.12·6.3.1과 보완 결정을 따른다. 기존 장소 1개·검색 공급자 선행 계약을 대체한다.
 #107은 장소 ID 의도 처리와 사용자 lease 없는 저장을 추가한다. 아래 계약이 이전 lease 설명보다 우선한다.
+2026-11-12 승인한 4.3.10 동시 편집 보완에 따라 의도 요청의 행 ID 보존·중복/정원 거부를 적용한다.
+사진·위치가 움직이는 과정의 실시간 공유는 후속이다. 이번에는 놓은 뒤 최종 위치 순서만 저장·전파한다.
 공개 접근은 [피드 공통 계약](feed-api.md), 초안 프로토콜은 [번들 API](bundle-api.md)를 재사용한다.
 
 ## 저장·입력
@@ -91,37 +93,56 @@
 
 | intent | 입력 | 최신 목록 적용 |
 | --- | --- | --- |
-| ADD | `locations`: 1~3개 장소, position 제외 | 정규화 키를 중복 제거하고 기존 키를 제외한 뒤 남은 정원까지 선택 순서로 뒤에 추가 |
-| REPLACE | `targetLocationId`, `location`: 장소 1개 | 새 키면 대상 자리에 교체. 대상 자신이나 다른 행의 기존 키면 원래 목록을 유지하는 no-op |
+| ADD | `locations`: 1~3개 장소, position 제외 | 중복·정원 검증 후 요청 전체를 선택 순서대로 뒤에 추가. 하나라도 위반하면 전체 거부 |
+| REPLACE | `targetLocationId`, `location`: 장소 1개 | 기존 행 ID·순서를 유지하며 장소 교체. 정규화 키 중복은 거부 |
 | REMOVE | `targetLocationId` | 대상 삭제. 이 번들에서 이미 삭제한 대상은 no-op |
 | MOVE | `targetLocationId`, 선택 `previousLocationId`·`nextLocationId` | 대상을 뺀 최신 목록에서 next 앞, 없으면 previous 뒤, 둘 다 없으면 끝에 배치 |
 
 각 intent에 해당하지 않는 입력 필드는 거부한다. 요청 배열은 **최대 3개**만 받고 초과는 부분 처리 없이
 `INVALID_INPUT`으로 거부한다. 이름·주소 등은 기존 PlaceDetails 검증을 그대로 적용하며,
-남은 정원 밖의 항목도 먼저 검증한다. target·anchor ID는 양수이고 target 자신이나 같은 두 anchor를 받을 수 없다.
+모든 입력의 구조 검증 후 정규화한 외부 키 중복, 최신 목록 정원 순서로 검사한다.
+요청 내부의 중복도 합쳐서 수락하지 않는다. target·anchor ID는 양수이고 target 자신이나 같은 두 anchor를 받을 수 없다.
 
 존재하는 ID는 대상 번들 소속을 검증한다. 없는 ID도 **이 번들에서 삭제한 기록이 있는지** 확인한다.
 알 수 없는 ID·다른 번들의 현재/삭제 ID는 `RESOURCE_NOT_FOUND`이며 목록을 변경하지 않는다.
-같은 번들에서 삭제한 target의 MOVE/REMOVE는 no-op이다. 삭제된 target의 REPLACE는
-새 키이고 정원이 남으면 끝에 추가하며, 정원이 찼거나 같은 키가 있으면 no-op이다.
+같은 번들에서 삭제한 target의 REMOVE는 no-op이다. MOVE는 `LOCATION_REMOVED` 충돌로 거부하며
+클라이언트는 드래그 표시를 제거하고 「다른 멤버가 삭제한 위치예요.」를 안내한 뒤 최신 목록을 반영한다.
+삭제된 target의 REPLACE는 새 키이고 정원이 남으면 **새 행 ID로 끝에 추가**하며,
+정원이 찼거나 같은 키가 있으면 아래 충돌로 거부한다.
 삭제된 anchor는 건너뛰고 남아 있는 anchor를 사용한다. 둘 다 사라지면 끝에 배치한다.
 현재 anchor 사이가 인접하지 않아도 최신 next 위치를 우선하여 적용한다.
 
-K43의 중복 선택 규칙에 따라 REPLACE의 정규화한 `(provider, externalId)`가 현재 목록에 있으면
-`changed=false`, `acceptedCount=0`을 반환한다. 대상 자신의 키도 동일하며, 입력한 이름·주소가 달라도
-기존 행 ID·순서·이름·주소·핀과 버전·시각을 그대로 유지한다. 중복 위치를 대상 자리로 옮기거나
-원래 대상을 삭제하지 않는다. 클라이언트는 시트를 닫고 「이미 추가한 위치에요.」를 안내한다.
+같은 행을 두 참여자가 교체하면 서버가 나중에 처리한 요청의 장소가 남는다. REPLACE는
+`targetLocationId`를 유지하므로 첫 교체 후 도착한 두 번째 교체·삭제·MOVE도 같은 줄에 적용한다.
+교체 후 삭제하면 그 줄이 삭제되고, 삭제 후 교체하면 정원·중복 검증을 거쳐 끝에 새로 추가한다.
+드래그 도중 같은 행의 장소가 바뀌어도 MOVE는 변경된 장소를 사용자가 놓은 위치로 옮긴다.
+이 서버 처리 순서는 기기 시각을 사용하지 않으며 기존 번치→번들 잠금으로 직렬화한다.
+
+의도 요청의 정원·중복·삭제된 이동 대상은 모두 HTTP 409 `BUNDLE_002`와
+`error.detail.reason`으로 구분한다. 기존 전체 PUT의 입력 검증 오류는 `COMMON_001`을 유지한다.
+
+| reason | 조건·클라이언트 처리 |
+| --- | --- |
+| `LOCATION_CAPACITY_EXCEEDED` | 최신 목록에 적용하면 3개 초과. 전체 거부하며 정원 안내 |
+| `LOCATION_DUPLICATE` | 요청 내부 또는 현재 목록과 정규화한 외부 키 중복. 「이미 추가한 위치에요.」 안내 |
+| `LOCATION_REMOVED` | 같은 번들에서 이미 삭제한 행을 MOVE. 「다른 멤버가 삭제한 위치예요.」 안내 |
+
+REPLACE 대상 자신의 키도 중복으로 거부하며, 입력한 이름·주소가 달라도 기존 데이터를 보존한다.
+실패 요청은 행 ID·순서·이름·주소·핀과 revision·locationVersion·updatedAt·활동 시각을 바꾸지 않고
+LOCATION 이벤트를 발행하지 않는다. 동시 요청의 승자가 저장된 뒤 후속 요청이 정원·중복에 걸리면
+그 후속 요청 전체를 거부하고 먼저 저장된 목록을 보존한다. 부분 수락은 없다.
 
 삭제 ID 출처는 기존 `bundle_requests`에 `operation=LOCATION_REMOVED`,
 `request_key=UUID(0, locationId)`, 해당 `bundle_id`와 함께 남긴다. 원문 장소나 토큰은 남기지 않는다.
-`replaceLocked`의 기존 동기 핀 정리 callback을 실행한 뒤 같은 트랜잭션에 기록하므로
+기존 동기 핀 정리 callback을 실행한 뒤 **실제로 삭제하는 행에만** 같은 트랜잭션에서 기록하므로
 기존 PUT·발행본 일괄 수정의 삭제도 같은 검증 근거를 남기며 실패 시 함께 롤백한다.
+의도 REPLACE로 장소만 교체한 행은 살아 있으므로 삭제 이력을 남기지 않는다.
 이 기록은 새 이벤트 재생 체계나 클라이언트 오프라인 큐가 아니다.
 전환 이전에 삭제되어 기록이 없는 ID는 알 수 없는 ID로 처리하므로 클라이언트는 최신 GET으로 복구한다.
 
 응답은 `{bundleId, revision, locationVersion, changed, acceptedCount, locations}`다.
 `acceptedCount`는 ADD에서 실제 새로 추가한 수이고 REPLACE/REMOVE/MOVE는 변경되면 1, no-op이면 0이다.
-정원이 가득 찼어도 유효한 요청은 200과 변경 없는 최신 목록을 반환한다.
+성공한 의도 요청은 200과 최종 목록을 반환하며, 정원·중복·삭제된 이동 대상 충돌은 409다.
 `changed=false`이면 내용 revision·locationVersion·updatedAt·활동 시각과 LOCATION 이벤트를 갱신하지 않는다.
 다른 요청은 DB 잠금으로 직렬 적용하며 한 요청 안에서는 선택 순서를 유지한다.
 
@@ -135,7 +156,9 @@ K43의 중복 선택 규칙에 따라 REPLACE의 정규화한 `(provider, extern
 ```
 
 발행 후 도착한 의도 요청은 OWNER도 `BUNDLE_STATE_CONFLICT`로 거부한다.
-클라이언트는 부분 수락 결과의 acceptedCount와 최신 locations로 본인 안내와 목록을 갱신한다.
+클라이언트는 성공 응답의 acceptedCount와 locations를 반영하고, 충돌 시 reason에 맞는 안내 후 최신 GET으로 복구한다.
+로컬 드래그 중에는 해당 목록의 원격 변경을 보류하고 놓거나 취소하면 최신 결과를 반영한다.
+저장은 손을 뗄 때 MOVE 1회이며 취소할 때는 저장하지 않는다. 발행·삭제·권한 상실은 즉시 처리한다.
 재연결은 기존 GET snapshot 복구를 사용하며 서버에 반영되지 않은 오프라인 입력을 재생하지 않는다.
 권한·추천 날짜 칩 갱신은 [번들 갱신 신호](bundle-refresh.md)를 따른다.
 
@@ -161,13 +184,16 @@ CREATED/PUBLISHED 공통 content에도 locations/locationVersion을 포함한다
 
 ## 콕하기·배치 조회
 
-같은 `(provider, externalId)`가 남아 있으면 이름·주소·순서가 바뀌어도 행 ID를 보존한다.
-새 키에는 새 ID를 발급하며 제거한 키를 다시 추가해도 이전 출처 ID를 재사용하지 않는다.
+전체 PUT·발행본 일괄 수정은 같은 `(provider, externalId)`가 남아 있으면 이름·주소·순서가 바뀌어도
+행 ID를 보존하며 새 키에는 새 ID를 발급한다. 의도 REPLACE는 다른 장소로 바꾸어도 행 ID를 유지한다.
+ADD 또는 이미 삭제된 행의 REPLACE에는 새 ID를 발급하며 이전 삭제 ID를 재사용하지 않는다.
 
-편집으로 제거/교체할 장소가 있으면 **행 삭제 전**, 같은 트랜잭션에서
+편집으로 제거/교체할 장소가 있으면 **기존 행의 장소 키 변경 또는 행 삭제 전**, 같은 트랜잭션에서
 `com.bunch.bundle.dto.BundleLocationsRemovedEvent(bundleId, locationIds)`를 동기 발행한다.
 G(#92)는 동기 `@EventListener`와 MANDATORY 트랜잭션으로 이 ID를 source로 가진 콕만 삭제해야 한다.
-AFTER_COMMIT·비동기 listener는 사용하지 않는다. 다른 번들·광고 출처의 같은 장소 콕은 유지한다.
+AFTER_COMMIT·비동기 listener는 사용하지 않는다. 기존 listener가 flush할 수 있으므로 장소 키를 먼저 변경하지 않는다.
+REPLACE의 이벤트 ID는 삭제 이력이 아닌 **이전 장소의 핀 출처 정리 대상**이다.
+교체된 행 ID를 새 장소의 콕 출처로 다시 사용할 수 있다. 다른 번들·광고 출처의 같은 장소 콕은 유지한다.
 listener 실패는 장소와 나머지 번들 편집을 함께 롤백시킨다.
 
 **번들 자체 삭제·번치 cascade에는 이 편집 이벤트를 발행하지 않는다.**
@@ -188,8 +214,9 @@ location의 bundle FK는 ON DELETE CASCADE다. position 0~2 CHECK와 `(bundle_id
 `(bundle_id, provider, external_id)` UNIQUE는 즉시 검사한다. 이름·주소는 grapheme 경계 보존을 위해
 TEXT로 저장하고 애플리케이션에서 상한을 검사한다. 적용된 마이그레이션은 수정하지 않는다.
 
-자동 검증 범위는 입력 경계·HTTP·권한·동시 저장·legacy version/lease 비의존·부분 정원 수락·
-삭제 ID 출처·동시 삭제/이동·ID 보존·실제 핀 정리와 동기 listener 실패 롤백·
+자동 검증 범위는 입력 경계·HTTP 오류 reason·권한·동시 저장·legacy version/lease 비의존·정원/중복 전체 거부·
+동일 행 연속/동시 교체·교체/삭제 양쪽 도착 순서·삭제 ID 출처·동시 삭제/이동·교체 후 이동·
+행 ID 보존·교체된 행의 삭제 이력 미생성·실제 핀 정리와 동기 listener 실패 롤백·
 실제 STOMP 커밋/롤백/재연결·기존 발행 조건·PostgreSQL migration·JPA validate다.
 C의 실제 일괄 편집과 G의 실제 콕 writer 연결은 각각의 구현 통합 시 추가 검증한다.
 검색 공급자·실제 iOS/WebView 연동은 후속이며 자동 검증과 구분한다.

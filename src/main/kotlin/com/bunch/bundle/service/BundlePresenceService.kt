@@ -4,6 +4,7 @@ import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.domain.BundleText
 import com.bunch.bundle.domain.BundlePhotoRepository
+import com.bunch.bundle.domain.BundleLocationRepository
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.bundle.dto.BundlePresenceCommand
@@ -33,7 +34,8 @@ class BundlePresenceService(
     private val registry: BundleRealtimeSessionRegistry,
     private val messaging: SimpMessagingTemplate,
     private val clock: Clock,
-    private val photos: BundlePhotoRepository
+    private val photos: BundlePhotoRepository,
+    private val locations: BundleLocationRepository
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val states = mutableMapOf<Scope, MutableMap<String, Connection>>()
@@ -52,7 +54,7 @@ class BundlePresenceService(
         if (bundle.status != BundleStatus.DRAFT) fail(ErrorCode.BUNDLE_STATE_CONFLICT)
         val action = command.action.trim().uppercase(Locale.ROOT)
         val target = command.target
-        if (action == "BEGIN" || action == "END") {
+        if (action in setOf("BEGIN", "END", "STOP", "BLUR")) {
             if (action == "BEGIN") access.requireParticipant(actor.memberId, bundle)
             if (action == "BEGIN" || target != null) validateTarget(target, bundleId, action == "BEGIN")
             if (command.text != null) fail(ErrorCode.INVALID_INPUT)
@@ -98,16 +100,16 @@ class BundlePresenceService(
                     }
                     "BEGIN" -> {
                         connection.participant = true
-                        connection.editing = Editing(target!!, now)
-                        if (connection.typing?.target != target) connection.typing = null
+                        // Old focus-only clients may still send BEGIN for text fields.
+                        // Actual TYPE is the only source of their visible input indicator.
+                        if (target != "TITLE" && target != "COMMENT") {
+                            val editingTarget = target!!
+                            connection.editing[editingTarget] = Editing(editingTarget, now)
+                        }
                     }
-                    "END" -> {
-                        if (target == null || connection.editing?.target == target) connection.editing = null
+                    "END", "STOP", "BLUR" -> {
+                        if (target == null) connection.editing.clear() else connection.editing.remove(target)
                         if (target == null || connection.typing?.target == target) connection.typing = null
-                    }
-                    "STOP", "BLUR" -> {
-                        connection.typing = null
-                        connection.editing = null
                     }
                 }
             }
@@ -136,8 +138,8 @@ class BundlePresenceService(
                 if (connection.typing?.at?.plusSeconds(TYPING_SECONDS)?.isAfter(now) == false) {
                     connection.typing = null
                 }
-                if (connection.editing?.at?.plusSeconds(PRESENCE_SECONDS)?.isAfter(now) == false) {
-                    connection.editing = null
+                connection.editing.entries.removeIf { (_, editing) ->
+                    !editing.at.plusSeconds(PRESENCE_SECONDS).isAfter(now)
                 }
                 connection.disconnected = true
             }
@@ -179,9 +181,17 @@ class BundlePresenceService(
             BundleEventType.PHOTOS -> {
                 val ids = photos.findAllByBundleIdOrderByPositionAscIdAsc(scope.bundleId).map { it.id }.toSet()
                 current.values.forEach { connection ->
-                    val target = connection.editing?.target
-                    if (target != null && (target.startsWith("PHOTO:") || target.startsWith("PICK:")) &&
-                        target.substringAfter(':').toLong() !in ids) connection.editing = null
+                    connection.editing.keys.removeIf { target ->
+                        target.startsWith("PHOTO:") && target.substringAfter(':').toLong() !in ids
+                    }
+                }
+            }
+            BundleEventType.LOCATION -> {
+                val ids = locations.findAllByBundleIdOrderByPositionAscIdAsc(scope.bundleId).map { it.id }.toSet()
+                current.values.forEach { connection ->
+                    connection.editing.keys.removeIf { target ->
+                        target.startsWith("LOCATION:") && target.substringAfter(':').toLong() !in ids
+                    }
                 }
             }
             else -> return
@@ -203,8 +213,8 @@ class BundlePresenceService(
                     if (connection.typing?.at?.plusSeconds(TYPING_SECONDS)?.isAfter(now) == false) {
                         connection.typing = null
                     }
-                    if (connection.editing?.at?.plusSeconds(PRESENCE_SECONDS)?.isAfter(now) == false) {
-                        connection.editing = null
+                    connection.editing.entries.removeIf { (_, editing) ->
+                        !editing.at.plusSeconds(PRESENCE_SECONDS).isAfter(now)
                     }
                     connection.disconnected = true
                     changed = true
@@ -214,11 +224,10 @@ class BundlePresenceService(
                     connection.typing = null
                     changed = true
                 }
-                val editing = connection.editing
-                if (editing != null && !editingExpiry(connection, editing).isAfter(now)) {
-                    connection.editing = null
-                    changed = true
+                val expiredEditing = connection.editing.entries.removeIf { (_, editing) ->
+                    !editingExpiry(connection, editing).isAfter(now)
                 }
+                if (expiredEditing) changed = true
                 false
             }
         }
@@ -238,10 +247,10 @@ class BundlePresenceService(
                 val (connection, input) = inputs.maxBy { it.second.sequence }
                 BundleTypingState(key.first, key.second, input.text, typingExpiry(connection, input))
             }.sortedWith(compareBy<BundleTypingState> { it.memberId }.thenBy { it.target })
-        val editing = current.mapNotNull { connection ->
-            connection.editing?.let { input -> BundleEditingState(
-                connection.actor.memberId, input.target, editingExpiry(connection, input)
-            ) }
+        val editing = current.flatMap { connection ->
+            connection.editing.values.map { input ->
+                BundleEditingState(connection.actor.memberId, input.target, editingExpiry(connection, input))
+            }
         }.groupBy { it.memberId to it.target }.values.map { values -> values.maxBy { it.expiresAt } }
             .sortedWith(compareBy<BundleEditingState> { it.memberId }.thenBy { it.target })
         return BundlePresenceData(members, typing, editing)
@@ -252,10 +261,15 @@ class BundlePresenceService(
         else input.at.plusSeconds(PRESENCE_SECONDS)
 
     private fun validateTarget(target: String?, bundleId: Long, requireExisting: Boolean) {
+        if (requireExisting && target?.startsWith("PICK:") == true) fail(ErrorCode.INVALID_INPUT)
         if (target in setOf("TITLE", "COMMENT", "DATE", "LOCATION", "PHOTOS", "PARTICIPANTS", "VISIBILITY")) return
-        if (target == null || !Regex("(PHOTO|PICK):[1-9][0-9]{0,18}").matches(target)) fail(ErrorCode.INVALID_INPUT)
+        if (target == null || !Regex("(PHOTO|PICK|LOCATION):[1-9][0-9]{0,18}").matches(target)) fail(ErrorCode.INVALID_INPUT)
         val id = target.substringAfter(':').toLongOrNull() ?: fail(ErrorCode.INVALID_INPUT)
-        if (requireExisting && photos.findById(id).orElse(null)?.bundleId != bundleId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (requireExisting) {
+            val actualBundle = if (target.startsWith("LOCATION:")) locations.findById(id).orElse(null)?.bundleId
+                else photos.findById(id).orElse(null)?.bundleId
+            if (actualBundle != bundleId) fail(ErrorCode.RESOURCE_NOT_FOUND)
+        }
     }
 
     private fun typingExpiry(connection: Connection, input: Input): Instant =
@@ -283,7 +297,7 @@ class BundlePresenceService(
         var participant: Boolean,
         var disconnected: Boolean = false,
         var typing: Input? = null,
-        var editing: Editing? = null
+        val editing: MutableMap<String, Editing> = mutableMapOf()
     )
 
     private data class Input(val target: String, val text: String, val at: Instant, val sequence: Long)

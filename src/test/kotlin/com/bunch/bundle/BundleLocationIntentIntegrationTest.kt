@@ -13,6 +13,7 @@ import com.bunch.bundle.dto.BundleLocationIntentRequest
 import com.bunch.bundle.dto.BundleLocationIntentResponse
 import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleLocationService
+import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -83,58 +84,77 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `partial add accepts only free slots in normalized selection order without changing existing IDs`() {
+    fun `add preserves selection order and row IDs but rejects an overflowing batch atomically`() {
         val f = fixture()
         val initial = add(f, "a")
-        val added = add(f, "a", "c", "b")
+        val added = add(f, "c", "b")
         assertThat(added.acceptedCount).isEqualTo(2)
         assertThat(added.locations.map { it.externalId }).containsExactly("a", "c", "b")
         assertThat(added.locations.first().id).isEqualTo(initial.locations.single().id)
         assertThat(added.locationVersion).isEqualTo(initial.locationVersion + 1)
-        val before = bundles.findById(f.bundleId).orElseThrow()
-        val full = add(f, "d", "e")
-        assertThat(full.changed).isFalse()
-        assertThat(full.acceptedCount).isZero()
-        assertThat(full.revision).isEqualTo(added.revision)
-        assertThat(full.locations).isEqualTo(added.locations)
-        assertThat(bundles.findById(f.bundleId).orElseThrow().updatedAt).isEqualTo(before.updatedAt)
+        assertUnchangedConflict(f, "LOCATION_CAPACITY_EXCEEDED") { add(f, "d", "e") }
+
+        val oneSlot = fixture()
+        add(oneSlot, "a", "b")
+        assertUnchangedConflict(oneSlot, "LOCATION_CAPACITY_EXCEEDED") { add(oneSlot, "c", "d") }
     }
 
     @Test
-    fun `one free slot takes first selected new place and deduplicates normalized keys`() {
+    fun `normalized duplicate against existing row or within batch rejects all additions`() {
         val f = fixture()
-        add(f, "a", "b")
-        val state = apply(f, BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
-            place("a").copy(provider = " KAKAO "), place("c"), place("d")
-        )))
-        assertThat(state.acceptedCount).isEqualTo(1)
-        assertThat(state.locations.map { it.externalId }).containsExactly("a", "b", "c")
-        val another = fixture()
-        val duplicate = apply(another, BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
-            place("a"), place("a").copy(provider = " KAKAO "), place("b")
-        )))
-        assertThat(duplicate.acceptedCount).isEqualTo(2)
-        assertThat(duplicate.locations.map { it.externalId }).containsExactly("a", "b")
+        add(f, "a")
+        assertUnchangedConflict(f, "LOCATION_DUPLICATE") {
+            apply(f, BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
+                place("b"), place("a").copy(provider = " KAKAO ", externalId = " a ")
+            )))
+        }
+        val empty = fixture()
+        assertUnchangedConflict(empty, "LOCATION_DUPLICATE") {
+            apply(empty, BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
+                place("a"), place("a").copy(provider = " KAKAO ", externalId = " a "), place("b")
+            )))
+        }
     }
 
     @Test
-    fun `concurrent additions serialize and partially accept capacity without losing selection order`() {
+    fun `concurrent additions serialize and reject the losing batch without partial acceptance`() {
         val f = fixture()
         add(f, "seed")
         val results = concurrently(listOf(
             { add(f, "a1", "a2") },
             { add(f.copy(actor = f.guest), "b1", "b2") }
-        )).map { it.getOrThrow() }
-        assertThat(results.sumOf { it.acceptedCount }).isEqualTo(2)
-        assertThat(results.count { it.changed }).isEqualTo(1)
+        ))
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertConflict(results.single { it.isFailure }.exceptionOrNull(), "LOCATION_CAPACITY_EXCEEDED")
+        val winner = results.single { it.isSuccess }.getOrThrow()
+        assertThat(winner.acceptedCount).isEqualTo(2)
         val state = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
-        val winner = results.single { it.changed }
         assertThat(state.locations).isEqualTo(winner.locations)
         assertThat(state.locations.map { it.externalId }).satisfiesAnyOf(
             { assertThat(it).containsExactly("seed", "a1", "a2") },
             { assertThat(it).containsExactly("seed", "b1", "b2") }
         )
         assertThat(state.locationVersion).isEqualTo(2)
+    }
+
+    @Test
+    fun `concurrent normalized duplicate additions preserve the first stored place`() {
+        val f = fixture()
+        val results = concurrently(listOf(
+            { add(f, "same") },
+            { apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+                BundleLocationIntent.ADD,
+                locations = listOf(place("same").copy(
+                    provider = " KAKAO ", externalId = " same ", name = "other name"
+                ))
+            )) }
+        ))
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertConflict(results.single { it.isFailure }.exceptionOrNull(), "LOCATION_DUPLICATE")
+        val winner = results.single { it.isSuccess }.getOrThrow()
+        val state = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
+        assertThat(state.locations).isEqualTo(winner.locations)
+        assertThat(state.locationVersion).isEqualTo(1)
     }
 
     @Test
@@ -148,7 +168,9 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
             { apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
                 BundleLocationIntent.MOVE, targetLocationId = a, previousLocationId = b
             )) }
-        )).forEach { it.getOrThrow() }
+        )).forEach { result ->
+            result.exceptionOrNull()?.let { assertConflict(it, "LOCATION_REMOVED") }
+        }
         val final = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
         assertThat(final.locations.map { it.externalId }).containsExactly("b", "c")
         assertThat(final.locations.map { it.position }).containsExactly(0, 1)
@@ -171,13 +193,13 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         ))
         assertThat(rebased.locations.map { it.id }).containsExactly(c, b)
         assertThat(rebased.changed).isFalse()
-        val deleted = apply(f, BundleLocationIntentRequest(BundleLocationIntent.MOVE, targetLocationId = a))
-        assertThat(deleted.changed).isFalse()
-        assertThat(deleted.acceptedCount).isZero()
+        assertUnchangedConflict(f, "LOCATION_REMOVED") {
+            apply(f, BundleLocationIntentRequest(BundleLocationIntent.MOVE, targetLocationId = a))
+        }
     }
 
     @Test
-    fun `replacement of deleted target appends if room and becomes no op at capacity`() {
+    fun `replacement of deleted target appends if room and rejects duplicates or capacity overflow`() {
         val f = fixture()
         val target = add(f, "a", "b").locations.first().id
         apply(f, BundleLocationIntentRequest(BundleLocationIntent.REMOVE, targetLocationId = target))
@@ -186,16 +208,165 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         ))
         assertThat(replacement.locations.map { it.externalId }).containsExactly("b", "c")
         assertThat(replacement.acceptedCount).isEqualTo(1)
-        val duplicate = apply(f, BundleLocationIntentRequest(
-            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("c")
-        ))
-        assertThat(duplicate.changed).isFalse()
+        assertUnchangedConflict(f, "LOCATION_DUPLICATE") {
+            apply(f, BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = target, location = place("c")
+            ))
+        }
         add(f, "d")
-        val full = apply(f, BundleLocationIntentRequest(
-            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("e")
+        assertUnchangedConflict(f, "LOCATION_CAPACITY_EXCEEDED") {
+            apply(f, BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = target, location = place("e")
+            ))
+        }
+    }
+
+    @Test
+    fun `successive replacements keep the same row ID and last processed place wins`() {
+        val f = fixture()
+        val initial = add(f, "a", "b", "c")
+        val target = initial.locations[1].id
+        val first = apply(f, BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
         ))
-        assertThat(full.changed).isFalse()
-        assertThat(full.locations.map { it.externalId }).containsExactly("b", "c", "d")
+        val second = apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("y")
+        ))
+        assertThat(first.locations.map { it.id }).isEqualTo(initial.locations.map { it.id })
+        assertThat(first.locations.map { it.externalId }).containsExactly("a", "x", "c")
+        assertThat(second.locations.map { it.id }).isEqualTo(initial.locations.map { it.id })
+        assertThat(second.locations.map { it.externalId }).containsExactly("a", "y", "c")
+        assertThat(second.locationVersion).isEqualTo(initial.locationVersion + 2)
+        assertThat(second.revision).isEqualTo(initial.revision + 2)
+        assertThat(removedIdCount(f)).isZero()
+    }
+
+    @Test
+    fun `concurrent same row replacements keep one row with the last committed response`() {
+        val f = fixture()
+        val initial = add(f, "a", "b", "c")
+        val target = initial.locations[1].id
+        val results = concurrently(listOf(
+            { apply(f, BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
+            )) },
+            { apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = target, location = place("y")
+            )) }
+        )).map { it.getOrThrow() }
+        val latest = results.maxBy { it.revision }
+        val state = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
+        assertThat(results.map { it.revision }).containsExactlyInAnyOrder(initial.revision + 1, initial.revision + 2)
+        assertThat(state.locations).isEqualTo(latest.locations)
+        assertThat(state.locations.map { it.id }).isEqualTo(initial.locations.map { it.id })
+        assertThat(state.locations[1].externalId).isIn("x", "y")
+        assertThat(removedIdCount(f)).isZero()
+    }
+
+    @Test
+    fun `replace followed by removal deletes the same row and repeated removal is a no op`() {
+        val f = fixture()
+        val initial = add(f, "a", "b")
+        val target = initial.locations.first().id
+        apply(f, BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
+        ))
+        val deleted = apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+            BundleLocationIntent.REMOVE, targetLocationId = target
+        ))
+        assertThat(deleted.locations.map { it.externalId }).containsExactly("b")
+        assertThat(deleted.changed).isTrue()
+        assertThat(removedIdCount(f)).isEqualTo(1)
+        val repeated = apply(f, BundleLocationIntentRequest(BundleLocationIntent.REMOVE, targetLocationId = target))
+        assertThat(repeated.changed).isFalse()
+        assertThat(repeated.acceptedCount).isZero()
+        assertThat(repeated.locations).isEqualTo(deleted.locations)
+        assertThat(repeated.revision).isEqualTo(deleted.revision)
+        assertThat(repeated.locationVersion).isEqualTo(deleted.locationVersion)
+        assertThat(removedIdCount(f)).isEqualTo(1)
+    }
+
+    @Test
+    fun `deleted row replacement appends a new ID and leaves the deleted original absent`() {
+        val f = fixture()
+        val initial = add(f, "a", "b", "c")
+        val target = initial.locations[1].id
+        apply(f, BundleLocationIntentRequest(BundleLocationIntent.REMOVE, targetLocationId = target))
+        val replaced = apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
+        ))
+        assertThat(replaced.locations.map { it.externalId }).containsExactly("a", "c", "x")
+        assertThat(replaced.locations.take(2).map { it.id })
+            .containsExactly(initial.locations[0].id, initial.locations[2].id)
+        assertThat(replaced.locations.last().id).isNotEqualTo(target)
+        assertThat(rows.findById(target)).isEmpty()
+        assertThat(removedIdCount(f)).isEqualTo(1)
+    }
+
+    @Test
+    fun `replacement clears only old source pins without tombstoning the live row`() {
+        val f = fixture()
+        val initial = add(f, "a", "b")
+        val target = initial.locations.first().id
+        val retained = initial.locations.last().id
+        pin(f, target, "a")
+        pin(f, retained, "b")
+        val replaced = apply(f, BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
+        ))
+        assertThat(replaced.locations.first().id).isEqualTo(target)
+        assertThat(replaced.locations.first().externalId).isEqualTo("x")
+        assertThat(pinSources(f)).containsExactly(retained)
+        assertThat(removedIdCount(f)).isZero()
+        // The new place can be pinned using the same source ID and is cleaned on a later replacement.
+        pin(f, target, "x")
+        val again = apply(f, BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("y")
+        ))
+        assertThat(again.locations.first().id).isEqualTo(target)
+        assertThat(pinSources(f)).containsExactly(retained)
+        assertThat(removedIdCount(f)).isZero()
+    }
+
+    @Test
+    fun `drop of a replaced row moves its current place using the original row ID`() {
+        val f = fixture()
+        val initial = add(f, "a", "b", "c")
+        val target = initial.locations.first().id
+        apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+            BundleLocationIntent.REPLACE, targetLocationId = target, location = place("x")
+        ))
+        val dropped = apply(f, BundleLocationIntentRequest(
+            BundleLocationIntent.MOVE, targetLocationId = target, previousLocationId = initial.locations.last().id
+        ))
+        assertThat(dropped.locations.map { it.externalId }).containsExactly("b", "c", "x")
+        assertThat(dropped.locations.map { it.id })
+            .containsExactly(initial.locations[1].id, initial.locations[2].id, target)
+        assertThat(dropped.changed).isTrue()
+    }
+
+    @Test
+    fun `concurrent replacements racing for one normalized key retain one winner and the untouched loser`() {
+        val f = fixture()
+        val initial = add(f, "a", "b")
+        val results = concurrently(listOf(
+            { apply(f, BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = initial.locations[0].id, location = place("x")
+            )) },
+            { apply(f.copy(actor = f.guest), BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = initial.locations[1].id,
+                location = place("x").copy(provider = " KAKAO ", externalId = " x ")
+            )) }
+        ))
+        assertThat(results.count { it.isSuccess }).isEqualTo(1)
+        assertConflict(results.single { it.isFailure }.exceptionOrNull(), "LOCATION_DUPLICATE")
+        val winner = results.single { it.isSuccess }.getOrThrow()
+        val state = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
+        assertThat(state.locations).isEqualTo(winner.locations)
+        assertThat(state.locations.map { it.id }).isEqualTo(initial.locations.map { it.id })
+        assertThat(state.locations.count { it.externalId == "x" }).isEqualTo(1)
+        assertThat(state.locationVersion).isEqualTo(initial.locationVersion + 1)
+        assertThat(removedIdCount(f)).isZero()
     }
 
     @Test
@@ -206,7 +377,7 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         val b = initial.locations[1].id
         pin(f, a, "a")
         pin(f, b, "b")
-        assertReplacementNoOp(f, a, place("b"))
+        assertReplacementRejected(f, a, place("b"))
         assertThat(pinSources(f)).containsExactly(a, b)
     }
 
@@ -218,7 +389,7 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         val b = initial.locations[1].id
         pin(f, a, "a")
         pin(f, b, "b")
-        assertReplacementNoOp(f, a, place("b").copy(
+        assertReplacementRejected(f, a, place("b").copy(
             provider = " KAKAO ",
             externalId = " b ",
             name = "changed duplicate name",
@@ -233,7 +404,7 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         val initial = add(f, "a", "b", "c")
         val a = initial.locations[0].id
         pin(f, a, "a")
-        assertReplacementNoOp(f, a, place("a").copy(
+        assertReplacementRejected(f, a, place("a").copy(
             provider = " KAKAO ",
             externalId = " a ",
             name = "changed target name",
@@ -356,7 +527,7 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `HTTP enforces auth payload cap and lease free ordered partial acceptance`() {
+    fun `HTTP enforces auth payload cap and returns distinguishable atomic location conflicts`() {
         val f = fixture()
         val path = "/api/v1/bunches/${f.bunchId}/bundles/${f.bundleId}/locations/intents"
         val pair = tokens.generateToken(f.actor.memberId, "ROLE_USER", f.actor.sessionId)
@@ -378,10 +549,21 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(post(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsBytes(BundleLocationIntentRequest(
                 BundleLocationIntent.ADD, locations = listOf(place("first"), place("second"))
-            )))).andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.acceptedCount").value(1))
-            .andExpect(jsonPath("$.data.changed").value(true))
-            .andExpect(jsonPath("$.data.locations[2].externalId").value("first"))
+            )))).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value("BUNDLE_002"))
+            .andExpect(jsonPath("$.error.detail.reason").value("LOCATION_CAPACITY_EXCEEDED"))
+        mvc.perform(post(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(BundleLocationIntentRequest(
+                BundleLocationIntent.ADD, locations = listOf(place("seed").copy(provider = " KAKAO "))
+            )))).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.detail.reason").value("LOCATION_DUPLICATE"))
+        val deletedId = locations.get(f.actor.memberId, f.bunchId, f.bundleId).locations.first().id
+        apply(f, BundleLocationIntentRequest(BundleLocationIntent.REMOVE, targetLocationId = deletedId))
+        mvc.perform(post(path).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(BundleLocationIntentRequest(
+                BundleLocationIntent.MOVE, targetLocationId = deletedId
+            )))).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.detail.reason").value("LOCATION_REMOVED"))
     }
 
     @Test
@@ -414,27 +596,39 @@ class BundleLocationIntentIntegrationTest : BunchIntegrationSupport() {
         assertThat(locations.get(f.actor.memberId, f.bunchId, f.bundleId)).isEqualTo(before)
     }
 
-    private fun assertReplacementNoOp(f: Fixture, targetId: Long, replacement: BundleLocationIntentPlace) {
+    private fun assertReplacementRejected(f: Fixture, targetId: Long, replacement: BundleLocationIntentPlace) {
+        assertUnchangedConflict(f, "LOCATION_DUPLICATE") {
+            apply(f, BundleLocationIntentRequest(
+                BundleLocationIntent.REPLACE, targetLocationId = targetId, location = replacement
+            ))
+        }
+    }
+
+    private fun assertUnchangedConflict(f: Fixture, reason: String, action: () -> Any?) {
         val before = locations.get(f.actor.memberId, f.bunchId, f.bundleId)
         val metadataSql = "SELECT revision, location_version, created_at, updated_at FROM bundles WHERE id = ?"
         val beforeMetadata = jdbc.queryForMap(metadataSql, f.bundleId)
         val pinsSql = "SELECT * FROM pinned_places WHERE source_bundle_id = ? ORDER BY id"
         val beforePins = jdbc.queryForList(pinsSql, f.bundleId)
+        val activitySql = "SELECT * FROM bunch_memberships WHERE bunch_id = ? ORDER BY id"
+        val beforeActivity = jdbc.queryForList(activitySql, f.bunchId)
         val beforeRemovedIds = removedIdCount(f)
 
-        val result = apply(f, BundleLocationIntentRequest(
-            BundleLocationIntent.REPLACE, targetLocationId = targetId, location = replacement
-        ))
+        val failure = runCatching(action).exceptionOrNull()
 
-        assertThat(result.changed).isFalse()
-        assertThat(result.acceptedCount).isZero()
-        assertThat(result.locations).isEqualTo(before.locations)
-        assertThat(result.revision).isEqualTo(before.revision)
-        assertThat(result.locationVersion).isEqualTo(before.locationVersion)
+        assertConflict(failure, reason)
         assertThat(locations.get(f.actor.memberId, f.bunchId, f.bundleId)).isEqualTo(before)
         assertThat(jdbc.queryForMap(metadataSql, f.bundleId)).isEqualTo(beforeMetadata)
         assertThat(jdbc.queryForList(pinsSql, f.bundleId)).isEqualTo(beforePins)
+        assertThat(jdbc.queryForList(activitySql, f.bunchId)).isEqualTo(beforeActivity)
         assertThat(removedIdCount(f)).isEqualTo(beforeRemovedIds)
+    }
+
+    private fun assertConflict(failure: Throwable?, reason: String) {
+        assertThat(failure).isInstanceOf(BusinessException::class.java)
+        val business = failure as BusinessException
+        assertThat(business.errorCode).isEqualTo(ErrorCode.BUNDLE_STATE_CONFLICT)
+        assertThat((business.detail as? Map<*, *>)?.get("reason")).isEqualTo(reason)
     }
 
     private fun fixture(): Fixture {
