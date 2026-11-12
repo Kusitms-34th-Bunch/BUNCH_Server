@@ -27,7 +27,7 @@ class BundlePhotoOrderMigrationIntegrationTest @Autowired constructor(private va
     fun `migration preserves old positions and retains tombstone until bundle deletion and is repeatable`() {
         val schema = "photo_order_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            val version = MigrationVersion.fromVersion("2026111111290")
+            val version = MigrationVersion.fromVersion("40")
             val previous = configure(schema).info().all().mapNotNull { it.version }.filter { it < version }.max()
             configure(schema, previous.toString()).migrate()
             val member = jdbc.queryForObject(

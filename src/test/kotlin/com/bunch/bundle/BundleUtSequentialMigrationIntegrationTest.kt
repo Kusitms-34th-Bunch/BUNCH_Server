@@ -46,8 +46,7 @@ class BundleUtSequentialMigrationIntegrationTest @Autowired constructor(private 
                 bundle, member
             )
 
-            val versions = listOf("1260", "1270", "1280", "1281", "1290", "1291", "1292")
-                .map { "202611111$it" }
+            val versions = listOf("36", "37", "38", "39", "40", "41", "42")
             for (version in versions) {
                 val step = migration(schema, version)
                 assertThat(step.migrate().migrationsExecuted).describedAs("apply %s", version).isEqualTo(1)
