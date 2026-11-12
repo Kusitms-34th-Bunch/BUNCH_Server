@@ -528,6 +528,12 @@ class BundleService(
         }
     }
 
+    /** Called when the account is withdrawn: comments left in published bundles keep no text (6.2.5, 7.6.4). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun clearCommentsOf(memberId: Long) {
+        comments.clearContentByMemberId(memberId)
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     fun beforePhotoDelete(photoId: Long) {
         val references = photos.findAllByPhotoIdOrderByBundleIdAscIdAsc(photoId)
