@@ -114,7 +114,7 @@ PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`
 기존 nullable 필드(`bunch.imageUrl`, `coverImageUrl`, `date`, `location`, `publishedAt`,
 contributor/comment의 `nickname`·`imageUrl`·`content`)는 외부에서도 JSON `null`을 유지한다.
 nullable 객체 DTO는 `location:null`을 보존하기 위해 유지한다. null 전용 Kotlin 타입은 이 필드를 생략한다.
-상세는 카드 필드에 photos `{id,imageUrl,position,caption}`, contributors `{memberId,nickname,imageUrl}`,
+상세는 카드 필드에 photos `{id,imageUrl,position}`, contributors `{memberId,nickname,imageUrl}`,
 comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
 상세도 목록과 같은 서버 current·차단·승인·공개 범위를 다시 확인한다.
 나간 회원은 「나간 멤버」로 표시하며 탈퇴 계정 코멘트 원문은 노출하지 않는다.

@@ -28,7 +28,7 @@ interface BunchPublicRepository : Repository<Bundle, Long> {
 
     @Query(
         """
-        select new com.bunch.bunch.dto.BunchPublicBundlePhoto(photo.id, asset.url, photo.position, photo.caption)
+        select new com.bunch.bunch.dto.BunchPublicBundlePhoto(photo.id, asset.url, photo.position)
         from BundlePhoto photo
         join photo.imageAsset asset
         where photo.bundleId = :bundleId

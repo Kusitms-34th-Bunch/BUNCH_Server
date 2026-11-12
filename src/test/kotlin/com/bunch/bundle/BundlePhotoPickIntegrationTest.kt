@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -87,6 +88,20 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM photos")
         assetIds.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
         credentials.forEach { (id, sid) -> sessions.delete(sid, id) }
+    }
+
+    @Test
+    fun `caption write endpoint is no longer mapped`() {
+        val f = fixture()
+
+        val response = mvc.perform(
+            put("/api/v1/bunches/${f.bunchId}/bundles/${f.id}/photos/${f.photoId}/caption")
+                .header("Authorization", "Bearer ${token(f.owner)}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"value":"obsolete","expectedVersion":0,"mode":"DRAFT"}""")
+        ).andReturn().response
+
+        assertThat(response.status).isEqualTo(404)
     }
 
     @Test
@@ -266,26 +281,34 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `captionless published save preserves historical caption and starts new photos without captions or picks`() {
+    fun `published save hides caption metadata and preserves legacy storage`() {
         val f = fixture()
-        jdbc.update("UPDATE bundle_photos SET caption = '과거 캡션', caption_version = 2 WHERE id = ?", f.photoId)
+        val historicalUpdatedAt = java.sql.Timestamp.from(Instant.parse("2026-01-01T00:00:00Z"))
+        jdbc.update(
+            """UPDATE bundle_photos SET caption = '과거 캡션', caption_version = 2,
+                caption_updated_by = ?, caption_updated_at = ? WHERE id = ?""",
+            f.owner,
+            historicalUpdatedAt,
+            f.photoId
+        )
         jdbc.update(
             """UPDATE bundles SET status = 'PUBLISHED', title = '발행본', visibility = 'PUBLIC',
                 published_at = CURRENT_TIMESTAMP WHERE id = ?""",
             f.id
         )
         val revision = service.get(f.owner, f.bunchId, f.id).revision
+        val historicalBefore = legacyCaptionState(f.photoId)
         val saved = mvc.perform(put("/api/v1/bunches/${f.bunchId}/bundles/${f.id}/published")
             .header("Authorization", "Bearer ${token(f.owner)}")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""{
-                "expectedRevision":$revision,"title":"변경","visibility":"PUBLIC","date":null,
+                "expectedRevision":$revision,"title":"변경","date":null,
                 "photos":[{"bundlePhotoId":${f.photoId}}],"locations":[]
             }"""))
             .andExpect(status().isOk()).andReturn()
-        val retained = mapper.readTree(saved.response.contentAsString).path("data").path("photos").first()
-        assertThat(retained.path("caption").asText()).isEqualTo("과거 캡션")
-        assertThat(retained.path("captionVersion").asLong()).isEqualTo(2)
+        val savedData = mapper.readTree(saved.response.contentAsString).path("data")
+        assertNoCaptionMetadata(savedData.path("photos").first())
+        assertThat(legacyCaptionState(f.photoId)).isEqualTo(historicalBefore)
         write(f, """{"picked":true,"expectedVersion":0}""", 409)
         val addedAsset = assets.saveAndFlush(ImageAsset(
             publicId = "pick/${UUID.randomUUID()}",
@@ -298,16 +321,53 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
             processingStatus = ProcessingStatus.READY
         ))
         val current = service.get(f.owner, f.bunchId, f.id)
-        val result = service.editPublished(BundleActor(f.owner, "test"), f.bunchId, f.id,
-            EditPublishedBundleRequest(current.revision, current.title, current.date,
-                listOf(
-                    PublishedBundlePhotoInput(bundlePhotoId = f.photoId),
-                    PublishedBundlePhotoInput(photoId = added.id)
-                ),
-                emptyList()), "captionless-add")
-        assertThat(result.photos.first().caption).isEqualTo("과거 캡션")
-        assertThat(result.photos.last().caption).isEmpty()
-        assertThat(result.photos.last().picks!!.count).isZero()
+        val obsoleteCaption = mvc.perform(put("/api/v1/bunches/${f.bunchId}/bundles/${f.id}/published")
+            .header("Authorization", "Bearer ${token(f.owner)}")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{
+                "expectedRevision":${current.revision},"title":"변경","date":null,
+                "photos":[
+                    {"bundlePhotoId":${f.photoId},"caption":"obsolete historical overwrite"},
+                    {"photoId":${added.id},"caption":"obsolete new caption"}
+                ],"locations":[]
+            }"""))
+            .andExpect(status().isOk()).andReturn()
+        val editedData = mapper.readTree(obsoleteCaption.response.contentAsString).path("data")
+        editedData.path("photos").forEach(::assertNoCaptionMetadata)
+        assertThat(legacyCaptionState(f.photoId)).isEqualTo(historicalBefore)
+        val addedLegacy = legacyCaptionState(
+            jdbc.queryForObject(
+                "SELECT id FROM bundle_photos WHERE bundle_id = ? AND photo_id = ?",
+                Long::class.java,
+                f.id,
+                added.id
+            )!!
+        )
+        assertThat(addedLegacy.caption).isEmpty()
+        assertThat(addedLegacy.version).isZero()
+        assertThat(addedLegacy.updatedBy).isNull()
+        assertThat(addedLegacy.updatedAt).isNull()
+
+        val bundleData = detail(f)
+        bundleData.path("photos").forEach(::assertNoCaptionMetadata)
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", f.bunchId)
+        val viewer = member()
+        val publicData = mapper.readTree(
+            mvc.perform(
+                get("/api/v1/bunches/${f.bunchId}/published-bundles/${f.id}")
+                    .header("Authorization", "Bearer ${token(viewer)}")
+            ).andExpect(status().isOk()).andReturn().response.contentAsString
+        ).path("data")
+        publicData.path("photos").forEach(::assertNoCaptionMetadata)
+
+        val feedData = mapper.readTree(
+            mvc.perform(get("/api/v1/feed").header("Authorization", "Bearer ${token(viewer)}"))
+                .andExpect(status().isOk()).andReturn().response.contentAsString
+        ).path("data")
+        val feedCard = feedData.path("items").first {
+            it.path("type").asText() == "BUNDLE" && it.path("bundle").path("id").asLong() == f.id
+        }
+        feedCard.path("bundle").path("photos").forEach(::assertNoCaptionMetadata)
     }
 
     @Test
@@ -378,6 +438,24 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         return mapper.readTree(response.contentAsString).path(if (expectedStatus == 200) "data" else "error")
     }
 
+    private fun legacyCaptionState(bundlePhotoId: Long): LegacyCaptionState {
+        val row = jdbc.queryForMap(
+            "SELECT caption, caption_version, caption_updated_by, caption_updated_at FROM bundle_photos WHERE id = ?",
+            bundlePhotoId
+        )
+        return LegacyCaptionState(
+            caption = row["caption"] as String,
+            version = (row["caption_version"] as Number).toLong(),
+            updatedBy = (row["caption_updated_by"] as Number?)?.toLong(),
+            updatedAt = row["caption_updated_at"] as java.sql.Timestamp?
+        )
+    }
+
+    private fun assertNoCaptionMetadata(photo: JsonNode) {
+        assertThat(photo.fieldNames().asSequence().toSet())
+            .doesNotContain("caption", "captionVersion", "captionUpdatedBy", "captionUpdatedAt", "metadata")
+    }
+
     private fun token(memberId: Long): String {
         val sid = UUID.randomUUID().toString()
         sessions.save(sid, memberId, "test-refresh", 3600)
@@ -392,5 +470,12 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         val id: Long,
         val photoId: Long,
         val sourceId: Long
+    )
+
+    private data class LegacyCaptionState(
+        val caption: String,
+        val version: Long,
+        val updatedBy: Long?,
+        val updatedAt: java.sql.Timestamp?
     )
 }

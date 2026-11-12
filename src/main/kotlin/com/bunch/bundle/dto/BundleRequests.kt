@@ -90,8 +90,7 @@ data class EditPublishedBundleRequest(
 
 data class PublishedBundlePhotoInput(
     val bundlePhotoId: Long? = null,
-    val photoId: Long? = null,
-    val caption: String? = null
+    val photoId: Long? = null
 )
 
 

@@ -28,7 +28,6 @@ data class BunchPublicBundlePhoto @JvmOverloads constructor(
     val id: Long,
     val imageUrl: String,
     val position: Int,
-    val caption: String,
     val picks: BundlePhotoPicks? = null
 )
 

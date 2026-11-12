@@ -246,34 +246,6 @@ class BundleService(
     }
 
     @Transactional
-    fun caption(
-        actor: BundleActor,
-        bunchId: Long,
-        id: Long,
-        photoId: Long,
-        request: BundleTextRequest,
-        requestId: String
-    ): BundleSnapshot {
-        val bundle = editable(actor, bunchId, id, request.mode)
-        val photo = bundlePhoto(id, photoId)
-        leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
-        version(photo.captionVersion, request.expectedVersion, mapOf(
-            "value" to photo.caption,
-            "bundlePhotoId" to photoId
-        ))
-        val value = validateText { BundleText.caption(request.value) }
-        if (photo.caption != value) {
-            photo.caption = value
-            photo.captionVersion++
-            photo.captionUpdatedBy = actor.memberId
-            photo.captionUpdatedAt = Instant.now()
-            changed(bundle, requestId, BundleEventType.CAPTION, photoResponse(photo))
-            recordActivity(bundle, actor.memberId)
-        }
-        return snapshot(bundle, actor.memberId)
-    }
-
-    @Transactional
     fun addParticipant(actor: BundleActor, bunchId: Long, id: Long, memberId: Long, requestId: String): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
         access.requireParticipant(actor.memberId, bundle)
@@ -463,7 +435,6 @@ class BundleService(
             request.date?.isAfter(LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))) == true) {
             fail(ErrorCode.INVALID_INPUT)
         }
-        val captions = request.photos.map { input -> input.caption?.let { validateText { BundleText.caption(it) } } }
         request.photos.forEach {
             if ((it.bundlePhotoId == null) == (it.photoId == null)) fail(ErrorCode.INVALID_INPUT)
         }
@@ -491,14 +462,6 @@ class BundleService(
                 ?: addPhoto(bundle, additions.getValue(input.photoId!!), index, actor.memberId)
             if (row.position != index) {
                 row.position = index
-                edited = true
-            }
-            val caption = captions[index]
-            if (caption != null && row.caption != caption) {
-                row.caption = caption
-                row.captionVersion++
-                row.captionUpdatedBy = actor.memberId
-                row.captionUpdatedAt = clock.instant()
                 edited = true
             }
         }
@@ -548,7 +511,7 @@ class BundleService(
             val bundle = bundles.findLocked(bundleId) ?: return@forEach
             if (bundle.status == BundleStatus.PUBLISHED) {
                 rows.forEach { it.photoId = null }
-                // Source metadata is part of snapshots; retained image, caption and order remain unchanged.
+                // Source metadata is part of snapshots; retained image and order remain unchanged.
                 changed(bundle, UUID.randomUUID().toString(), BundleEventType.PHOTOS, photoChanges(bundle))
             } else {
                 rows.forEach { leases.clearPhoto(bundleId, it.id) }
@@ -665,9 +628,6 @@ class BundleService(
 
     private fun photoRows(id: Long) = photos.findAllByBundleIdOrderByPositionAscIdAsc(id)
 
-    private fun bundlePhoto(id: Long, photoId: Long) = photos.findById(photoId).orElse(null)
-        ?.takeIf { it.bundleId == id } ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-
     private fun version(current: Long, expected: Long, values: Map<String, Any?>) {
         if (current != expected) fail(ErrorCode.BUNDLE_VERSION_CONFLICT, values + ("version" to current))
     }
@@ -772,8 +732,7 @@ class BundleService(
     }
 
     private fun photoResponse(row: BundlePhoto) = BundlePhotoResponse(
-        row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt,
-        row.caption, row.captionVersion, row.captionUpdatedBy, row.captionUpdatedAt
+        row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt
     )
 
     private fun commentResponse(row: BundleComment) = BundleCommentResponse(

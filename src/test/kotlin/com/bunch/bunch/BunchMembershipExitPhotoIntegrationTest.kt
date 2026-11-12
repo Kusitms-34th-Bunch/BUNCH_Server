@@ -99,15 +99,22 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
                 title = "published"
             )
         )
-        bundlePhotos.saveAndFlush(
+        val publishedPhoto = bundlePhotos.saveAndFlush(
             BundlePhoto(
                 bundleId = publishedBundle.id,
                 photoId = publishedSource.id,
                 imageAsset = publishedSource.imageAsset,
                 position = 0,
-                addedBy = removed,
-                caption = "keep this caption"
+                addedBy = removed
             )
+        )
+        val historicalUpdatedAt = java.sql.Timestamp.from(Instant.parse("2026-01-02T00:00:00Z"))
+        jdbc.update(
+            """UPDATE bundle_photos SET caption = 'keep this caption', caption_version = 2,
+                caption_updated_by = ?, caption_updated_at = ? WHERE id = ?""",
+            removed,
+            historicalUpdatedAt,
+            publishedPhoto.id
         )
         val ownerMembership = memberships.findByMemberIdAndBunchIdAndStatus(owner, bunch.id)!!
         val removedMembership = memberships.findByMemberIdAndBunchIdAndStatus(removed, bunch.id)!!
@@ -126,7 +133,14 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
         assertThat(photos.existsById(publishedSource.id)).isFalse()
         val retained = bundlePhotos.findAllByBundleIdOrderByPositionAscIdAsc(publishedBundle.id).single()
         assertThat(retained.photoId).isNull()
-        assertThat(retained.caption).isEqualTo("keep this caption")
+        val legacy = jdbc.queryForMap(
+            "SELECT caption, caption_version, caption_updated_by, caption_updated_at FROM bundle_photos WHERE id = ?",
+            publishedPhoto.id
+        )
+        assertThat(legacy["caption"]).isEqualTo("keep this caption")
+        assertThat((legacy["caption_version"] as Number).toLong()).isEqualTo(2L)
+        assertThat((legacy["caption_updated_by"] as Number).toLong()).isEqualTo(removed)
+        assertThat(legacy["caption_updated_at"]).isEqualTo(historicalUpdatedAt)
         assertThat(retained.imageAsset.id).isEqualTo(publishedAsset)
         assertThat(assets.existsById(publishedAsset)).isTrue()
     }
