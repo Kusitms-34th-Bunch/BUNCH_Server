@@ -7,6 +7,9 @@ interface RefreshTokenRepository {
 
     fun delete(sessionId: String, userId: Long): Boolean
 
+    // Every session of the account on every device, for the withdrawal (7.6.4). Returns how many were removed.
+    fun deleteAll(userId: Long): Int
+
     fun compareAndRotate(
         sessionId: String,
         userId: Long,
