@@ -10,7 +10,7 @@ data class PinnedPlaceResponse(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+    val address: String?,
     val sourceType: PinnedPlaceSource,
     val sourceBundleId: Long?,
     val sourceLocationId: Long?,
@@ -39,7 +39,7 @@ data class BundlePlacePinResponse(
     val provider: String,
     val externalId: String,
     val name: String,
-    val address: String,
+    val address: String?,
     val position: Int,
     val pinned: Boolean,
     val pinId: Long?

@@ -16,6 +16,16 @@ class PlaceDetailsTest {
     }
 
     @Test
+    fun `keeps a missing regional address null without substituting its name`() {
+        val place = PlaceDetails.of(" example-provider ", " Region-01 ", " 여의도 ", null)
+
+        assertThat(place.provider).isEqualTo("example-provider")
+        assertThat(place.externalId).isEqualTo("Region-01")
+        assertThat(place.name).isEqualTo("여의도")
+        assertThat(place.address).isNull()
+    }
+
+    @Test
     fun `validates shared limits by graphemes and handles family emoji at the boundary`() {
         val family = "👨‍👩‍👧‍👦"
         assertThat(PlaceDetails.of("a".repeat(32), "a".repeat(128), family.repeat(200), family.repeat(500)).name)
