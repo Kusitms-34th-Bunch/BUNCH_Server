@@ -15,10 +15,6 @@ data class BundlePhotoResponse(
     val position: Int,
     val addedBy: Long,
     val addedAt: Instant,
-    val caption: String,
-    val captionVersion: Long,
-    val captionUpdatedBy: Long?,
-    val captionUpdatedAt: Instant?,
     @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val picks: BundlePhotoPicks? = null
 )

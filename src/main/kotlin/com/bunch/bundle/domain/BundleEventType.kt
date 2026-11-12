@@ -9,7 +9,6 @@ enum class BundleEventType {
     DATE_CHIPS,
     PERMISSIONS,
     COMMENT,
-    CAPTION,
     PARTICIPANTS,
     PHOTOS,
     PUBLISHED,

@@ -897,7 +897,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `move uses current anchors and captions require the owning photo lease`() {
+    fun `move uses current anchors`() {
         val owner = member()
         val guest = member()
         val bunchId = bunchWithMembers(owner, guest)
@@ -927,33 +927,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         }
 
         val target = moved.photos.first()
-        val token = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            draft.id,
-            "PHOTO:${target.id}",
-            "caption-connection"
-        ).token
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleService.caption(
-                actor(guest),
-                bunchId,
-                draft.id,
-                target.id,
-                BundleTextRequest("foreign caption", 0, BundleStatus.DRAFT),
-                "foreign-caption"
-            )
-        }
-        val captioned = bundleService.caption(
-            actor(owner),
-            bunchId,
-            draft.id,
-            target.id,
-            BundleTextRequest("caption belongs to owner", 0, BundleStatus.DRAFT, token),
-            "owner-caption"
-        )
-        assertThat(captioned.photos.first { it.id == target.id }.caption).isEqualTo("caption belongs to owner")
-        assertThat(captioned.leases).extracting<Long> { it.memberId }.contains(owner)
+        assertThat(target.photoId).isEqualTo(source[2].id)
     }
 
     @Test
@@ -1439,21 +1413,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val source = photo(bunchId, listOf(owner))
         val draft = createDraft(owner, bunchId, listOf(source.id))
         val row = bundlePhotos.findAllByBundleIdOrderByPositionAscIdAsc(draft.id).single()
-        val lease = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            draft.id,
-            "PHOTO:${row.id}",
-            "overlap-caption-connection"
-        ).token
-        val captioned = bundleService.caption(
-            actor(owner),
-            bunchId,
-            draft.id,
-            row.id,
-            BundleTextRequest("keep this caption", 0, BundleStatus.DRAFT, lease),
-            "overlap-caption"
-        )
 
         assertBundleError(ErrorCode.INVALID_INPUT) {
             bundleService.changePhotos(
@@ -1470,11 +1429,10 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         }
 
         val after = bundleService.get(owner, bunchId, draft.id)
-        assertThat(after.revision).isEqualTo(captioned.revision)
+        assertThat(after.revision).isEqualTo(draft.revision)
         assertThat(after.photos).hasSize(1)
         assertThat(after.photos.single().id).isEqualTo(row.id)
         assertThat(after.photos.single().photoId).isEqualTo(source.id)
-        assertThat(after.photos.single().caption).isEqualTo("keep this caption")
     }
 
     @Test
@@ -1667,13 +1625,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             actor(owner), bunchId, published.id,
             publishedEdit(published).copy(
                 title = "updated title", date = LocalDate.of(2024, 2, 1),
-                photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = publishedPhoto.id, caption = "published caption"))
+                photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = publishedPhoto.id))
             ), "published-save"
         )
         assertThat(updated.title).isEqualTo("updated title")
         assertThat(updated.visibility).isEqualTo(published.visibility)
         assertThat(updated.date).isEqualTo(LocalDate.of(2024, 2, 1))
-        assertThat(updated.photos.single().caption).isEqualTo("published caption")
         assertBundleError(ErrorCode.FORBIDDEN) {
             bundleService.editPublished(actor(guest), bunchId, published.id, publishedEdit(updated), "guest-save")
         }
@@ -1739,7 +1696,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         setRole(bunchId, coOwner, MembershipRole.CO_OWNER)
         val source = photo(bunchId, listOf(creator))
         val published = publishReadyBundle(creator, coOwner, bunchId, source, "member-creator")
-        val photoId = published.photos.single().id
         jdbc.update("UPDATE bunch_memberships SET last_activity_at = NULL WHERE bunch_id = ?", bunchId)
 
         listOf(creator, coOwner).forEach { memberId ->
@@ -1762,10 +1718,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 {
                     bundleService.date(actor(memberId), bunchId, published.id,
                         BundleDateRequest(LocalDate.of(2024, 2, 1), 0, BundleStatus.PUBLISHED), "role-date")
-                },
-                {
-                    bundleService.caption(actor(memberId), bunchId, published.id, photoId,
-                        BundleTextRequest("forbidden", 0, BundleStatus.PUBLISHED), "role-caption")
                 },
                 {
                     bundleService.changePhotos(actor(memberId), bunchId, published.id, UUID.randomUUID(),
@@ -1921,7 +1873,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val titleLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "TITLE", "activity-title")
         val dateLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "DATE", "activity-date")
         val photoId = draft.photos.single().id
-        val captionLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "PHOTO:$photoId", "activity-photo")
         val photoKey = UUID.randomUUID()
         val photoRequest = BundlePhotoChangesRequest(listOf(addition.id), mode = BundleStatus.DRAFT)
         val edits = listOf<() -> Any?>(
@@ -1931,8 +1882,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.DRAFT), "activity-visibility") },
             { bundleService.date(actor(owner), bunchId, draft.id,
                 BundleDateRequest(LocalDate.of(2024, 1, 1), 0, BundleStatus.DRAFT, dateLease.token), "activity-date") },
-            { bundleService.caption(actor(owner), bunchId, draft.id, photoId,
-                BundleTextRequest("activity caption", 0, BundleStatus.DRAFT, captionLease.token), "activity-caption") },
             { bundleService.changePhotos(actor(owner), bunchId, draft.id, photoKey, photoRequest) },
             { bundleService.move(actor(owner), bunchId, draft.id, photoId,
                 MoveBundlePhotoRequest(bundleService.get(owner, bunchId, draft.id).photos.last().id,
@@ -2071,7 +2020,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
 
     private fun publishedEdit(value: BundleSnapshot) = EditPublishedBundleRequest(
         value.revision, value.title, value.date,
-        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) },
+        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id) },
         emptyList()
     )
 

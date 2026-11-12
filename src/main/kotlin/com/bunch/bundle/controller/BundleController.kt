@@ -190,18 +190,6 @@ class BundleController(
         @RequestBody request: BundlePhotoPickRequest
     ) = ApiResponse.ok(picks.save(userId(authentication), bunchId, id, photoId, request))
 
-    @PutMapping("/{id}/photos/{photoId}/caption")
-    fun caption(
-        authentication: Authentication,
-        @PathVariable bunchId: Long,
-        @PathVariable id: Long,
-        @PathVariable photoId: Long,
-        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
-        @RequestBody request: BundleTextRequest
-    ) = ApiResponse.ok(
-        bundles.caption(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
-    )
-
     @PostMapping("/{id}/publish")
     fun publish(
         authentication: Authentication,

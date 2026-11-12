@@ -27,10 +27,9 @@ E19:K20(6.2.11·6.2.12), E23:K23(6.2.15)에 따라 내용 저장과 공개 범�
 }
 ```
 
-사진·제목·위치·날짜의 최종 값을 보내되 사진 입력의 `caption`은 optional nullable이다. 날짜 null·장소 빈 배열·
-빈 캡션은 허용한다. 사진은 배열 순서대로 1~20장, 장소는 [장소 계약](bundle-locations.md)에
-따라 최대 3개다. 제목은 NFC·trim 후 1~40 grapheme, 캡션은 NFC 후 최대 200 grapheme,
-날짜는 서울 기준 미래 날짜를 거부한다.
+사진·제목·위치·날짜의 최종 값을 보낸다. 날짜 null·장소 빈 배열을 허용한다. 사진은 배열
+순서대로 1~20장, 장소는 [장소 계약](bundle-locations.md)에 따라 최대 3개다. 제목은
+NFC·trim 후 1~40 grapheme, 날짜는 서울 기준 미래 날짜를 거부한다.
 공개 범위는 아래 전용 경로로만 변경한다.
 사진마다 `bundlePhotoId`(보존할 번들 사진)와 `photoId`(새 사진함 사진) 중 정확히 하나를
 보낸다. 기존 사진 ID는 해당 번들 소속이어야 하며 중복 ID·중복 원본 사진을 거부한다.
@@ -40,13 +39,9 @@ E19:K20(6.2.11·6.2.12), E23:K23(6.2.15)에 따라 내용 저장과 공개 범�
 `EditPublishedBundleRequest.visibility`는 제거한다. 구 클라이언트가 일괄 저장 JSON에
 `visibility`를 남겨도 기존 Jackson 미지 필드 처리대로 무시하며 공개 범위와 그 버전은
 변경하지 않는다. 클라이언트는 공개 범위 변경을 전용 경로로 전환해야 한다.
-사진 입력의 `caption`은 #123의 호환성 전환 전까지 기존 계약을 유지하며 과거 데이터를 삭제하지 않는다.
-
-보존 입력(`bundlePhotoId`)의 `caption`을 생략하거나 null로 보내면 기존 캡션을 유지한다.
-새 입력(`photoId`)의 caption이 생략되거나 null이면 빈 캡션으로 시작한다. 명시적인 non-null
-caption은 NFC·길이 검증 후 저장하며, 기존 caption에 빈 문자열을 명시하면 기존 캡션을 지운다.
-새 픽·발행본 수정 화면은 이 legacy caption 입력을 사용하지 않지만, 기존 API·응답 필드·데이터는
-삭제하거나 재해석하지 않는다.
+캡션은 현재 발행 입력·응답 계약에서 제거한다. 이미 적용된 DB/Flyway의 caption 컬럼·값과
+마이그레이션 이력은 내부 historical data로만 보존하며 API 입력·응답·이벤트로 노출하거나
+수정하지 않는다.
 
 서버는 번치→번들을 잠근 뒤 expectedRevision과 전체 입력을 검증한다. 불일치는
 409 `BUNDLE_003`, detail `{revision: 현재값, version: 현재값}`이다. 잘못된 입력은 400 `COMMON_001`,
@@ -69,7 +64,7 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 장소 교체는 MANDATORY `BundleLocationService.replaceLocked`를 호출한다. 동기 출처 제거
 이벤트의 실제 핀 정리는 #92 소유이며 별도 임시 writer를 만들지 않는다. listener 실패도 전체 롤백한다.
 
-기존 제목·날짜·사진 추가/삭제/이동·캡션 경로는 PUBLISHED에서 OWNER도
+기존 제목·날짜·사진 추가/삭제/이동 경로는 PUBLISHED에서 OWNER도
 409 `BUNDLE_002`로 거부한다. 참여자 추가/삭제·leave·comments/me도 발행 후 거부한다.
 이 경로들의 DRAFT lease·version·참여 권한은 유지한다.
 
@@ -98,7 +93,7 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 no-op으로 시각·버전·이벤트를 유지한다. 성공 응답은 기존 BundleSnapshot이다.
 커밋 후 기존 `VISIBILITY` 이벤트 `{value, version}`를 한 번 보내며 선택 `X-Request-Id`를 유지한다.
 롤백 시 이벤트를 보내지 않는다. 발행본 변경에서는 활동 기록·발행 준비 알림·수정 알림을 만들지 않는다.
-발행 시각·제목·사진 ID/순서/캡션·위치·날짜·참여자 코멘트·좋아요·소셜 댓글은 보존한다.
+발행 시각·제목·사진 ID/순서·위치·날짜·참여자 코멘트·좋아요·소셜 댓글은 보존한다.
 
 내용 저장은 visibilityVersion을 바꾸지 않는다. 먼저 내용 저장이 끝나면 기존 visibilityVersion으로
 범위 변경을 이어갈 수 있다. 반대로 범위 변경은 aggregate revision을 올리므로 그 이전
@@ -122,9 +117,8 @@ PRIVATE(멤버 공개)로 바꾸면 외부 피드·번치 프로필 목록·상�
 ## 상세·권한·집계
 
 내부 GET과 외부 `published-bundles` GET 모두 FeedAccessService의 최신 접근 판정을 적용한다.
-외부 상세는 사진·기존 caption 필드·사진별 `picks` 순서, `locations`, `revision`, `visibility`,
-`permissions`를 제공한다. 새 상세 흐름은 caption을 표시하지 않아도 `picks`와 기존 데이터의
-보존 규칙을 바꾸지 않는다.
+외부 상세는 사진·사진별 `picks` 순서, `locations`, `revision`, `visibility`, `permissions`를
+제공한다. 사진 픽과 기존 발행 데이터의 보존 규칙은 캡션 제거와 무관하게 유지한다.
 내부·외부 상세는 참여자를 전원 제공하며 발행 당시 joinedAt/id 순서를 유지한다.
 참여자 코멘트 `comments`도 같은 참여자 순서다. 기존 필드 이름은 유지한다.
 

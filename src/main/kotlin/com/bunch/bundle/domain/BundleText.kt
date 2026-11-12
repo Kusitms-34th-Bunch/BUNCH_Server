@@ -6,7 +6,6 @@ import java.util.regex.Pattern
 object BundleText {
     private const val TITLE_MAX_GRAPHEMES = 40
     private const val COMMENT_MAX_GRAPHEMES = 400
-    private const val CAPTION_MAX_GRAPHEMES = 200
 
     private val graphemePattern = Pattern.compile("\\X")
     private val lineBreakPattern = Regex("[\\r\\n\\u0085\\u2028\\u2029]")
@@ -33,8 +32,6 @@ object BundleText {
     fun titleTooLong(value: String): Boolean = graphemeLength(normalize(value).trim()) > TITLE_MAX_GRAPHEMES
 
     fun comment(value: String): String = validate(value, COMMENT_MAX_GRAPHEMES, "comment")
-
-    fun caption(value: String): String = validate(value, CAPTION_MAX_GRAPHEMES, "caption")
 
     private fun validate(value: String, maximum: Int, field: String): String = normalize(value).also {
         require(graphemeLength(it) <= maximum) {

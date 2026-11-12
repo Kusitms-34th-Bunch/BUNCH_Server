@@ -490,6 +490,24 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `http feed photo cards omit caption metadata`() {
+        val viewer = member()
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(target, owner)
+        photo(bundle, image("captionless"), 0, owner)
+
+        mvc.perform(get("/api/v1/feed").header("Authorization", bearer(viewer)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.items[0].bundle.id").value(bundle))
+            .andExpect(jsonPath("$.data.items[0].bundle.photos[0].caption").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].bundle.photos[0].captionVersion").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].bundle.photos[0].captionUpdatedBy").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].bundle.photos[0].captionUpdatedAt").doesNotExist())
+            .andExpect(jsonPath("$.data.items[0].bundle.photos[0].metadata").doesNotExist())
+    }
+
+    @Test
     fun `card batch query count stays bounded as cards and individual profiles increase`() {
         val visitor = member()
         repeat(20) {

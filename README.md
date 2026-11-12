@@ -199,6 +199,9 @@ TYPE로 제목·본인 코멘트의 실제 입력을 알리는 비독점 신호�
 기존 적용 Flyway 이력은 보존하며, 새 번들·콕 마이그레이션은 선행 PR 순서대로 적용한다.
 사진 픽 저장은 `V38__bundle_photo_picks.sql`, 초기 픽 버전은
 `V39__bundle_pick_initial_versions.sql`로 관리한다.
+캡션은 현재 활성 제품 계약에서 제거했다. 캡션 쓰기·편집 API, 발행 입력,
+Bundle/public/feed 응답 필드, `CAPTION` 이벤트와 캡션 검증은 제공하지 않는다. 이미 적용된
+DB/Flyway의 caption 컬럼·값은 내부 과거 데이터로만 보존하며 새 DDL이나 호환 계층은 추가하지 않는다.
 사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
 테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 
@@ -225,7 +228,7 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
   준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
 - 사진 픽은 실제 PostgreSQL에서 HTTP 정상·동일 상태 stale no-op·상태 변경 stale `BUNDLE_003`,
   동시 요청 직렬화, 응답 요약, false row의 ABA 방지, 사진·참여자 FK cascade, 발행 동결과
-  nullable caption 호환을 검증한다. 픽 전용 STOMP event·알림은 만들지 않으며 snapshot 재조회로
+  사진 원본 삭제 후 보존을 검증한다. 픽 전용 STOMP event·알림은 만들지 않으며 snapshot 재조회로
   revision gap을 복구한다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.

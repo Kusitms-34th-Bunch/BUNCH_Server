@@ -378,7 +378,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `draft title date and photo caption save without the REST screen header`() {
+    fun `draft title and date save without the REST screen header`() {
         val fixture = fixture(photoCount = 1)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
@@ -395,15 +395,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             "DATE",
             "stomp-date-connection"
-        )
-        val photoId = detail(fixture.owner, fixture.bunchId, bundleId)
-            .path("photos").single().path("id").asLong()
-        val captionGrant = leaseService.acquire(
-            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            fixture.bunchId,
-            bundleId,
-            "PHOTO:$photoId",
-            "stomp-caption-connection"
         )
 
         titleRequest(
@@ -422,20 +413,10 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             expectedVersion = 0,
             leaseToken = dateGrant.token
         ).andExpect(status().isOk)
-        captionRequest(
-            fixture.owner,
-            fixture.bunchId,
-            bundleId,
-            photoId,
-            value = "헤더 없는 캡션",
-            expectedVersion = 0,
-            leaseToken = captionGrant.token
-        ).andExpect(status().isOk)
 
         val saved = detail(fixture.owner, fixture.bunchId, bundleId)
         assertThat(saved.path("title").asText()).isEqualTo("헤더 없는 제목")
         assertThat(saved.path("date").asText()).isEqualTo("2024-01-02")
-        assertThat(saved.path("photos").single().path("caption").asText()).isEqualTo("헤더 없는 캡션")
     }
 
     @Test
@@ -705,23 +686,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .header(HttpHeaders.AUTHORIZATION, bearer(auth))
             .contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsBytes(BundleDateRequest(value, expectedVersion, mode, leaseToken)))
-        return mvc.perform(request)
-    }
-
-    private fun captionRequest(
-        auth: Auth,
-        bunchId: Long,
-        bundleId: Long,
-        photoId: Long,
-        value: String,
-        expectedVersion: Long,
-        leaseToken: UUID?,
-        mode: BundleStatus = BundleStatus.DRAFT
-    ): ResultActions {
-        val request = put("${bundlePath(bunchId, bundleId)}/photos/$photoId/caption")
-            .header(HttpHeaders.AUTHORIZATION, bearer(auth))
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode, leaseToken)))
         return mvc.perform(request)
     }
 

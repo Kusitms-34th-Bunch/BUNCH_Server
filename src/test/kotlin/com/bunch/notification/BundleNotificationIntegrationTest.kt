@@ -289,8 +289,8 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
             actor(owner), bunchId, published.id,
             EditPublishedBundleRequest(
                 published.revision, "published edit", published.date,
-                published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) } +
-                    PublishedBundlePhotoInput(photoId = publishedAddition.id, caption = ""),
+                published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id) } +
+                    PublishedBundlePhotoInput(photoId = publishedAddition.id),
                 emptyList()
             ), "published-save"
         )

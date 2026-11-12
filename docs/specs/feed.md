@@ -86,7 +86,7 @@ WITHDRAWN 계정이나 새 계정은 복구되지 않는다.
 | 6.2.1 | 번들 상세 | [발행본](published-bundle-edit.md): 공통 접근·사진·원자적 표시 | 상세 레이아웃·진입·불가 안내 |
 | 6.2.2 | 번치·참여자 | [발행본](published-bundle-edit.md): 업로드 참여자·이탈 익명화·번치 재참여 복구 | 번치/참여자 시트 이동 |
 | 6.2.3 | 제목·위치·날짜 | [발행본](published-bundle-edit.md), [위치](bundle-locations.md) | 제목·날짜 형식·위치 줄 |
-| 6.2.4 | 사진·픽 | [발행본](published-bundle-edit.md): 사진 순서·대표·`photos[].picks`; 기존 caption 필드는 유지하되 새 흐름은 표시하지 않음 | 사진 순서·픽 표시 |
+| 6.2.4 | 사진·픽 | [발행본](published-bundle-edit.md): 사진 순서·대표·`photos[].picks` | 사진 순서·픽 표시 |
 | 6.2.5 | 멤버별 코멘트 | [발행본](published-bundle-edit.md): 참여자 순서·이탈 자리·소셜 댓글과 분리 | 칩·코멘트 전환 |
 | 6.2.6 | 좋아요·댓글 수 | [좋아요](feed-likes.md), [댓글](feed-comments.md): 현재 번치·삭제 자리 포함·비노출 제외 | 낙관 갱신·실패 복구 |
 | 6.2.7 | 댓글 목록 | [댓글](feed-comments.md): 원댓글 최신순·1단계 답글 오래된순·삭제 자리 | 답글 펼치기·더보기 |
