@@ -92,6 +92,11 @@ class PushJobWriter(
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    fun deleteAllOf(memberId: Long) {
+        jobs.deleteByRecipientMemberId(memberId)
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     fun cancelPendingForDevice(memberId: Long, deviceId: Long) {
         jobs.cancelPendingForDevice(memberId, deviceId, DEVICE_UNREGISTERED)
     }

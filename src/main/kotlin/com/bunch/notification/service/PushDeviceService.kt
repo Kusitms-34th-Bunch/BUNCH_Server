@@ -10,6 +10,7 @@ import jakarta.persistence.EntityManager
 import com.bunch.notification.dto.PushDeviceRegistrationRequest
 import com.bunch.notification.dto.PushDeviceResponse
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Instant
@@ -107,6 +108,13 @@ class PushDeviceService(
         jobs.cancelPendingForDevice(memberId, device.id)
         devices.delete(device)
         devices.flush()
+    }
+
+    // Called when the account is withdrawn: every device and every queued or finished push of the member goes (7.6.4).
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllOf(memberId: Long) {
+        jobs.deleteAllOf(memberId)
+        devices.deleteByMemberId(memberId)
     }
 
     @Transactional
