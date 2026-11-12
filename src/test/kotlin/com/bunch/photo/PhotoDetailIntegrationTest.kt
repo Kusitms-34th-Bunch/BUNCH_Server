@@ -19,6 +19,7 @@ import java.util.UUID
 class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanDetailFixtures() {
+        deleteInsertedBundles()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("UPDATE members SET profile_image_asset_id = NULL WHERE profile_image_asset_id IN " +
@@ -46,6 +47,7 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
             )
             .andExpect(jsonPath("$.data.capturedDate").value("2026-10-19"))
             .andExpect(jsonPath("$.data.uploaders.length()").value(1))
+            .andExpect(jsonPath("$.data.usedInDraftBundle").value(false))
             // The spec shows no place, no time and no upload date, and the menu is the app's decision.
             .andExpect(jsonPath("$.data.capturedTime").doesNotExist())
             .andExpect(jsonPath("$.data.place").doesNotExist())
@@ -185,6 +187,20 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
         val (_, bunchId) = bunchWithOwner()
 
         mvc.perform(get("${base(bunchId)}/1")).andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `tells whether a draft bundle uses the photo`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val inDraft = photo(bunchId, "2026-10-19", uploaders = listOf(ownerId))
+        val inPublished = photo(bunchId, "2026-10-19", uploaders = listOf(ownerId))
+        val unused = photo(bunchId, "2026-10-19", uploaders = listOf(ownerId))
+        insertBundleWith(bunchId, ownerId, "DRAFT", listOf(inDraft))
+        insertBundleWith(bunchId, ownerId, "PUBLISHED", listOf(inPublished))
+
+        detail(ownerId, bunchId, inDraft).andExpect(jsonPath("$.data.usedInDraftBundle").value(true))
+        detail(ownerId, bunchId, inPublished).andExpect(jsonPath("$.data.usedInDraftBundle").value(false))
+        detail(ownerId, bunchId, unused).andExpect(jsonPath("$.data.usedInDraftBundle").value(false))
     }
 
     private fun detail(memberId: Long, bunchId: Long, photoId: Long): ResultActions =
