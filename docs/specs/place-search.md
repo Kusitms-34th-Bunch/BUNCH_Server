@@ -61,10 +61,10 @@ nullable로 맞춰야 한다. 기존 클라이언트 문서의 BFF/백엔드 호
 핀 요청 본문으로 이름·주소를 바꾸지 않는다. 원본 삭제 후에도 null 주소와 이름을 포함한 핀
 스냅샷 보존 정책을 유지한다.
 
-V2026111111260은 bundle_locations.address, pinned_places.address,
+V36은 bundle_locations.address, pinned_places.address,
 feed_advertisements.place_address의 NOT NULL만 제거한다. 기존 CHECK는 null에서 통과하고
 빈 주소는 계속 거부한다. 기존 주소·ID·키·출처를 갱신하지 않으며 과거 Flyway 파일을 수정하지 않는다.
-원격 dev 최신 V32 및 병렬 #107 V2026111011072, #123 V2026111011230과 버전 중복이 없음을 확인했다.
+기존 dev의 V35 다음에 V36을 적용하며, 후속 PR의 새 마이그레이션도 순번을 이어간다.
 
 기존 유효 문자열 입력은 그대로 호환된다. 클라이언트는 nullable 응답을 처리한 뒤
 주소 없는 결과를 보내야 한다. 기존 앱이 address를 항상 문자열로 가정하면 표시·복사가 실패할 수 있다.
