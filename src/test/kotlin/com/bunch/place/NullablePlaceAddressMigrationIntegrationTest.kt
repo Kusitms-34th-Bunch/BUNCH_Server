@@ -73,9 +73,9 @@ class NullablePlaceAddressMigrationIntegrationTest @Autowired constructor(privat
                     .hasMessageContaining(column)
             }
 
-            val migration = flyway(schema, "2026111111260")
+            val migration = flyway(schema, "36")
             assertThat(migration.migrate().migrationsExecuted).isPositive()
-            assertThat(migration.info().current().version.toString()).isEqualTo("2026111111260")
+            assertThat(migration.info().current().version.toString()).isEqualTo("36")
             previousRows.forEach { (table, rows) ->
                 assertThat(jdbc.queryForList("SELECT * FROM $schema.$table")).isEqualTo(rows)
             }
