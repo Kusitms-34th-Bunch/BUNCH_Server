@@ -20,6 +20,7 @@ const staticFiles = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/app.mjs', ['app.mjs', 'text/javascript; charset=utf-8']],
   ['/protocol.mjs', ['protocol.mjs', 'text/javascript; charset=utf-8']],
+  ['/interaction.mjs', ['interaction.mjs', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);
 

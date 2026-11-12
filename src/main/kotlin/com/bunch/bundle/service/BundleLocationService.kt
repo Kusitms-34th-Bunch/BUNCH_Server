@@ -89,7 +89,7 @@ class BundleLocationService(
         val current = locations.findAllByBundleIdOrderByPositionAscIdAsc(bundle.id)
         validateIntent(bundle, request)
         val plan = plan(request, current)
-        val result = replaceLocked(bundle, plan.inputs)
+        val result = writeLocked(bundle, current, plan.drafts)
         if (result.changed) {
             bundle.revision++
             bundle.updatedAt = clock.instant()
@@ -140,15 +140,37 @@ class BundleLocationService(
     fun replaceLocked(bundle: Bundle, input: List<BundleLocationInput>): BundleLocationChange {
         val normalized = normalize(input)
         val current = locations.findAllByBundleIdOrderByPositionAscIdAsc(bundle.id)
+        val byKey = current.associateBy(::key)
+        val drafts = normalized.map { (place, _) ->
+            LocationDraft(
+                id = byKey[place.provider to place.externalId]?.id,
+                place = BundleLocationIntentPlace(place.provider, place.externalId, place.name, place.address)
+            )
+        }
+        return writeLocked(bundle, current, drafts)
+    }
+
+    private fun writeLocked(
+        bundle: Bundle,
+        current: List<BundleLocation>,
+        drafts: List<LocationDraft>
+    ): BundleLocationChange {
         val before = current.map(::response)
-        val keys = normalized.map { it.first.provider to it.first.externalId }.toSet()
-        val removed = current.filter { (it.provider to it.externalId) !in keys }
+        val byId = current.associateBy { it.id }
+        val plannedById = drafts.filter { it.id != null }.associateBy { it.id }
+        val removed = current.filter { it.id !in plannedById }
+        val invalidatedSources = current.filter { row ->
+            val planned = plannedById[row.id]
+            planned == null || key(row) != planned.place.key()
+        }
+        if (invalidatedSources.isNotEmpty()) {
+            // Clean old place pins before changing a retained row's identity or deleting its source.
+            // The listener may flush, so no location fields may be changed before this callback.
+            events.publishEvent(BundleLocationsRemovedEvent(bundle.id, invalidatedSources.map { it.id }))
+        }
         if (removed.isNotEmpty()) {
-            // A synchronous pin listener deletes only these source references before FK SET NULL can run.
-            events.publishEvent(BundleLocationsRemovedEvent(bundle.id, removed.map { it.id }))
             removed.forEach { row ->
-                // Retain only ID provenance, using the existing per-bundle request storage.
-                // A deleted target must remain distinguishable from an unknown/foreign ID.
+                // Only a physically deleted row gets provenance; a replacement keeps its live ID.
                 requests.save(BundleRequest(
                     bunchId = bundle.bunchId,
                     memberId = bundle.createdBy,
@@ -163,9 +185,9 @@ class BundleLocationService(
             locations.deleteAll(removed)
             locations.flush()
         }
-        val byKey = current.associateBy { it.provider to it.externalId }
-        val after = normalized.map { (place, position) ->
-            val row = byKey[place.provider to place.externalId] ?: locations.save(BundleLocation(
+        val after = drafts.mapIndexed { position, draft ->
+            val place = draft.place
+            val row = draft.id?.let { byId.getValue(it) } ?: locations.save(BundleLocation(
                 bundleId = bundle.id,
                 provider = place.provider,
                 externalId = place.externalId,
@@ -173,6 +195,8 @@ class BundleLocationService(
                 address = place.address,
                 position = position
             ))
+            row.provider = place.provider
+            row.externalId = place.externalId
             row.name = place.name
             row.address = place.address
             row.position = position
@@ -261,12 +285,11 @@ class BundleLocationService(
         if (request.locations.isEmpty()) fail(ErrorCode.INVALID_INPUT)
         val normalized = normalizePlaces(request.locations)
         val currentKeys = current.map(::key).toSet()
-        val additions = normalized
-            .filterNot { it.key() in currentKeys }
-            .take(MAX_LOCATIONS - current.size)
+        if (normalized.any { it.key() in currentKeys }) conflict("LOCATION_DUPLICATE")
+        if (current.size + normalized.size > MAX_LOCATIONS) conflict("LOCATION_CAPACITY_EXCEEDED")
         val drafts = current.map(::draft).toMutableList()
-        additions.forEach { drafts.add(LocationDraft(null, it)) }
-        return IntentPlan(toInputs(drafts), additions.size)
+        normalized.forEach { drafts.add(LocationDraft(null, it)) }
+        return IntentPlan(drafts, normalized.size)
     }
 
     private fun replacePlan(
@@ -276,22 +299,21 @@ class BundleLocationService(
         val targetId = positive(request.targetLocationId)
         val replacement = request.location?.let(::normalizePlace) ?: fail(ErrorCode.INVALID_INPUT)
         if (current.any { key(it) == replacement.key() }) {
-            return IntentPlan(toInputs(current.map(::draft)), 0)
+            conflict("LOCATION_DUPLICATE")
         }
         val targetIndex = current.indexOfFirst { it.id == targetId }
         if (targetIndex < 0) {
             if (current.size >= MAX_LOCATIONS) {
-                return IntentPlan(toInputs(current.map(::draft)), 0)
+                conflict("LOCATION_CAPACITY_EXCEEDED")
             }
             val drafts = current.map(::draft).toMutableList()
             drafts.add(LocationDraft(null, replacement))
-            return IntentPlan(toInputs(drafts), 1)
+            return IntentPlan(drafts, 1)
         }
 
         val drafts = current.map(::draft).toMutableList()
-        drafts.removeAt(targetIndex)
-        drafts.add(targetIndex.coerceAtMost(drafts.size), LocationDraft(null, replacement))
-        return IntentPlan(toInputs(drafts), 1)
+        drafts[targetIndex] = LocationDraft(targetId, replacement)
+        return IntentPlan(drafts, 1)
     }
 
     private fun removePlan(
@@ -299,8 +321,8 @@ class BundleLocationService(
         current: List<BundleLocation>
     ): IntentPlan {
         val targetId = positive(request.targetLocationId)
-        if (current.none { it.id == targetId }) return IntentPlan(toInputs(current.map(::draft)), 0)
-        return IntentPlan(toInputs(current.filterNot { it.id == targetId }.map(::draft)), 1)
+        if (current.none { it.id == targetId }) return IntentPlan(current.map(::draft), 0)
+        return IntentPlan(current.filterNot { it.id == targetId }.map(::draft), 1)
     }
 
     private fun movePlan(
@@ -311,8 +333,7 @@ class BundleLocationService(
         val previousId = request.previousLocationId?.also { positive(it) }
         val nextId = request.nextLocationId?.also { positive(it) }
         if (previousId == targetId || nextId == targetId) fail(ErrorCode.INVALID_INPUT)
-        val target = current.firstOrNull { it.id == targetId }
-            ?: return IntentPlan(toInputs(current.map(::draft)), 0)
+        val target = current.firstOrNull { it.id == targetId } ?: conflict(REMOVED_LOCATION)
         val rest = current.filterNot { it.id == targetId }.toMutableList()
         val nextIndex = nextId?.let { id -> rest.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
         val previousIndex = previousId?.let { id ->
@@ -321,11 +342,14 @@ class BundleLocationService(
         val insertionIndex = nextIndex ?: previousIndex?.plus(1) ?: rest.size
         rest.add(insertionIndex.coerceIn(0, rest.size), target)
         val changed = rest.map { it.id } != current.map { it.id }
-        return IntentPlan(toInputs(rest.map(::draft)), if (changed) 1 else 0)
+        return IntentPlan(rest.map(::draft), if (changed) 1 else 0)
     }
 
-    private fun normalizePlaces(places: List<BundleLocationIntentPlace>): List<BundleLocationIntentPlace> =
-        places.map(::normalizePlace).distinctBy { it.key() }
+    private fun normalizePlaces(places: List<BundleLocationIntentPlace>): List<BundleLocationIntentPlace> {
+        val normalized = places.map(::normalizePlace)
+        if (normalized.map { it.key() }.distinct().size != normalized.size) conflict("LOCATION_DUPLICATE")
+        return normalized
+    }
 
     private fun normalizePlace(place: BundleLocationIntentPlace): BundleLocationIntentPlace {
         val normalized = try {
@@ -340,17 +364,6 @@ class BundleLocationService(
             normalized.address
         )
     }
-
-    private fun toInputs(drafts: List<LocationDraft>): List<BundleLocationInput> =
-        drafts.mapIndexed { index, draft ->
-            BundleLocationInput(
-                provider = draft.place.provider,
-                externalId = draft.place.externalId,
-                name = draft.place.name,
-                address = draft.place.address,
-                position = index
-            )
-        }
 
     private fun draft(row: BundleLocation) = LocationDraft(
         id = row.id,
@@ -371,7 +384,7 @@ class BundleLocationService(
     )
 
     private data class IntentPlan(
-        val inputs: List<BundleLocationInput>,
+        val drafts: List<LocationDraft>,
         val acceptedCount: Int
     )
 
@@ -384,6 +397,8 @@ class BundleLocationService(
         const val MAX_LOCATIONS = 3
         const val REMOVED_LOCATION = "LOCATION_REMOVED"
     }
+
+    private fun conflict(reason: String): Nothing = fail(ErrorCode.BUNDLE_STATE_CONFLICT, mapOf("reason" to reason))
 
     private fun fail(code: ErrorCode, detail: Any? = null): Nothing = throw BusinessException(code, detail)
 }

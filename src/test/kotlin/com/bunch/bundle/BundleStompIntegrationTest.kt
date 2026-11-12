@@ -15,6 +15,9 @@ import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.dto.BundleLocationsRequest
+import com.bunch.bundle.dto.BundleLocationIntentPlace
+import com.bunch.bundle.dto.BundleLocationIntentRequest
+import com.bunch.bundle.domain.BundleLocationIntent
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.ErrorCode
@@ -581,9 +584,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
 
         val photoTarget = "PHOTO:${before.path("photos").single().path("id").asLong()}"
         for ((target, endAction) in listOf(
-            photoTarget to "END", "TITLE" to "BLUR", "COMMENT" to "END", "LOCATION" to "END",
-            "PHOTOS" to "END", "VISIBILITY" to "END", "PARTICIPANTS" to "END",
-            photoTarget.replace("PHOTO:", "PICK:") to "END"
+            photoTarget to "END", "LOCATION" to "END", "PHOTOS" to "END",
+            "VISIBILITY" to "END", "PARTICIPANTS" to "END"
         )) {
             owner.clear()
             owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
@@ -600,7 +602,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         owner.presenceAck()
         owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "COMMENT"))
         assertThat(editingTargets(owner.presenceAck().path("data"))).containsExactlyInAnyOrder(
-            fixture.owner.memberId to "COMMENT", fixture.guest.memberId to "LOCATION"
+            fixture.guest.memberId to "LOCATION"
         )
         owner.send(command(fixture, "presence"), mapOf("action" to "END"))
         assertThat(editingTargets(owner.presenceAck().path("data")))
@@ -629,6 +631,53 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `location editing targets individual rows and clears deleted rows without changing content`() {
+        val fixture = fixture()
+        val added = locations.applyIntent(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
+            BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
+                BundleLocationIntentPlace("lab", "first", "서울숲", "서울 성동구 뚝섬로 273"),
+                BundleLocationIntentPlace("lab", "second", "성수역", "서울 성동구 아차산로 100")
+            )), UUID.randomUUID().toString())
+        val first = added.locations[0].id
+        val second = added.locations[1].id
+        val foreign = fixture()
+        val foreignId = locations.applyIntent(actor(foreign.owner), foreign.bunchId, foreign.bundleId,
+            BundleLocationIntentRequest(BundleLocationIntent.ADD, locations = listOf(
+                BundleLocationIntentPlace("lab", "foreign", "외부 장소", "다른 번치 주소")
+            )), UUID.randomUUID().toString()).locations.single().id
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        val before = getSnapshot(fixture, fixture.owner)
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "LOCATION:$first"))
+        owner.presenceAck()
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "LOCATION:$second"))
+        assertThat(editingTargets(guest.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "LOCATION:$first", fixture.guest.memberId to "LOCATION:$second"
+        )
+        owner.json { it.path("data").path("editing").size() == 2 }
+        assertThat(getSnapshot(fixture, fixture.owner).path("revision")).isEqualTo(before.path("revision"))
+        for (target in listOf("LOCATION:$foreignId", "LOCATION:${Long.MAX_VALUE}")) {
+            owner.clear()
+            owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
+            owner.json { it.path("type").asText() == "COMMAND_REJECTED" }
+            assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+                .contains(fixture.owner.memberId to "LOCATION:$first")
+        }
+        locations.applyIntent(actor(fixture.guest), fixture.bunchId, fixture.bundleId,
+            BundleLocationIntentRequest(BundleLocationIntent.REMOVE, targetLocationId = first), UUID.randomUUID().toString())
+        assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+            .containsExactly(fixture.guest.memberId to "LOCATION:$second")
+        owner.clear()
+        owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "LOCATION:$first"))
+        owner.presenceAck()
+        guest.clear()
+        guest.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "LOCATION:$second"))
+        assertThat(guest.presenceAck().path("data").path("editing")).isEmpty()
+    }
+
+    @Test
     fun `field editing presence rejects foreign and unknown bundle photo targets without replacing valid state`() {
         val fixture = fixture()
         val foreign = fixture()
@@ -651,10 +700,11 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val target = "PHOTO:$photoId"
         owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
         assertThat(editingTargets(owner.presenceAck().path("data")))
-            .containsExactly(fixture.owner.memberId to target)
+            .containsExactlyInAnyOrder(fixture.owner.memberId to "DATE", fixture.owner.memberId to target)
         jdbc.update("DELETE FROM bundle_photos WHERE id = ?", photoId)
         owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to target))
-        assertThat(owner.presenceAck().path("data").path("editing")).isEmpty()
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.owner.memberId to "DATE")
     }
 
     @Test
@@ -791,6 +841,103 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         assertThat(rejection.path("data").path("code").asText())
             .isEqualTo(ErrorCode.BUNDLE_STATE_CONFLICT.code)
         assertThat(getPresence(fixture, fixture.owner).path("members")).isEmpty()
+    }
+
+    @Test
+    fun `one STOMP connection keeps uploads beside date and typing while targeted end preserves other editors`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        val before = getSnapshot(fixture, fixture.owner)
+        val activityBefore = jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "PHOTOS"))
+        owner.presenceAck()
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(owner.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "DATE", fixture.owner.memberId to "PHOTOS"
+        )
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "PHOTOS"))
+        assertThat(editingTargets(guest.presenceAck().path("data"))).containsExactlyInAnyOrder(
+            fixture.owner.memberId to "DATE", fixture.owner.memberId to "PHOTOS", fixture.guest.memberId to "PHOTOS"
+        )
+        owner.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("editing").size() == 3 }
+        owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "DATE"))
+        val photoEditors = listOf(fixture.owner.memberId to "PHOTOS", fixture.guest.memberId to "PHOTOS")
+        assertThat(editingTargets(owner.presenceAck().path("data"))).containsExactlyInAnyOrderElementsOf(photoEditors)
+        listOf("TITLE", "COMMENT").forEach { target ->
+            owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to target))
+            val focused = owner.presenceAck().path("data")
+            assertThat(editingTargets(focused)).containsExactlyInAnyOrderElementsOf(photoEditors)
+            assertThat(focused.path("typing")).isEmpty()
+        }
+        val photoId = before.path("photos").single().path("id").asLong()
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "PICK:$photoId"))
+        assertThat(owner.json { it.path("type").asText() == "COMMAND_REJECTED" }
+            .path("data").path("code").asText()).isEqualTo(ErrorCode.INVALID_INPUT.code)
+        assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+            .containsExactlyInAnyOrderElementsOf(photoEditors)
+        owner.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "COMMENT", "text" to "업로드 중 코멘트 입력"
+        ))
+        assertThat(owner.presenceAck().path("data").path("typing").single().path("text").asText())
+            .isEqualTo("업로드 중 코멘트 입력")
+        owner.send(command(fixture, "presence"), mapOf("action" to "BLUR", "target" to "DATE"))
+        val unrelatedBlur = owner.presenceAck().path("data")
+        assertThat(unrelatedBlur.path("typing")).hasSize(1)
+        assertThat(editingTargets(unrelatedBlur)).containsExactlyInAnyOrderElementsOf(photoEditors)
+        owner.send(command(fixture, "presence"), mapOf("action" to "STOP", "target" to "COMMENT"))
+        val stopped = owner.presenceAck().path("data")
+        assertThat(stopped.path("typing")).isEmpty()
+        assertThat(editingTargets(stopped)).containsExactlyInAnyOrderElementsOf(photoEditors)
+        owner.send(command(fixture, "presence"), mapOf("action" to "END", "target" to "PHOTOS"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .containsExactly(fixture.guest.memberId to "PHOTOS")
+        guest.send(command(fixture, "presence"), mapOf("action" to "BACKGROUND"))
+        assertThat(guest.presenceAck().path("data").path("editing")).isEmpty()
+        val after = getSnapshot(fixture, fixture.owner)
+        listOf("revision", "titleVersion", "dateVersion", "locationVersion", "updatedAt").forEach { field ->
+            assertThat(after.path(field)).isEqualTo(before.path(field))
+        }
+        assertThat(jdbc.queryForList(
+            "SELECT member_id, last_activity_at FROM bunch_memberships WHERE bunch_id = ? ORDER BY member_id",
+            fixture.bunchId
+        )).isEqualTo(activityBefore)
+    }
+
+    @Test
+    fun `STOMP TYPE expires in three seconds while independent upload indicator remains`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "PHOTOS"))
+        owner.presenceAck()
+        val sentAt = Instant.now()
+        owner.send(command(fixture, "presence"), mapOf(
+            "action" to "TYPE", "target" to "TITLE", "text" to "입력 신호만 표시"
+        ))
+        val typed = owner.presenceAck().path("data")
+        assertThat(typed.path("typing")).hasSize(1)
+        assertThat(editingTargets(typed)).containsExactly(fixture.owner.memberId to "PHOTOS")
+        val expiresAt = Instant.parse(typed.path("typing").single().path("expiresAt").asText())
+        assertThat(expiresAt).isBetween(sentAt.plusSeconds(3), Instant.now().plusSeconds(3))
+        guest.json { it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").size() == 1 }
+        // The test profile disables SchedulingConfig with async-job.worker.enabled=false.
+        // Run the real expiry tick after its advertised deadline, then assert wire delivery.
+        val remainingMillis = Duration.between(Instant.now(), expiresAt).toMillis()
+        if (remainingMillis >= 0) Thread.sleep(remainingMillis + 1)
+        presence.expire()
+        val expired = guest.json {
+            it.path("type").asText() == "PRESENCE" && it.path("data").path("typing").isEmpty
+        }.path("data")
+        assertThat(editingTargets(expired)).containsExactly(fixture.owner.memberId to "PHOTOS")
+        assertThat(getPresence(fixture, fixture.owner).path("typing")).isEmpty()
     }
 
     private fun editingTargets(data: JsonNode): List<Pair<Long, String>> {

@@ -23,7 +23,7 @@ import uuid
 POSTGRES_CONTAINER = "bunch-lab107-postgres"
 REDIS_CONTAINER = "bunch-lab107-redis"
 POSTGRES_USER = "bunch"
-DATABASE = "bunch_bundle_lab107_1129"
+DATABASE = "bunch_bundle_lab107_v42"
 REDIS_DATABASE = 13
 REFRESH_TTL_SECONDS = 14 * 24 * 60 * 60
 ACCESS_TTL_SECONDS = 7 * 24 * 60 * 60

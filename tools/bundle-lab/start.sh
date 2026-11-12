@@ -9,7 +9,7 @@ BACKEND_PORT=18080
 MANAGEMENT_PORT=18081
 POSTGRES_CONTAINER=bunch-lab107-postgres
 REDIS_CONTAINER=bunch-lab107-redis
-LAB_DATABASE=bunch_bundle_lab107_1129
+LAB_DATABASE=bunch_bundle_lab107_v42
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || {

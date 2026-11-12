@@ -8,9 +8,10 @@
 2026-11-10 #107은 최신 시트 4.3.3~4.3.14의 서버 계약을 반영한다.
 [제목 CRDT](bundle-title-crdt.md), [typing/presence](bundle-realtime-107.md),
 [장소 작업](bundle-locations.md)을 함께 따른다. 미전송 입력은 재연결 때 폐기한다.
-2026-11-11 명시적 사용자 요구로 I46의 필드 편집 표시 제외 제안을 대체한다.
+2026-11-12 확정 계획으로 작업 프로필과 위치 동시 편집 규칙을 적용한다.
 비독점 BEGIN/END 필드 editing은 아래 6절과 [presence 계약](bundle-realtime-107.md)을 따른다.
-같은 날 리더 확정으로 TITLE/COMMENT focus 즉시 BEGIN을 보내며 이전의 입력 전 표시 제외 규칙보다 우선한다.
+제목·코멘트는 실제 TYPE 입력만 표시하며 focus BEGIN과 픽 표시는 제외한다.
+사진·위치의 이동 과정 실시간 공유(좌표 전송·상대 이동 애니메이션)는 후속 구현으로 둔다.
 4.3.8 K41의 보관 문구는 4.3.14 J47/K47 및 기존 사용자 승인9번과 충돌하여 정렬 대기다.
 
 ## 1. 데이터와 상태
@@ -217,19 +218,23 @@
   DB 잠금과 매 요청 권한/상태 검증은 유지한다.
 - 제목은 글자 단위 CRDT, 날짜는 마지막 저장값, 장소는 ID 작업, 사진은 이동 의도로
   병합한다. 전환용 전체 문자열/장소 목록 저장은 버전 검증을 유지한다.
-- TITLE/본인 COMMENT는 focus 즉시 text 없는 BEGIN으로 비독점 editing을 표시한다.
-  drag·위치 편집 등 실제 상호작용도 BEGIN을 보낸다. 단순 대상은 TITLE·COMMENT·DATE·LOCATION·
-  사진 선택 그룹 PHOTOS·VISIBILITY·PARTICIPANTS이며 항목 대상은 PHOTO:{bundlePhotoId}·PICK:{bundlePhotoId}다.
-  PHOTO/PICK은 BEGIN 시 서버가 양의 10진 정수 ID와 해당 초안의 현재 번들 사진 행인지 검증한다.
-  PICK은 작업 신호만 표시하며 픽 결과를 저장하거나 broadcast하지 않는다.
-  연결당 현재 editing 대상 하나를 두고 다른 target BEGIN은 이전 editing을 교체한다.
-  편집 중에만 5초마다 BEGIN을 반복하고 연결 중에는 마지막 BEGIN부터 15초에 만료한다.
-  VIEW나 TYPE는 editing 기한을 연장하지 않는다.
+- 사진은 추가 시트·사진함/갤러리 선택·업로드·삭제 확인·드래그 동안 「사진」 제목 옆에
+  프로필을 모아 표시한다. 선택창이 닫혀도 업로드가 진행 중이면 유지한다.
+- 위치 교체/드래그는 LOCATION:{bundleLocationId}로 위치 이름 바로 옆에, 신규 검색은
+  LOCATION으로 「+ 위치 추가」 옆에 표시한다. 날짜는 선택 화면 동안 「날짜 추가」 옆에 표시한다.
+  여러 작업자의 프로필을 모두 표시한다. 시트·화면·모달 종료 시 해당 작업을 즉시 해제한다.
+- BEGIN은 DATE·LOCATION·PHOTOS·PHOTO:{bundlePhotoId}·LOCATION:{bundleLocationId}의
+  실제 작업 생명주기에서 보낸다. 제목·코멘트 focus BEGIN은 호환 no-op이며 PICK BEGIN은 거부한다.
+  항목 BEGIN은 양의 10진 정수 ID와 현재 초안 소속을 검증한다.
+  연결당 target별로 관리하여 업로드와 다른 필드 작업이 겹쳐도 유지한다.
+  편집 중인 각 target만 5초마다 갱신하고 마지막 BEGIN부터 15초에 만료한다.
+  VIEW나 TYPE는 editing 기한을 연장하지 않는다. 갤러리 진입의 window blur는 앱 백그라운드와 구분한다.
 - 제목/본인 코멘트의 실제 입력만 TYPE preview로 전달하며 3초 무입력 후 해제한다.
   BEGIN은 typing을 만들거나 연장하지 않고 비텍스트 필드에는 TYPE preview가 없다.
 - END는 해당 연결의 지정 target editing·typing을 즉시 지우며 target 생략 시 모두 지운다.
   항목 END는 문법만 검증하므로 사진 행이 이미 삭제되어도 정리할 수 있다.
-  BLUR/STOP도 즉시 해제하고 LEAVE/BACKGROUND는 입장 상태까지 제거한다.
+  BLUR/STOP도 target 지정 시 해당 작업만 해제하고 생략 시 모두 해제한다.
+  LEAVE/BACKGROUND는 입장 상태까지 제거한다.
   disconnect 후 아직 유효한 editing은 `min(마지막 BEGIN, 마지막 연결 신호)+15초`에 만료한다.
   VIEW는 disconnect 후에도 editing을 연장하지 않는다. BEGIN 0초·VIEW/disconnect 10초이면
   editing은 15초, 입장은 25초에 만료한다. disconnect 시각부터 새로 세거나 끝난 editing을 부활시키지 않는다.
@@ -240,8 +245,12 @@
 - 연결이 끊기면 읽기 전용과 「인터넷 연결을 확인해 주세요.」 배너를 표시한다.
   재연결 시 최신 snapshot을 새로 읽고 서버 미반영 수정은 폐기한다.
   서버에 저장된 변경은 응답이 유실돼도 snapshot에서 복구한다.
-- 원격 변경은 열린 공동 편집 화면에 반영한다. 드래그 중 순서 변경은 드롭까지 보류한다.
+- 원격 변경은 열린 공동 편집 화면에 반영한다. 로컬 드래그 중 해당 목록의 원격 변경은
+  드롭·취소까지 보류하고 이후 최신 결과로 맞춘다. 발행·삭제·권한 상실은 즉시 처리한다.
+  손을 뗄 때 앞뒤 ID 이동을 1회 저장하며 취소는 저장하지 않는다.
   픽 화면은 재진입 때 갱신하며 #123이 소유한다.
+- 최종 업로드 진입 시 현재 다른 멤버의 typing/editing이 있으면 「편집 중인 멤버가 있어요」
+  안내를 띄운다. 표시만으로 발행을 차단하지 않으며 서버는 권한·필수 조건을 다시 검증한다.
 
 ### 6.1. 통신·저장 계약
 
