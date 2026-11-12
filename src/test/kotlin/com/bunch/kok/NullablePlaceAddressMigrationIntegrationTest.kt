@@ -1,4 +1,4 @@
-package com.bunch.place
+package com.bunch.kok
 
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

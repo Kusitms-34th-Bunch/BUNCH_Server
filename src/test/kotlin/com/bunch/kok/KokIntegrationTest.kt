@@ -1,4 +1,4 @@
-package com.bunch.place
+package com.bunch.kok
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
@@ -15,11 +15,11 @@ import com.bunch.bundle.service.BundleService
 import com.bunch.feed.domain.FeedContentHideRepository
 import com.bunch.feed.domain.FeedContentKind
 import com.bunch.global.exception.ErrorCode
-import com.bunch.place.domain.PinnedPlaceRepository
-import com.bunch.place.domain.PinnedPlaceSource
+import com.bunch.kok.domain.KokRepository
+import com.bunch.kok.domain.KokSource
 import com.bunch.place.domain.PlaceDetails
-import com.bunch.place.service.PinnedPlaceLocationListener
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.service.KokLocationListener
+import com.bunch.kok.service.KokService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -37,12 +37,12 @@ import java.util.concurrent.TimeUnit
 
 @SpringBootTest
 @ActiveProfiles("test")
-class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
+class KokIntegrationTest : BunchIntegrationSupport() {
     @Autowired
-    private lateinit var pins: PinnedPlaceService
+    private lateinit var pins: KokService
 
     @Autowired
-    private lateinit var pinRows: PinnedPlaceRepository
+    private lateinit var pinRows: KokRepository
 
     @Autowired
     private lateinit var locations: BundleLocationService
@@ -63,7 +63,7 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
     private lateinit var hides: FeedContentHideRepository
 
     @Autowired
-    private lateinit var listener: PinnedPlaceLocationListener
+    private lateinit var listener: KokLocationListener
 
     @Autowired
     private lateinit var transactions: PlatformTransactionManager
@@ -112,6 +112,26 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
         assertThat(repin.id).isNotEqualTo(first.id)
         assertThat(repin.pinnedByMemberId).isEqualTo(colleague)
         assertThat(count("notifications")).isZero()
+    }
+
+    @Test
+    fun `pending undo keeps original registration and delayed delete never removes a repin`() {
+        val f = fixture()
+        val colleague = member()
+        join(colleague, issue(f.actor, f.bunch))
+        val original = pins.pinBundleLocation(f.actor, f.bundle, f.location)
+        // Undo during the toast sends no DELETE, so a duplicate still returns the original registration.
+        assertThat(pins.pinBundleLocation(colleague, f.bundle, f.location)).isEqualTo(original)
+        assertThat(pins.list(f.actor).items.single().pinnedByMemberId).isEqualTo(f.actor)
+        assertThat(pins.list(f.actor).items.single().pinnedAt).isEqualTo(original.pinnedAt)
+        pins.unpin(colleague, original.id)
+        val repin = pins.pinBundleLocation(colleague, f.bundle, f.location)
+        pins.unpin(f.actor, original.id)
+        val retained = pins.list(f.actor)
+        assertThat(retained.items.single().id).isEqualTo(repin.id)
+        assertThat(retained.items.single().pinnedByMemberId).isEqualTo(colleague)
+        assertThat(retained.members.first { it.memberId == f.actor }.count).isZero()
+        assertThat(retained.members.first { it.memberId == colleague }.count).isEqualTo(1)
     }
 
     @Test
@@ -408,7 +428,7 @@ class PinnedPlaceIntegrationTest : BunchIntegrationSupport() {
         assertThat(tx { pins.pinAdvertisement(f.actor, 123, place()) }).isEqualTo(bundleFirst)
         pins.unpin(f.actor, bundleFirst.id)
         val adFirst = tx { pins.pinAdvertisement(f.actor, 123, place()) }
-        assertThat(adFirst.sourceType).isEqualTo(PinnedPlaceSource.ADVERTISEMENT)
+        assertThat(adFirst.sourceType).isEqualTo(KokSource.ADVERTISEMENT)
         assertThat(adFirst.sourceAdvertisementId).isEqualTo(123)
         assertThat(pins.pinBundleLocation(f.actor, f.bundle, f.location)).isEqualTo(adFirst)
         replace(f, emptyList())
