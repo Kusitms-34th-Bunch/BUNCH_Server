@@ -34,4 +34,8 @@ interface BunchAccessNoticeRepository : JpaRepository<BunchAccessNotice, Long> {
     @Modifying
     @Query("delete from BunchAccessNotice notice where notice.expiresAt <= :now")
     fun deleteExpired(now: Instant): Int
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from BunchAccessNotice notice where notice.recipientMemberId = :memberId")
+    fun deleteByRecipientMemberId(memberId: Long): Int
 }

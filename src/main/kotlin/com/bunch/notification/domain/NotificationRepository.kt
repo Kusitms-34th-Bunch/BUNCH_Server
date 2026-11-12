@@ -39,4 +39,8 @@ interface NotificationRepository : JpaRepository<Notification, Long> {
     @Modifying
     @Query("delete from Notification n where n.createdAt <= :cutoff")
     fun deleteExpired(cutoff: Instant): Int
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from Notification n where n.recipientMemberId = :memberId")
+    fun deleteByRecipientMemberId(memberId: Long): Int
 }

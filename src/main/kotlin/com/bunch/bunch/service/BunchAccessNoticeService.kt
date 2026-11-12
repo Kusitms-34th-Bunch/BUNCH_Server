@@ -145,6 +145,12 @@ class BunchAccessNoticeService(
     private fun hasActiveMembership(memberId: Long, bunchId: Long): Boolean =
         memberships.existsByMemberIdAndBunchIdAndStatus(memberId, bunchId)
 
+    // Called when the account is withdrawn: its notices are no longer reachable by anyone.
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun removeAllOf(memberId: Long) {
+        notices.deleteByRecipientMemberId(memberId)
+    }
+
     private fun fail(errorCode: ErrorCode, detail: Any? = null): Nothing =
         throw BusinessException(errorCode, detail)
 

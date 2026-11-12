@@ -289,10 +289,11 @@ class BunchDeletionService(
         val membership: BunchMembership
     )
 
-    private companion object {
-        const val DELETED = "DELETED"
+    companion object {
+        // The account withdrawal deletes a bunch it is alone in with the same confirmation text (7.6.4).
         const val DELETE_CONFIRMATION = "삭제하기"
-        val ACCESS_NOTICE_RETENTION: Duration = Duration.ofDays(30)
+        private const val DELETED = "DELETED"
+        private val ACCESS_NOTICE_RETENTION: Duration = Duration.ofDays(30)
     }
 }
 
