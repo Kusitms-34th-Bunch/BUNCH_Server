@@ -191,7 +191,7 @@ class Client {
     window.addEventListener('pointercancel', () => {
       if (this.pointerPhoto || (this.dragging && !this.nativeDragging)) this.finishPhotoDrag();
     });
-    window.addEventListener('blur', () => { this.endEditing(); this.dragging = null; this.pointerPhoto = null; });
+    window.addEventListener('blur', () => this.finishPhotoDrag());
     this.root.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
@@ -310,6 +310,7 @@ class Client {
     this.presence = {members:[], typing:[]};
     this.editingTarget = null;
     this.dragging = null;
+    this.nativeDragging = false;
     this.pointerPhoto = null;
     if (socket) { socket.onclose = null; socket.close(); }
     this.connectionLabel('연결 해제');
@@ -799,9 +800,7 @@ $('#fixture').addEventListener('click', async () => {
 document.addEventListener('visibilitychange', () => {
   for (const client of clients) {
     if (document.hidden) {
-      client.endEditing();
-      client.dragging = null;
-      client.pointerPhoto = null;
+      client.finishPhotoDrag();
       client.presenceCommand('BACKGROUND');
     }
     else if (client.connected) client.presenceCommand('VIEW');

@@ -5,3 +5,4 @@
 .date-rule{font-size:11px;color:#627066;margin:6px 0}
 .location-tools>label,.location-place>label,.location-anchors>label{margin:10px 0}.location-tools>p,.location-result{font-size:12px}.location-list{padding-left:20px;line-height:1.8;overflow-wrap:anywhere}.location-place details{margin:10px 0}.location-place details label{margin:8px 0}.location-anchors p{font-size:11px}.location-tools>[data-action="location"]{margin-top:12px}
 .photo-drag-list{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.photo-drag-card{cursor:grab;touch-action:none;user-select:none}.photo-drag-card:active{cursor:grabbing;background:#eaf0e6}.photo-tools .field-presence,.location-tools .field-presence{min-height:30px}
+[hidden]{display:none!important}
