@@ -5,6 +5,7 @@ import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import java.time.Instant
 import java.util.UUID
@@ -20,6 +21,12 @@ interface SocialCommentRepository : JpaRepository<SocialComment, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from SocialComment c where c.id = :id and c.bundleId = :bundleId")
     fun findLocked(bundleId: Long, id: Long): SocialComment?
+
+    // The same change a member makes when deleting one comment (6.2.9), applied to all of them.
+    @Modifying(flushAutomatically = true)
+    @Query("""update SocialComment c set c.content = '', c.deletedAt = :now
+        where c.authorMemberId = :memberId and c.deletedAt is null""")
+    fun deleteAllByAuthor(memberId: Long, now: Instant): Int
 
     @Query("select c from SocialComment c where c.bundleId = :bundleId and c.parentId is null and " + VISIBLE + """
         and (c.createdAt < :at or (c.createdAt = :at and c.id < :afterId))

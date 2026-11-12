@@ -41,6 +41,10 @@ interface PushDeviceRepository : JpaRepository<PushDevice, Long> {
     @Query("delete from PushDevice d where d.memberId = :memberId and d.sessionId = :sessionId")
     fun deleteByMemberIdAndSessionId(memberId: Long, sessionId: UUID): Int
 
+    @Modifying(flushAutomatically = true)
+    @Query("delete from PushDevice d where d.memberId = :memberId")
+    fun deleteByMemberId(memberId: Long): Int
+
     @Modifying
     @Query("""
         delete from PushDevice d
