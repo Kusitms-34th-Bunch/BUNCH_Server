@@ -131,3 +131,23 @@ data class BundlePhotoPicks(
     val version: Long = 0,
     val members: List<BundleParticipantResponse> = emptyList()
 )
+
+data class BundleTitleState(
+    val title: String,
+    val titleCrdtState: ByteArray,
+    val titleVersion: Long,
+    val titleTooLong: Boolean
+)
+
+data class TitleMergeResult(val state: ByteArray, val value: String, val tooLong: Boolean)
+
+data class TitleDocument(val value: String, val tooLong: Boolean)
+
+data class BundleLocationIntentResponse(
+    val bundleId: Long,
+    val revision: Long,
+    val locationVersion: Long,
+    val changed: Boolean,
+    val acceptedCount: Int,
+    val locations: List<BundleLocationResponse>
+)

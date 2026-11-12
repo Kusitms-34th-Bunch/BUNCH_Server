@@ -659,8 +659,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             source[1].id, source[2].id, source[3].id, source[0].id, source[4].id
         )
         assertThat(changed.photos[3].id).isEqualTo(original.id)
-        assertThat(changed.photos[3].caption).isEqualTo("keep caption")
-        assertThat(changed.photos[3].captionVersion).isEqualTo(7)
+        assertThat(jdbc.queryForObject(
+            "SELECT caption FROM bundle_photos WHERE id = ?", String::class.java, original.id
+        )).isEqualTo("keep caption")
+        assertThat(jdbc.queryForObject(
+            "SELECT caption_version FROM bundle_photos WHERE id = ?", Long::class.java, original.id
+        )).isEqualTo(7L)
         assertThat(changed.revision).isEqualTo(draft.revision + 1)
         assertThat(changed.photoChangeResult!!.addedPhotoIds).containsExactly(source[3].id, source[4].id)
     }

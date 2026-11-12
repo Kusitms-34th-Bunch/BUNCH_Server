@@ -2,11 +2,13 @@ package com.bunch.bundle.dto
 
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.bundle.domain.BundleLocationIntent
 import com.bunch.bundle.domain.BundlePhotoCapacityMode
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSetter
 import com.fasterxml.jackson.annotation.Nulls
 import java.time.LocalDate
+import jakarta.validation.constraints.Size
 import java.util.UUID
 
 data class CreateBundleRequest(
@@ -109,4 +111,37 @@ data class BundlePhotoPickRequest(
     @param:JsonProperty(value = "expectedVersion", required = true)
     @param:JsonSetter(nulls = Nulls.FAIL)
     val expectedVersion: Long
+)
+
+data class BundleTitleCrdtRequest(val state: ByteArray)
+
+data class BundleLocationIntentPlace(
+    @param:JsonProperty(value = "provider", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val provider: String,
+
+    @param:JsonProperty(value = "externalId", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val externalId: String,
+
+    @param:JsonProperty(value = "name", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val name: String,
+
+    val address: String?
+)
+
+data class BundleLocationIntentRequest(
+    @param:JsonProperty(value = "intent", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
+    val intent: BundleLocationIntent,
+
+    @field:Size(max = 3)
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
+    val locations: List<BundleLocationIntentPlace> = emptyList(),
+
+    val location: BundleLocationIntentPlace? = null,
+    val targetLocationId: Long? = null,
+    val previousLocationId: Long? = null,
+    val nextLocationId: Long? = null
 )

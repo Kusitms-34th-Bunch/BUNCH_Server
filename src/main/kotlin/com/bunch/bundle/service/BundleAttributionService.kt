@@ -30,9 +30,6 @@ class BundleAttributionService(
     @Transactional(readOnly = true)
     fun published(bundle: Bundle): BundleAttribution = publishedAll(listOf(bundle)).getValue(bundle.id)
 
-    @Transactional(readOnly = true)
-    fun draftParticipants(bundle: Bundle): List<BundleParticipantResponse> = draft(bundle).participants
-
     /** Internal assembler: caller must authorize all bundles before passing them here. Three bounded queries. */
     @Transactional(readOnly = true)
     fun publishedAll(bundles: Collection<Bundle>): Map<Long, BundleAttribution> {

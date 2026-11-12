@@ -41,7 +41,7 @@ class BundlePhotoPickService(
             throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
         }
         if (request.expectedVersion < 0) throw BusinessException(ErrorCode.INVALID_INPUT)
-        val people = attribution.draftParticipants(bundle)
+        val people = attribution.draft(bundle).participants
         val row = picks.findByBundlePhotoIdAndMemberId(photoId, userId)
         row?.let(entityManager::refresh)
         if ((row?.picked ?: false) != request.picked) {

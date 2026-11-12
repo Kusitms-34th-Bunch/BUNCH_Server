@@ -13,7 +13,6 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.UUID
@@ -120,42 +119,6 @@ class BundleLeaseService(
         val lease = requireOwnedLease(bundle, actor, normalizedTarget, token, now, connectionId)
         lease.release(now)
         publishStates(bundle)
-    }
-
-    /**
-     * Checks a lease while the caller owns the bundle write transaction.
-     * The caller must lock the bunch and bundle first through BundleAccessService.
-     */
-    @Transactional(propagation = Propagation.MANDATORY)
-    fun requireLease(
-        bundle: Bundle,
-        actor: BundleActor,
-        target: String,
-        token: UUID?
-    ) {
-        validateActor(actor)
-        val normalizedTarget = normalizeTarget(target)
-        requirePhotoBelongsToBundle(bundle.id, normalizedTarget)
-        access.requireParticipant(actor.memberId, bundle)
-        if (token == null) fail(ErrorCode.BUNDLE_LEASE_CONFLICT)
-        requireOwnedLease(bundle, actor, normalizedTarget, token, Instant.now())
-    }
-
-    /**
-     * Rejects a photo operation only when another actor still owns that photo lease.
-     * Move starts deliberately do not call this method; only the committed move does.
-     */
-    @Transactional(propagation = Propagation.MANDATORY)
-    fun rejectForeignPhoto(
-        bundleId: Long,
-        bundlePhotoId: Long,
-        actor: BundleActor
-    ) {
-        validateActor(actor)
-        val lease = leases.findLockedByBundleIdAndTarget(bundleId, photoTarget(bundlePhotoId)) ?: return
-        if (lease.isActive(Instant.now()) && !lease.isOwnedBy(actor)) {
-            fail(ErrorCode.BUNDLE_LEASE_CONFLICT, publicState(lease))
-        }
     }
 
     @Transactional(readOnly = true)
@@ -311,9 +274,6 @@ class BundleLeaseService(
     )
 
     private fun fail(code: ErrorCode, detail: Any? = null): Nothing = throw BusinessException(code, detail)
-
-    private fun BundleEditLease.isOwnedBy(actor: BundleActor): Boolean =
-        isOwnedBy(actor.memberId, actor.sessionId)
 
     private companion object {
         const val TITLE = "TITLE"

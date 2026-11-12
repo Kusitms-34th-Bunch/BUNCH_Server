@@ -2,7 +2,7 @@
 
 2026-11-10 #107의 [제목 CRDT](bundle-title-crdt.md)·[typing/presence](bundle-realtime-107.md)·
 [장소 의도 작업](bundle-locations.md)을 초안 계약의 최신 기준으로 따른다.
-아래 lease 절차는 구 클라이언트·캡션 호환용이며 제목/날짜/위치/사진 작업의 필수조건이 아니다.
+아래 lease 절차는 기존 연결 정리용이며 제목/날짜/위치/사진 작업의 필수조건이 아니다.
 
 2026-11-07 승인한 [발행본 계약](published-bundle-edit.md)과 2026-11-10 재전달된
 6.2.12·6.2.15(#124)를 따른다. 발행본 내용은 `PUT /{bundleId}/published`, 공개 범위는
@@ -339,7 +339,7 @@ PUBLISHED에서 현재 OWNER만 호출한다. 번들·번들 사진·참여자·
 `reselectedPhotoIds`에 해당 **원본 Photo ID**를 넣고, `addPhotoIds`에는 이번에 새로
 고른 사진과 재선택한 사진을 **고른 순서대로 함께** 넣는다. 예를 들어 기존 `[A,B,C]`에서
 새 D, 기존 A, 새 E 순으로 선택했다면 addPhotoIds는 `[D,A,E]`, reselectedPhotoIds는
-`[A]`이며 결과는 `[B,C,D,A,E]`다. 재선택한 기존 BundlePhoto 행·캡션은 유지한다.
+`[A]`이며 결과는 `[B,C,D,A,E]`다. 재선택한 기존 BundlePhoto 행과 픽은 유지한다.
 다른 멤버가 추가/이동한 사진 중 본인이 재선택하지 않은 항목의 최신 상대 순서는 유지한다.
 이미 삭제된 재선택 사진은 추가 대상으로 바꾸지 않으며 복원하지 않는다.
 
@@ -820,7 +820,7 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 `type: "ACTIVITY"`와 `data.activity: "COMMENT"`다. `data.activity`는 별도의
 `BundleActivityType` enum으로 정의하며 `COMMENT`, `VIEW`만 사용한다.
 
-### Legacy 캡션/구 클라이언트 편집권 절차: 획득·heartbeat·해제
+### 기존 연결 편집권 절차: 획득·heartbeat·해제
 
 이 lease 절차는 기존 연결의 전환·정리용이다. 현재 제목·날짜·위치·사진·코멘트 저장은
 이를 요구하지 않으며, 서버가 매 요청의 권한·상태와 해당 내용 버전을 검증한다.
