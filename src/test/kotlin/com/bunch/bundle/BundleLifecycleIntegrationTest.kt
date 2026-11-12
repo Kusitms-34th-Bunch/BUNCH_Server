@@ -1696,6 +1696,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         setRole(bunchId, coOwner, MembershipRole.CO_OWNER)
         val source = photo(bunchId, listOf(creator))
         val published = publishReadyBundle(creator, coOwner, bunchId, source, "member-creator")
+        val photoId = published.photos.single().id
         jdbc.update("UPDATE bunch_memberships SET last_activity_at = NULL WHERE bunch_id = ?", bunchId)
 
         listOf(creator, coOwner).forEach { memberId ->
