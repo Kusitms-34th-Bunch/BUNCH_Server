@@ -6,7 +6,7 @@
 인증·가입 상태·번치 소속 검증은 [로그인·온보딩 API 계약](login-onboarding-api.md)을 따른다.
 
 [이슈 #123](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/123)의 사진 픽은
-[재전달 원문](https://docs.google.com/spreadsheets/d/1ScziF7WoYLHRiC_UYJBkKsi0j6KKQJD2TNDzW1QGfU/edit?gid=100#gid=100)
+[재전달 원문](https://docs.google.com/spreadsheets/d/1ScziF7WoYLHRiC_UYJBkKsi0jL6KKQJD2TNDzW1QGfU/edit?gid=100#gid=100)
 4.3.2·4.3.5·4.3.12와 피드 6.2.4·6.2.12·6.2.13을 따른다. 캡션은 현재 제품 계약에서 제거한다.
 캡션 쓰기·편집 API, 발행 입력, 번들·공개·피드 응답 필드, `CAPTION` 이벤트와 캡션 검증은 제공하지 않는다.
 이미 적용된 DB/Flyway의 caption 컬럼·값은 내부 historical data로만 보존하며 새 DDL이나 호환 계층은 추가하지 않는다.
