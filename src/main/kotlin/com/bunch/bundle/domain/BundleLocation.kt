@@ -18,16 +18,16 @@ class BundleLocation(
     val bundleId: Long,
 
     @Column(nullable = false, length = 32)
-    val provider: String,
+    var provider: String,
 
     @Column(name = "external_id", nullable = false, length = 128)
-    val externalId: String,
+    var externalId: String,
 
     @Column(nullable = false, columnDefinition = "text")
     var name: String,
 
-    @Column(nullable = false, columnDefinition = "text")
-    var address: String,
+    @Column(columnDefinition = "text")
+    var address: String?,
 
     @Column(nullable = false)
     var position: Int

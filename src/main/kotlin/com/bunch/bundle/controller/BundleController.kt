@@ -3,6 +3,8 @@ package com.bunch.bundle.controller
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.*
 import com.bunch.bundle.service.BundleLocationService
+import com.bunch.bundle.service.BundlePhotoPickService
+import com.bunch.bundle.service.BundlePresenceService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.common.ApiResponse
 import com.bunch.global.exception.BusinessException
@@ -11,12 +13,15 @@ import com.bunch.global.security.JwtSessionDetails
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
+import jakarta.validation.Valid
 
 @RestController
 @RequestMapping("/api/v1/bunches/{bunchId}/bundles")
 class BundleController(
     private val bundles: BundleService,
-    private val locations: BundleLocationService
+    private val locations: BundleLocationService,
+    private val picks: BundlePhotoPickService,
+    private val presence: BundlePresenceService
 ) {
     @PostMapping
     fun create(
@@ -42,6 +47,24 @@ class BundleController(
     @GetMapping("/{id}")
     fun get(authentication: Authentication, @PathVariable bunchId: Long, @PathVariable id: Long) =
         ApiResponse.ok(bundles.get(userId(authentication), bunchId, id))
+
+    @GetMapping("/{id}/presence")
+    fun presence(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable id: Long
+    ) = ApiResponse.ok(presence.get(userId(authentication), bunchId, id))
+
+    @PatchMapping("/{id}/title/crdt")
+    fun mergeTitle(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable id: Long,
+        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
+        @RequestBody request: BundleTitleCrdtRequest
+    ) = ApiResponse.ok(
+        bundles.mergeTitle(actor(authentication), bunchId, id, request.state, correlation(requestId))
+    )
 
     @PutMapping("/{id}/title")
     fun title(
@@ -86,6 +109,18 @@ class BundleController(
         @RequestBody request: BundleLocationsRequest
     ) = ApiResponse.ok(
         locations.saveDraft(actor(authentication), bunchId, bundleId, request, correlation(requestId))
+    )
+
+    @PostMapping("/{bundleId}/locations/intents")
+    fun applyLocationIntent(
+        authentication: Authentication,
+        @PathVariable bunchId: Long,
+        @PathVariable bundleId: Long,
+        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
+        @Valid
+        @RequestBody request: BundleLocationIntentRequest
+    ) = ApiResponse.ok(
+        locations.applyIntent(actor(authentication), bunchId, bundleId, request, correlation(requestId))
     )
 
     @PutMapping("/{id}/comments/me")
@@ -146,17 +181,14 @@ class BundleController(
         bundles.move(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
     )
 
-    @PutMapping("/{id}/photos/{photoId}/caption")
-    fun caption(
+    @PutMapping("/{id}/photos/{photoId}/pick")
+    fun pick(
         authentication: Authentication,
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
         @PathVariable photoId: Long,
-        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
-        @RequestBody request: BundleTextRequest
-    ) = ApiResponse.ok(
-        bundles.caption(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
-    )
+        @RequestBody request: BundlePhotoPickRequest
+    ) = ApiResponse.ok(picks.save(userId(authentication), bunchId, id, photoId, request))
 
     @PostMapping("/{id}/publish")
     fun publish(

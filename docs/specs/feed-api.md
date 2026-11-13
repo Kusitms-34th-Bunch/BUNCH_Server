@@ -27,7 +27,7 @@ nextCursor, hasNext, endReached}`다. `bundleCount`는 이번 응답의 실제 �
 카드는 `{id, bunch, publishedAt, title, date, coverImageUrl, photos, locations,
 participants, likeCount, likedByCurrentBunch, commentCount}`다.
 `bunch`는 `{id, name, imageUrl, characterType, visibility}`이며 번치 프로필 이동에 쓴다.
-`photos`는 `{id, imageUrl, position, caption}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
+`photos`는 `{id, imageUrl, position}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
 `date`는 nullable ISO 날짜, 경과 시간은 `publishedAt` 기준으로 앱이 표시한다.
 `locations`는 [장소 계약](bundle-locations.md)의 순서 있는 배열이다.
 `participants`는 [발행본 계약](published-bundle-edit.md)의 공통 표시 DTO
@@ -133,7 +133,7 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 공통 경계로 연결했다. 기존 응답 모양과 현재 번치 내부/다른 소속 외부 구분은 유지한다.
 `BundleService`·`BundleAccessService`의 내부 편집/조회 경로는 C(#88)가 소유한다.
 발행 상세는 위 공통 검사를 연결하며 `BunchPublicService`도 같은 경계를 유지한다.
-운영 숨김을 초안 편집권 등 다른 권한으로 대체하지 않는다.
+운영 숨김을 초안 수정 권한 등 다른 권한으로 대체하지 않는다.
 
 ## 페이지 DB 조건 재사용 (#95)
 
@@ -149,7 +149,10 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 피드 페이지 조회는 실제 `Bundle bundle, Bunch bunch`에서 `bunch.id = bundle.bunchId`와
 `PUBLISHED_ACCESS AND FEED_EXCLUSIONS`를 **LIMIT/커서/count 이전**에 적용한다.
 구간별 기간·APPROVED 팔로우·공개 번치·anchor 조건은 #95가 추가한다.
-`visibleBundleIds`로 이미 자른 페이지를 사후 필터링하면 누락·빈 페이지·잘못된 hasNext가 생기므로 금지한다.
+`visibleBundleIds`로 이미 자른 피드 페이지를 사후 필터링하면 누락·빈 페이지·잘못된 hasNext가 생기므로 금지한다.
+[콕 목록](pinned-places.md)의 #125는 원본 불가 핀도 유지하므로 해당 핀 페이지를 거르지 않고
+`forFeed=false` 배치 결과로 출처 접근 상태만 조립한다. 유효한 내보내짐/삭제 안내도 배치 검사해
+상세에서 거부할 출처 ID·이름·제목을 숨긴다. 카드 탭은 기존 발행본 상세에서 다시 검사한다.
 `viewer`의 `memberId/currentBunchId`를 요청마다 다시 얻고 클라이언트의 viewer ID로 바꾸지 않는다.
 
 댓글·좋아요 집계는 실제 자기 테이블의 작성 번치에 `VISIBLE_BUNCH`를 적용한다.

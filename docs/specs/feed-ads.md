@@ -43,7 +43,7 @@ pinned, pinId, canPin}`, place는 `{provider, externalId, name, address}`다.
   H가 회원→서버 현재 번치→실제 광고 행 순서로 잠근다.
   번치 잠금 뒤 refresh·현재 ACTIVE 소속을 재검사하고 광고 활성·개인 숨김을 검증한 뒤
   G의 실제 pinAdvertisement를 호출한다. G는 회원·번치 잠금에 재진입한다.
-  임의 요청 장소 payload는 사용하지 않는다. 응답은 G의 PinnedPlaceResponse다.
+  임의 요청 장소 payload는 사용하지 않는다. 응답은 G의 KokResponse다.
 - 콕 취소는 기존 `DELETE /api/v1/pinned-places/{pinId}`를 사용한다.
 
 잘못된 ID·슬롯은 COMMON_001/400, 없는 광고·비활성/숨긴 광고 조회 및 콕은
@@ -80,7 +80,10 @@ WHERE id = :advertisement_id;
 ```
 
 provider는 trim/lowercase ASCII 1..32, 외부 ID는 trim 1..128 code point,
-이름은 trim 1..200 grapheme, 주소는 trim 1..500 grapheme이다.
+이름은 trim 1..200 grapheme, 주소는 null 또는 trim 후 비어 있지 않은 1..500 grapheme이다.
+주소 없는 지역은 place.address=null로 조회·콕 스냅샷에 보존하며 앱은 주소 복사 시 장소명을 쓴다.
+검색은 프론트가 담당한다. [#126 입력 계약](place-search.md)에 따라
+V36에서 place_address의 NOT NULL만 제거하고 빈 주소 금지 CHECK는 유지한다.
 사진과 선택적 외부 링크는 http(s) 절대 URL이다. 태그는 JSON 문자열 배열이다.
 운영 SQL 입력도 공용 길이 정책을 지킨다. DB는 기본 형식·빈 값·참조를 제약한다.
 

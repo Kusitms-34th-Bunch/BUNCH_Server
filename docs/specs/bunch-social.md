@@ -106,7 +106,7 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 직접 반환한다. `role`은 `OWNER→CO_OWNER→MEMBER`를 유지하고 메인/공동 관리자 배지는 [PRD 정렬 커밋 `d898c21`](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/commit/d898c21691201c1768f5f90e9e336d4cadd369e1)에
 기록된 2026-10-29 제품 승인 근거를 따른다. `memberId`는 목록 연결용 기술 ID 예외이며,
 출생연도·성별·가입일·계정 상태·세션·관리 action·개인 프로필 이동·사진함·초안·PRIVATE 발행본·
-편집권은 반환하지 않는다.
+초안 수정 권한은 반환하지 않는다.
 
 PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`다.
 페이지는 `{items,page,size,totalElements,hasNext}`이며 `publishedAt DESC,id DESC`로 조회한다.
@@ -114,7 +114,7 @@ PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`
 기존 nullable 필드(`bunch.imageUrl`, `coverImageUrl`, `date`, `location`, `publishedAt`,
 contributor/comment의 `nickname`·`imageUrl`·`content`)는 외부에서도 JSON `null`을 유지한다.
 nullable 객체 DTO는 `location:null`을 보존하기 위해 유지한다. null 전용 Kotlin 타입은 이 필드를 생략한다.
-상세는 카드 필드에 photos `{id,imageUrl,position,caption}`, contributors `{memberId,nickname,imageUrl}`,
+상세는 카드 필드에 photos `{id,imageUrl,position}`, contributors `{memberId,nickname,imageUrl}`,
 comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
 상세도 목록과 같은 서버 current·차단·승인·공개 범위를 다시 확인한다.
 나간 회원은 「나간 멤버」로 표시하며 탈퇴 계정 코멘트 원문은 노출하지 않는다.

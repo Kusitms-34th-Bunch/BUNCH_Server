@@ -32,4 +32,8 @@ interface BunchActionRequestRepository : JpaRepository<BunchActionRequest, Long>
     @Query("""delete from BunchActionRequest request
         where request.bunchId = :bunchId and request.expiresAt <= :now""")
     fun deleteExpiredByBunchId(bunchId: Long, now: Instant): Int
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from BunchActionRequest request where request.memberId = :memberId")
+    fun deleteByMemberId(memberId: Long): Int
 }

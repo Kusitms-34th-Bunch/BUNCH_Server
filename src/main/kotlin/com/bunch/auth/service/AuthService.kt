@@ -14,6 +14,7 @@ import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.service.SocialMemberRegistry
 import com.bunch.notification.service.PushDeviceService
+import org.springframework.dao.DataAccessException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -72,6 +73,20 @@ class AuthService(
             tokenProvider.getRefreshTokenValiditySeconds()
         )
         return AuthResponses.DevTokenResponse(member.id, pair.accessToken)
+    }
+
+    fun issueWsToken(userId: Long, sid: String): AuthResponses.WsTokenResponse {
+        val active = try {
+            refreshTokens.isActive(sid, userId)
+        } catch (_: DataAccessException) {
+            throw BusinessException(ErrorCode.AUTH_SESSION_UNAVAILABLE)
+        }
+        if (!active) throw BusinessException(ErrorCode.UNAUTHORIZED)
+        members.findById(userId).orElse(null)?.requireActive()
+            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+
+        val token = tokenProvider.createWsToken(userId, sid)
+        return AuthResponses.WsTokenResponse(token, tokenProvider.parseClaims(token).expiration.toInstant())
     }
 
     fun reissue(refreshToken: String): TokenPair {

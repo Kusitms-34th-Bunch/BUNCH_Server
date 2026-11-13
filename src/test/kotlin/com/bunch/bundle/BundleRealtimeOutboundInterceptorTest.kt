@@ -94,7 +94,7 @@ class BundleRealtimeOutboundInterceptorTest {
     }
 
     @Test
-    fun `private lease payload is delivered only to the owning subscribed connection`() {
+    fun `private activity payload is delivered only to the owning subscribed connection`() {
         bindConnection()
         `when`(sessions.isActive(AUTH_SESSION_ID, MEMBER_ID)).thenReturn(true)
         val message = privateMessage()
@@ -103,7 +103,7 @@ class BundleRealtimeOutboundInterceptorTest {
         assertThat(
             registry.addSubscription(
                 "other-connection",
-                BundleRealtimeSubscription("other-lease-subscription", BundleRealtimeDestinations.LEASE_QUEUE)
+                BundleRealtimeSubscription("other-activity-subscription", BundleRealtimeDestinations.ACTIVITY_QUEUE)
             )
         ).isTrue()
         assertThat(interceptor.preSend(message, channel)).isNull()
@@ -111,7 +111,7 @@ class BundleRealtimeOutboundInterceptorTest {
 
         registry.addSubscription(
             CONNECTION_ID,
-            BundleRealtimeSubscription("lease-subscription", BundleRealtimeDestinations.LEASE_QUEUE)
+            BundleRealtimeSubscription("activity-subscription", BundleRealtimeDestinations.ACTIVITY_QUEUE)
         )
         `when`(access.read(MEMBER_ID, BUNCH_ID, BUNDLE_ID))
             .thenReturn(Bundle(id = BUNDLE_ID, bunchId = BUNCH_ID, createdBy = MEMBER_ID))
@@ -119,6 +119,25 @@ class BundleRealtimeOutboundInterceptorTest {
         assertThat(interceptor.preSend(message, channel)).isSameAs(message)
         assertThat(message.payload).doesNotContain(AUTH_SESSION_ID)
         verify(access).read(MEMBER_ID, BUNCH_ID, BUNDLE_ID)
+    }
+
+    @Test
+    fun `removed lease queue drops deliveries even with a stale registered subscription`() {
+        bindConnection()
+        `when`(sessions.isActive(AUTH_SESSION_ID, MEMBER_ID)).thenReturn(true)
+        registry.addSubscription(
+            CONNECTION_ID,
+            BundleRealtimeSubscription("old-subscription", "/user/queue/bundle-leases")
+        )
+        `when`(access.read(MEMBER_ID, BUNCH_ID, BUNDLE_ID))
+            .thenReturn(Bundle(id = BUNDLE_ID, bunchId = BUNCH_ID, createdBy = MEMBER_ID))
+        val message = brokerMessage(
+            "/user/queue/bundle-leases",
+            """{"bunchId":$BUNCH_ID,"bundleId":$BUNDLE_ID,"type":"COMMAND_REJECTED"}"""
+        )
+
+        assertThat(interceptor.preSend(message, channel)).isNull()
+        verifyNoInteractions(access)
     }
 
     private fun bindConnection() {
@@ -151,12 +170,13 @@ class BundleRealtimeOutboundInterceptorTest {
     )
 
     private fun privateMessage(): Message<String> = brokerMessage(
-        destination = BundleRealtimeDestinations.LEASE_QUEUE,
+        destination = BundleRealtimeDestinations.ACTIVITY_QUEUE,
         payload = """
             {
               "bunchId": $BUNCH_ID,
               "bundleId": $BUNDLE_ID,
-              "token": "private-lease-token"
+              "type": "COMMAND_REJECTED",
+              "data": { "code": "COMMON_001" }
             }
         """.trimIndent()
     )

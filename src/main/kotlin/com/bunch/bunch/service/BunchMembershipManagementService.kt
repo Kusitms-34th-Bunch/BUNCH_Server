@@ -9,6 +9,7 @@ import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.MembershipStatus
+import com.bunch.bunch.dto.BunchMembershipChangedEvent
 import com.bunch.bunch.dto.ChangeMembershipRoleRequest
 import com.bunch.bunch.dto.ManagedMembershipResponse
 import com.bunch.bunch.dto.MembershipActions
@@ -25,6 +26,7 @@ import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.dto.NotificationTarget
 import com.bunch.notification.service.PushJobWriter
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
@@ -42,6 +44,7 @@ class BunchMembershipManagementService(
     private val members: MemberRepository,
     private val notifications: NotificationRepository,
     private val pushJobs: PushJobWriter,
+    private val events: ApplicationEventPublisher,
     private val clock: Clock
 ) {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -122,6 +125,9 @@ class BunchMembershipManagementService(
             version = bunch.membershipVersion,
             now = now
         )
+        // Keep this source event in the role mutation transaction. The bundle
+        // bridge is synchronous; broker delivery is still AFTER_COMMIT.
+        events.publishEvent(BunchMembershipChangedEvent(bunch.id))
 
         return mutationResult(bunch, listOf(target.id))
     }
@@ -206,6 +212,9 @@ class BunchMembershipManagementService(
             version = bunch.membershipVersion,
             now = now
         )
+        // One event covers the atomic owner swap, so every open draft receives one
+        // permissions refresh with the committed membership state.
+        events.publishEvent(BunchMembershipChangedEvent(bunch.id))
 
         return result
     }

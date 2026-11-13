@@ -14,6 +14,7 @@ import com.bunch.notification.service.PushDeviceService
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
+import org.springframework.dao.DataAccessResourceFailureException
 import java.time.Instant
 import java.util.Base64
 import java.util.Optional
@@ -130,6 +131,88 @@ class AuthServiceTest {
         verifyNoInteractions(members)
     }
 
+    @Test
+    fun `WS issuance accepts active signup in progress without renewing or rotating session`() {
+        val member = Member(id = 1, signupStatus = SignupStatus.IN_PROGRESS)
+        `when`(members.findById(1)).thenReturn(Optional.of(member))
+        val pair = tokens.generateToken(1, member.role.name)
+        val sid = tokens.getSessionId(pair.accessToken)
+        refresh.save(sid, 1, pair.refreshToken, 100)
+        val before = refresh.values.toMap()
+
+        val first = service.issueWsToken(1, sid)
+        val second = service.issueWsToken(1, sid)
+        val claims = tokens.parseClaims(first.token)
+
+        assertEquals("1", claims.subject)
+        assertEquals(sid, claims["sid"])
+        assertEquals("ws", claims["tokenType"])
+        assertEquals("bunch-ws", claims.audience)
+        assertEquals(60_000L, claims.expiration.time - claims.issuedAt.time)
+        assertEquals(claims.expiration.toInstant(), first.expiresAt)
+        assertNotEquals(first.token, second.token)
+        assertEquals(before, refresh.values)
+        assertEquals(100L, refresh.lastValiditySeconds)
+        verifyNoInteractions(registry, pushDevices)
+    }
+
+    @Test
+    fun `WS issuance rejects missing session and a session belonging to another member`() {
+        val pair = tokens.generateToken(1, "ROLE_USER")
+        val sid = tokens.getSessionId(pair.accessToken)
+        assertUnauthorized { service.issueWsToken(1, sid) }
+        refresh.save(sid, 2, pair.refreshToken, 100)
+        assertUnauthorized { service.issueWsToken(1, sid) }
+        assertTrue(refresh.isActive(sid, 2))
+        verifyNoInteractions(members)
+    }
+
+    @Test
+    fun `WS issuance rejects missing and inactive members without changing session`() {
+        val pair = tokens.generateToken(1, "ROLE_USER")
+        val sid = tokens.getSessionId(pair.accessToken)
+        refresh.save(sid, 1, pair.refreshToken, 100)
+        val before = refresh.values.toMap()
+        val states = listOf(null, Member(id = 1, accountStatus = AccountStatus.SUSPENDED),
+            Member(id = 1, accountStatus = AccountStatus.WITHDRAWN))
+
+        states.forEach { member ->
+            `when`(members.findById(1)).thenReturn(Optional.ofNullable(member))
+            assertUnauthorized { service.issueWsToken(1, sid) }
+            assertEquals(before, refresh.values)
+            assertEquals(100L, refresh.lastValiditySeconds)
+        }
+    }
+
+    @Test
+    fun `issued WS token cannot rotate refresh session`() {
+        `when`(members.findById(1)).thenReturn(Optional.of(Member(id = 1)))
+        val pair = tokens.generateToken(1, "ROLE_USER")
+        val sid = tokens.getSessionId(pair.accessToken)
+        refresh.save(sid, 1, pair.refreshToken, 100)
+        val before = refresh.values.toMap()
+
+        assertUnauthorized { service.reissue(service.issueWsToken(1, sid).token) }
+
+        assertEquals(before, refresh.values)
+        assertEquals(100L, refresh.lastValiditySeconds)
+    }
+
+    @Test
+    fun `WS issuance maps session storage failure to unavailable without issuing JWT`() {
+        val sessions = mock(RefreshTokenRepository::class.java)
+        val issuer = mock(TokenProvider::class.java)
+        val sid = java.util.UUID.randomUUID().toString()
+        `when`(sessions.isActive(sid, 1))
+            .thenThrow(DataAccessResourceFailureException("private connection details"))
+        val auth = AuthService(issuer, sessions, replay, registry, members, verifierList, pushDevices)
+
+        val exception = assertThrows(BusinessException::class.java) { auth.issueWsToken(1, sid) }
+
+        assertEquals(ErrorCode.AUTH_SESSION_UNAVAILABLE, exception.errorCode)
+        verifyNoInteractions(issuer, members, registry, pushDevices)
+    }
+
     private fun assertUnauthorized(action: () -> Unit) {
         assertEquals(ErrorCode.UNAUTHORIZED, assertThrows(BusinessException::class.java, action).errorCode)
     }
@@ -147,6 +230,11 @@ class AuthServiceTest {
             if (!isActive(sessionId, userId)) return false
             values.remove(sessionId)
             return true
+        }
+        override fun deleteAll(userId: Long): Int {
+            val sessionIds = values.filterValues { it.first == userId }.keys
+            sessionIds.forEach(values::remove)
+            return sessionIds.size
         }
         override fun compareAndRotate(sessionId: String, userId: Long, expectedToken: String, newToken: String, expiresInSeconds: Long): Boolean {
             beforeRotate?.invoke()

@@ -26,6 +26,14 @@ interface BunchAccessNoticeRepository : JpaRepository<BunchAccessNotice, Long> {
         now: Instant
     ): List<BunchAccessNotice>
 
+    // Same access-notice guard as detail reads, in one query for pinned-place source cards.
+    @Query("""select distinct notice.bunchId from BunchAccessNotice notice
+        where notice.recipientMemberId = :memberId and notice.expiresAt > :now
+        and not exists (select membership.id from BunchMembership membership
+            where membership.member.id = :memberId and membership.bunch.id = notice.bunchId
+            and membership.status = com.bunch.bunch.domain.MembershipStatus.ACTIVE)""")
+    fun unavailableBunchIds(memberId: Long, now: Instant): Set<Long>
+
     fun findAllByRecipientMemberIdAndBunchId(
         recipientMemberId: Long,
         bunchId: Long
@@ -34,4 +42,8 @@ interface BunchAccessNoticeRepository : JpaRepository<BunchAccessNotice, Long> {
     @Modifying
     @Query("delete from BunchAccessNotice notice where notice.expiresAt <= :now")
     fun deleteExpired(now: Instant): Int
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from BunchAccessNotice notice where notice.recipientMemberId = :memberId")
+    fun deleteByRecipientMemberId(memberId: Long): Int
 }

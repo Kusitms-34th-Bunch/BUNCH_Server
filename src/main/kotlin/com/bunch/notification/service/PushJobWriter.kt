@@ -6,6 +6,7 @@ import com.bunch.notification.domain.push.PushDeviceRepository
 import com.bunch.notification.domain.push.PushJob
 import com.bunch.notification.domain.push.PushJobRepository
 import com.bunch.notification.domain.push.PushJobStatus
+import com.bunch.notification.domain.push.PushPreference
 import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.NotificationTarget
 import org.springframework.stereotype.Service
@@ -91,6 +92,11 @@ class PushJobWriter(
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    fun deleteAllOf(memberId: Long) {
+        jobs.deleteByRecipientMemberId(memberId)
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     fun cancelPendingForDevice(memberId: Long, deviceId: Long) {
         jobs.cancelPendingForDevice(memberId, deviceId, DEVICE_UNREGISTERED)
     }
@@ -157,10 +163,8 @@ class PushJobWriter(
             }
     }
 
-    private fun isPushEnabled(memberId: Long, type: NotificationType): Boolean {
-        val preference = preferences.findById(memberId).orElse(null) ?: return true
-        return preference.enabled && preference.types[type.name] != false
-    }
+    private fun isPushEnabled(memberId: Long, type: NotificationType): Boolean =
+        PushPreference.allows(preferences.findById(memberId).orElse(null), type)
 
     private companion object {
         val PUSH_TTL: Duration = Duration.ofHours(24)

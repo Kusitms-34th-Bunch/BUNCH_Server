@@ -60,4 +60,4 @@ data class FeedBunchInfo(
     val visibility: Visibility
 )
 
-data class FeedPhoto(val id: Long, val imageUrl: String, val position: Int, val caption: String)
+data class FeedPhoto(val id: Long, val imageUrl: String, val position: Int)

@@ -4,6 +4,7 @@ import com.bunch.bundle.domain.BundleActivityType
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.*
 import com.bunch.bundle.controller.BundleSocketErrorHandler
+import com.bunch.bundle.service.BundleRealtimeDestinations
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.fasterxml.jackson.databind.JsonNode
@@ -12,11 +13,27 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
-import java.util.UUID
 
 class BundleRealtimeMessageTest {
     private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
     private val expiresAt = Instant.parse("2026-10-25T10:00:15Z")
+
+    @Test
+    fun `legacy editing lease commands are no longer accepted`() {
+        listOf("acquire", "heartbeat", "release").forEach { action ->
+            assertThat(BundleRealtimeDestinations.parseCommand("/app/bunches/1/bundles/2/lease/$action"))
+                .describedAs("removed lease command %s", action)
+                .isNull()
+        }
+        assertThat(BundleRealtimeDestinations.parseCommand("/app/bunches/1/bundles/2/presence")).isNotNull()
+        assertThat(BundleRealtimeDestinations.parseCommand("/app/bunches/1/bundles/2/activity")).isNotNull()
+    }
+
+    @Test
+    fun `only the existing activity queue remains a private subscription`() {
+        assertThat(BundleRealtimeDestinations.isPrivateSubscription("/user/queue/bundle-leases")).isFalse()
+        assertThat(BundleRealtimeDestinations.isPrivateSubscription("/user/queue/bundle-activity")).isTrue()
+    }
 
     @Test
     fun `content events preserve stored values version and request correlation in common envelope`() {
@@ -37,39 +54,25 @@ class BundleRealtimeMessageTest {
     }
 
     @Test
-    fun `lease states and activity have explicit distinct event enums without credentials`() {
-        val states = BundleLeaseStateChangedEvent(1, 2, 7, listOf(LeaseState("TITLE", 5, expiresAt, 4)))
-        val stateJson = envelope(states.toMessage(), BundleEventType.LEASES)
-        assertThat(stateJson.path("data").path("states").single().path("memberId").asLong()).isEqualTo(5)
-        assertThat(stateJson.toString()).doesNotContain("token", "sessionId", "connectionId")
-
+    fun `activity uses the common envelope without credentials`() {
         val activity = BundleActivityEvent(1, 2, 5, BundleActivityType.COMMENT, 7)
-        val activityJson = envelope(activity.toMessage(), BundleEventType.ACTIVITY)
-        assertThat(activityJson.path("data").path("activity").asText()).isEqualTo("COMMENT")
-        assertThat(activityJson.path("data").path("memberId").asLong()).isEqualTo(5)
-        assertThat(activityJson.path("requestId").isNull).isTrue()
+        val json = envelope(activity.toMessage(), BundleEventType.ACTIVITY)
+        assertThat(json.path("data").path("activity").asText()).isEqualTo("COMMENT")
+        assertThat(json.path("data").path("memberId").asLong()).isEqualTo(5)
+        assertThat(json.path("requestId").isNull).isTrue()
+        assertThat(json.toString()).doesNotContain("token", "sessionId", "connectionId")
     }
 
     @Test
-    fun `private grants heartbeats releases and rejections share same envelope`() {
-        val token = UUID.randomUUID()
-        val grant = LeaseGrant(1, 2, "TITLE", token, 4, expiresAt, 7)
-        listOf(BundleEventType.LEASE_GRANTED, BundleEventType.LEASE_HEARTBEAT).forEach { type ->
-            val json = envelope(grant.toMessage(type), type)
-            assertThat(json.path("data").path("token").asText()).isEqualTo(token.toString())
-            assertThat(json.path("data").path("leaseVersion").asLong()).isEqualTo(4)
-        }
-        val released = envelope(BundleLeaseReleaseAck(1, 2, "TITLE", 7).toMessage(), BundleEventType.LEASE_RELEASED)
-        assertThat(released.path("data").path("target").asText()).isEqualTo("TITLE")
-
+    fun `command rejections use the common envelope without content revision`() {
         val rejected = envelope(BundleRealtimeMessage(
             type = BundleEventType.COMMAND_REJECTED,
             bunchId = 1,
             bundleId = 2,
-            data = BundleCommandRejectedData("BUNDLE_004")
+            data = BundleCommandRejectedData(ErrorCode.INVALID_INPUT.code)
         ), BundleEventType.COMMAND_REJECTED)
         assertThat(rejected.path("revision").isNull).isTrue()
-        assertThat(rejected.path("data").path("code").asText()).isEqualTo("BUNDLE_004")
+        assertThat(rejected.path("data").path("code").asText()).isEqualTo(ErrorCode.INVALID_INPUT.code)
     }
 
     @Test
@@ -96,6 +99,19 @@ class BundleRealtimeMessageTest {
         assertThat(json.path("bundleId").isNull).isTrue()
         assertThat(json.path("data").path("code").asText()).isEqualTo("AUTH_001")
         assertThat(json.toString()).doesNotContain("Authorization", "token", "sessionId")
+    }
+
+    @Test
+    fun `presence uses existing envelope without content revision or credentials`() {
+        val data = BundlePresenceData(
+            listOf(BundlePresenceMember(5, expiresAt)),
+            listOf(BundleTypingState(5, "COMMENT", "actual input", expiresAt))
+        )
+        val json = envelope(data.toMessage(1, 2), BundleEventType.PRESENCE)
+        assertThat(json.path("revision").isNull).isTrue()
+        assertThat(json.path("requestId").isNull).isTrue()
+        assertThat(json.path("data").path("typing").single().path("text").asText()).isEqualTo("actual input")
+        assertThat(json.toString()).doesNotContain("sessionId", "connectionId", "token")
     }
 
     private fun envelope(value: Any, type: BundleEventType): JsonNode {

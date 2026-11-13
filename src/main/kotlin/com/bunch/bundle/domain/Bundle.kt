@@ -41,6 +41,9 @@ class Bundle(
     @Column(nullable = false, columnDefinition = "text")
     var title: String = "",
 
+    @Column(name = "title_crdt", columnDefinition = "bytea")
+    var titleCrdt: ByteArray? = null,
+
     @Enumerated(EnumType.STRING)
     @Column(length = 16)
     var visibility: Visibility? = null,
@@ -71,6 +74,9 @@ class Bundle(
 
     @Column(name = "published_at")
     var publishedAt: Instant? = null,
+
+    @Column(name = "published_by")
+    var publishedBy: Long? = null,
 
     @Column(name = "ready_notified_at")
     var publishReadyNotifiedAt: Instant? = null,

@@ -10,13 +10,18 @@ import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bunch.service.BunchPublicService
+import com.bunch.bunch.service.BunchSocialService
+import com.bunch.bunch.dto.FollowDecision
+import com.bunch.feed.service.FeedAccessService
+import com.bunch.feed.service.FeedService
+import com.bunch.feed.dto.FeedBundleItem
 import com.bunch.bundle.domain.*
 import com.bunch.bundle.dto.*
 import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
 import com.bunch.bundle.service.BundleAttributionService
-import com.bunch.place.domain.PinnedPlaceRepository
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.domain.KokRepository
+import com.bunch.kok.service.KokService
 import jakarta.persistence.EntityManagerFactory
 import org.hibernate.SessionFactory
 import com.bunch.global.exception.BusinessException
@@ -81,10 +86,10 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     private lateinit var entityManagerFactory: EntityManagerFactory
 
     @Autowired
-    private lateinit var pins: PinnedPlaceService
+    private lateinit var pins: KokService
 
     @Autowired
-    private lateinit var pinRows: PinnedPlaceRepository
+    private lateinit var pinRows: KokRepository
 
     @Autowired
     private lateinit var blocks: BunchBlockRepository
@@ -137,12 +142,22 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var sessions: RefreshTokenRepository
 
+    @Autowired
+    private lateinit var feedAccess: FeedAccessService
+
+    @Autowired
+    private lateinit var feed: FeedService
+
+    @Autowired
+    private lateinit var social: BunchSocialService
+
     private val assetIds = mutableListOf<Long>()
     private val credentials = mutableListOf<Pair<Long, String>>()
 
     @BeforeEach
     fun reset() {
         recorder.edits.clear()
+        recorder.visibilities.clear()
         recorder.removals.clear()
         recorder.rejectRemoval = false
     }
@@ -171,24 +186,23 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val notificationCount = count("notifications")
         val pushCount = count("push_jobs")
         val request = edit(before).copy(
-            title = " 바뀐 제목 ", visibility = Visibility.PRIVATE, date = LocalDate.of(2024, 2, 1),
+            title = " 바뀐 제목 ", date = LocalDate.of(2024, 2, 1),
             photos = listOf(
-                PublishedBundlePhotoInput(bundlePhotoId = before.photos[1].id, caption = "새 캡션"),
-                PublishedBundlePhotoInput(photoId = added.id, caption = "추가")
+                PublishedBundlePhotoInput(bundlePhotoId = before.photos[1].id),
+                PublishedBundlePhotoInput(photoId = added.id)
             ),
             locations = listOf(place("a", 0), place("b", 1), place("c", 2))
         )
         val saved = save(f, request)
         assertThat(saved.title).isEqualTo("바뀐 제목")
-        assertThat(saved.visibility).isEqualTo(Visibility.PRIVATE)
+        assertThat(saved.visibility).isEqualTo(before.visibility)
         assertThat(saved.date).isEqualTo(request.date)
         assertThat(saved.revision).isEqualTo(before.revision + 1)
         assertThat(saved.titleVersion).isEqualTo(before.titleVersion + 1)
-        assertThat(saved.visibilityVersion).isEqualTo(before.visibilityVersion + 1)
+        assertThat(saved.visibilityVersion).isEqualTo(before.visibilityVersion)
         assertThat(saved.dateVersion).isEqualTo(before.dateVersion + 1)
         assertThat(saved.locationVersion).isEqualTo(1)
         assertThat(saved.photos.map { it.position }).containsExactly(0, 1)
-        assertThat(saved.photos.map { it.caption }).containsExactly("새 캡션", "추가")
         assertThat(saved.photos.first().id).isEqualTo(before.photos[1].id)
         assertThat(saved.photos.first().addedAt).isEqualTo(before.photos[1].addedAt)
         assertThat(saved.photos.first().addedBy).isEqualTo(before.photos[1].addedBy)
@@ -214,16 +228,15 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `retained photo survives source deletion and can change caption without original Photo`() {
+    fun `retained photo survives source deletion without original Photo`() {
         val f = fixture()
         val before = snapshot(f)
         jdbc.update("UPDATE bundle_photos SET photo_id = NULL WHERE bundle_id = ?", f.id)
         jdbc.update("DELETE FROM photos WHERE id = ?", before.photos.single().photoId)
         val saved = save(f, edit(snapshot(f)).copy(photos = listOf(
-            PublishedBundlePhotoInput(bundlePhotoId = before.photos.single().id, caption = "보존된 사진"))))
+            PublishedBundlePhotoInput(bundlePhotoId = before.photos.single().id))))
         assertThat(saved.photos.single().photoId).isNull()
         assertThat(saved.photos.single().imageAssetId).isEqualTo(before.photos.single().imageAssetId)
-        assertThat(saved.photos.single().caption).isEqualTo("보존된 사진")
     }
 
     @Test
@@ -283,10 +296,11 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val persisted = snapshot(f)
         val addition = photo(f.bunchId)
         recorder.edits.clear()
+        recorder.visibilities.clear()
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
         assertThatThrownBy {
             save(f, edit(initial).copy(title = "should roll back", photos = listOf(
-                PublishedBundlePhotoInput(photoId = addition.id, caption = "added")),
+                PublishedBundlePhotoInput(photoId = addition.id)),
                 locations = listOf(place("replacement", 0))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
         assertThat(snapshot(f)).isEqualTo(persisted)
@@ -319,7 +333,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val before = snapshot(f)
         assertError(ErrorCode.INVALID_INPUT) { save(f, edit(before).copy(photos = emptyList())) }
         val additions = (1..20).map { photo(f.bunchId) }
-        val entries = additions.map { PublishedBundlePhotoInput(photoId = it.id, caption = "") }
+        val entries = additions.map { PublishedBundlePhotoInput(photoId = it.id) }
         assertError(ErrorCode.INVALID_INPUT) {
             save(f, edit(before).copy(photos = edit(before).photos + entries))
         }
@@ -342,16 +356,13 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             edit(before).copy(title = "x".repeat(41)),
             edit(before).copy(title = "line\nbreak"),
             edit(before).copy(date = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1)),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(row.id, originalId, ""))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput())),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(row.id, originalId))),
             edit(before).copy(photos = edit(before).photos + edit(before).photos),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = foreign.id, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = foreign.photoId, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = notReady.id, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = originalId, caption = ""))),
-            edit(before).copy(photos = listOf(
-                PublishedBundlePhotoInput(bundlePhotoId = row.id, caption = "x".repeat(201)))
-            ),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = foreign.id))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = foreign.photoId))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = notReady.id))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = originalId))),
             edit(before).copy(locations = (0..3).map { place("p$it", it) }),
             edit(before).copy(locations = listOf(place("a", 0), place("a", 1))),
             edit(before).copy(locations = listOf(place("a", 2)))
@@ -408,8 +419,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `preloaded owner membership cannot edit or delete after concurrent demotion`() {
-        listOf(false, true).forEach { delete ->
+    fun `preloaded owner membership cannot edit delete or change scope after concurrent demotion`() {
+        listOf("edit", "delete", "visibility").forEach { operation ->
             val f = fixture()
             val before = snapshot(f)
             val loaded = CountDownLatch(1)
@@ -425,10 +436,12 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
                                 bunchRows.findById(f.bunchId).orElseThrow().name
                                 bundles.findById(f.id).orElseThrow().revision
                                 loaded.countDown()
-                                if (delete) {
-                                    service.delete(BundleActor(f.owner, "s"), f.bunchId, f.id, "late-delete")
-                                } else {
-                                    save(f, edit(before).copy(title = "preloaded owner write"))
+                                when (operation) {
+                                    "delete" -> service.delete(
+                                        BundleActor(f.owner, "s"), f.bunchId, f.id, "late-delete"
+                                    )
+                                    "visibility" -> visibility(f, Visibility.PRIVATE)
+                                    else -> save(f, edit(before).copy(title = "preloaded owner write"))
                                 }
                             }
                         }.exceptionOrNull()
@@ -492,15 +505,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val actor = BundleActor(f.owner, "owner")
         val calls = listOf<() -> Any?>(
             { service.title(actor, f.bunchId, f.id, BundleTextRequest("x", 0, BundleStatus.PUBLISHED), "title") },
-            {
-                service.visibility(actor, f.bunchId, f.id,
-                    BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.PUBLISHED), "visibility")
-            },
             { service.date(actor, f.bunchId, f.id, BundleDateRequest(null, 0, BundleStatus.PUBLISHED), "date") },
-            {
-                service.caption(actor, f.bunchId, f.id, row.id,
-                    BundleTextRequest("x", 0, BundleStatus.PUBLISHED), "caption")
-            },
             {
                 service.changePhotos(actor, f.bunchId, f.id, UUID.randomUUID(),
                     BundlePhotoChangesRequest(mode = BundleStatus.PUBLISHED))
@@ -556,6 +561,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reason,created_at) VALUES ('BUNDLE',?,'test',now())", f.id)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { snapshot(f) }
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { save(f, edit(before)) }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { visibility(f, Visibility.PRIVATE) }
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.delete(BundleActor(f.owner, "s"), f.bunchId, f.id, "delete") }
         assertThat(service.list(f.owner, f.bunchId, BundleStatus.PUBLISHED, 0, 20).total).isZero()
         jdbc.update("DELETE FROM feed_content_hides WHERE target_id=?", f.id)
@@ -731,7 +737,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
         assertThatThrownBy {
             save(f, edit(initial).copy(title = "failed edit", locations = emptyList(),
-                photos = listOf(PublishedBundlePhotoInput(photoId = addition.id, caption = ""))))
+                photos = listOf(PublishedBundlePhotoInput(photoId = addition.id))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
         assertThat(snapshot(f)).isEqualTo(persisted)
         val preserved = pinRows.findById(pin.id).orElseThrow()
@@ -765,6 +771,202 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.RESOURCE_NOT_FOUND) {
             service.editPublished(BundleActor(f.owner, "s"), create(f.owner).id, f.id, payload, "wrong-path")
         }
+    }
+
+    @Test
+    fun `published visibility only changes scope and preserves content provenance reactions and notifications`() {
+        val f = fixture(2)
+        val before = snapshot(f)
+        val visitor = member()
+        create(visitor)
+        likes.like(visitor, f.id)
+        socialComments.create(visitor, f.id, UUID.randomUUID(), CreateSocialCommentRequest("external note"))
+        val notifications = count("notifications")
+        val pushes = count("push_jobs")
+        val activity = memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!.lastActivityAt
+        assertThat(feedAccess.visibleBundleIds(visitor, listOf(f.id))).containsExactly(f.id)
+        assertThat(feed.get(visitor).items.filterIsInstance<FeedBundleItem>().map { it.bundle.id }).contains(f.id)
+        val saved = visibility(f, Visibility.PRIVATE)
+        assertThat(saved.visibility).isEqualTo(Visibility.PRIVATE)
+        assertThat(saved.visibilityVersion).isEqualTo(before.visibilityVersion + 1)
+        assertThat(saved.revision).isEqualTo(before.revision + 1)
+        assertThat(saved.updatedAt).isAfter(before.updatedAt)
+        assertThat(saved.copy(
+            visibility = before.visibility, visibilityVersion = before.visibilityVersion,
+            revision = before.revision, updatedAt = before.updatedAt,
+            likeCount = before.likeCount, commentCount = before.commentCount
+        )).isEqualTo(before)
+        assertThat(service.get(f.guest, f.bunchId, f.id).id).isEqualTo(f.id)
+        assertThat(feedAccess.visibleBundleIds(visitor, listOf(f.id))).isEmpty()
+        assertThat(feed.get(visitor).items.filterIsInstance<FeedBundleItem>().map { it.bundle.id }).doesNotContain(f.id)
+        assertThat(publicService.bundles(visitor, f.bunchId, 0, 20).items).isEmpty()
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { publicService.bundle(visitor, f.bunchId, f.id) }
+        val persisted = snapshot(f)
+        assertThat(visibility(f, Visibility.PRIVATE, saved.visibilityVersion)).isEqualTo(persisted)
+        assertThat(recorder.visibilities).hasSize(1)
+        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { visibility(f, Visibility.PRIVATE) }
+        val restored = visibility(f, Visibility.PUBLIC, saved.visibilityVersion)
+        val external = publicService.bundle(visitor, f.bunchId, f.id)
+        assertThat(feed.get(visitor).items.filterIsInstance<FeedBundleItem>().map { it.bundle.id }).contains(f.id)
+        assertThat(external.likeCount).isEqualTo(1)
+        assertThat(external.commentCount).isEqualTo(1)
+        assertThat(external.publishedAt).isEqualTo(before.publishedAt)
+        assertThat(restored.photos).isEqualTo(before.photos)
+        assertThat(restored.comments).isEqualTo(before.comments)
+        assertThat(count("notifications")).isEqualTo(notifications)
+        assertThat(count("push_jobs")).isEqualTo(pushes)
+        assertThat(memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!.lastActivityAt)
+            .isEqualTo(activity)
+        assertThat(recorder.edits).isEmpty()
+        assertThat(recorder.visibilities).hasSize(2)
+    }
+
+    @Test
+    fun `published visibility honors private bunch approved followers after reopening`() {
+        val f = fixture()
+        jdbc.update("UPDATE bunches SET visibility='PRIVATE' WHERE id=?", f.bunchId)
+        val visitor = member()
+        val viewer = create(visitor).id
+        val follow = social.follow(visitor, viewer, f.bunchId).followId!!
+        assertError(ErrorCode.FORBIDDEN) { publicService.bundle(visitor, f.bunchId, f.id) }
+        social.decide(f.owner, f.bunchId, follow, FollowDecision.APPROVE)
+        assertThat(publicService.bundle(visitor, f.bunchId, f.id).id).isEqualTo(f.id)
+        visibility(f, Visibility.PRIVATE)
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { publicService.bundle(visitor, f.bunchId, f.id) }
+        visibility(f, Visibility.PUBLIC, 1)
+        assertThat(publicService.bundle(visitor, f.bunchId, f.id).id).isEqualTo(f.id)
+        social.cancel(visitor, viewer, f.bunchId, follow)
+        assertError(ErrorCode.FORBIDDEN) { publicService.bundle(visitor, f.bunchId, f.id) }
+    }
+
+    @Test
+    fun `content save cannot change legacy scope input and only scope version governs scope writes`() {
+        val f = fixture()
+        val before = snapshot(f)
+        val payload = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(
+            edit(before).copy(title = "content")
+        )
+        payload.put("visibility", "PRIVATE")
+        mvc.perform(put("/api/v1/bunches/${f.bunchId}/bundles/${f.id}/published")
+            .header("Authorization", credential(f.owner)).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(payload)))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.visibility").value("PUBLIC"))
+            .andExpect(jsonPath("$.data.visibilityVersion").value(before.visibilityVersion))
+        val scoped = visibility(f, Visibility.PRIVATE, before.visibilityVersion)
+        assertThat(scoped.title).isEqualTo("content")
+        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, edit(before).copy(title = "stale content")) }
+        val saved = save(f, edit(scoped).copy(title = "fresh content"))
+        assertThat(saved.visibility).isEqualTo(Visibility.PRIVATE)
+        assertThat(saved.visibilityVersion).isEqualTo(scoped.visibilityVersion)
+    }
+
+    @Test
+    fun `concurrent content and scope saves never overwrite one another`() {
+        repeat(3) {
+            val f = fixture()
+            val before = snapshot(f)
+            val results = concurrently(listOf(
+                { save(f, edit(before).copy(title = "concurrent content")) },
+                { visibility(f, Visibility.PRIVATE, before.visibilityVersion) }
+            ))
+            assertThat(results[1].isSuccess).isTrue()
+            val saved = snapshot(f)
+            assertThat(saved.visibility).isEqualTo(Visibility.PRIVATE)
+            if (results[0].isSuccess) {
+                assertThat(saved.title).isEqualTo("concurrent content")
+                assertThat(saved.revision).isEqualTo(before.revision + 2)
+            } else {
+                assertThat((results[0].exceptionOrNull() as BusinessException).errorCode)
+                    .isEqualTo(ErrorCode.BUNDLE_VERSION_CONFLICT)
+                assertThat(saved.title).isEqualTo(before.title)
+                assertThat(saved.revision).isEqualTo(before.revision + 1)
+            }
+        }
+    }
+
+    @Test
+    fun `scope HTTP requires owner state path version and sends a correlated commit event`() {
+        val f = fixture()
+        val before = snapshot(f)
+        val url = "/api/v1/bunches/${f.bunchId}/bundles/${f.id}/visibility"
+        val payload = mapper.writeValueAsBytes(BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.PUBLISHED))
+        mvc.perform(put(url).contentType(MediaType.APPLICATION_JSON).content(payload))
+            .andExpect(status().isUnauthorized)
+        val auth = credential(f.owner)
+        mvc.perform(put(url).header("Authorization", credential(f.guest)).contentType(MediaType.APPLICATION_JSON)
+            .content(payload)).andExpect(status().isForbidden)
+        val requestId = UUID.randomUUID().toString()
+        mvc.perform(put(url).header("Authorization", auth).header("X-Request-Id", requestId)
+            .contentType(MediaType.APPLICATION_JSON).content(payload))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.visibility").value("PRIVATE"))
+        assertThat(recorder.visibilities.single().requestId).isEqualTo(requestId)
+        assertThat(recorder.visibilities.single().revision).isEqualTo(before.revision + 1)
+        mvc.perform(put(url).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON).content(payload))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value(ErrorCode.BUNDLE_VERSION_CONFLICT.code))
+        assertError(ErrorCode.BUNDLE_STATE_CONFLICT) {
+            service.visibility(BundleActor(f.owner, "s"), f.bunchId, f.id,
+                BundleVisibilityRequest(Visibility.PUBLIC, 1, BundleStatus.DRAFT), "late-draft")
+        }
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) {
+            service.visibility(BundleActor(f.owner, "s"), create(f.owner).id, f.id,
+                BundleVisibilityRequest(Visibility.PUBLIC, 1, BundleStatus.PUBLISHED), "wrong-path")
+        }
+        jdbc.update("UPDATE bundles SET status='DRAFT', published_at=NULL WHERE id=?", f.id)
+        assertError(ErrorCode.BUNDLE_STATE_CONFLICT) { visibility(f, Visibility.PUBLIC, 1) }
+        jdbc.update("DELETE FROM bundles WHERE id=?", f.id)
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { visibility(f, Visibility.PUBLIC, 1) }
+    }
+
+    @Test
+    fun `scope HTTP requires an explicit non-null version and valid scope and mode`() {
+        val f = fixture()
+        val before = snapshot(f)
+        val url = "/api/v1/bunches/${f.bunchId}/bundles/${f.id}/visibility"
+        val auth = credential(f.owner)
+        val payloads = listOf(
+            """{"value":"PRIVATE","mode":"PUBLISHED"}""",
+            """{"value":"PRIVATE","expectedVersion":null,"mode":"PUBLISHED"}""",
+            """{"value":"PRIVATE","expectedVersion":0}""",
+            """{"value":"ALL","expectedVersion":0,"mode":"PUBLISHED"}""",
+            """{"value":null,"expectedVersion":0,"mode":"PUBLISHED"}"""
+        )
+        payloads.forEach { payload ->
+            mvc.perform(put(url).header("Authorization", auth).contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.error.code").value(ErrorCode.INVALID_JSON.code))
+        }
+        assertThat(snapshot(f)).isEqualTo(before)
+        assertThat(recorder.visibilities).isEmpty()
+    }
+
+    @Test
+    fun `scope authorization uses active owner role without requiring published participation`() {
+        val f = fixture()
+        jdbc.update("UPDATE bunch_memberships SET role='CO_OWNER' WHERE bunch_id=? AND member_id=?", f.bunchId, f.guest)
+        assertError(ErrorCode.FORBIDDEN) {
+            service.visibility(BundleActor(f.guest, "s"), f.bunchId, f.id,
+                BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.PUBLISHED), "co-owner")
+        }
+        jdbc.update("DELETE FROM bundle_participants WHERE bundle_id=? AND member_id=?", f.id, f.owner)
+        assertThat(visibility(f, Visibility.PRIVATE).permissions.participant).isFalse()
+        jdbc.update("UPDATE bunch_memberships SET status='LEFT' WHERE bunch_id=? AND member_id=?", f.bunchId, f.owner)
+        assertError(ErrorCode.FORBIDDEN) { visibility(f, Visibility.PUBLIC, 1) }
+    }
+
+    @Test
+    fun `visibility event is only delivered on commit and rollback retains the old scope`() {
+        val f = fixture()
+        val before = snapshot(f)
+        TransactionTemplate(transactions).execute { tx ->
+            visibility(f, Visibility.PRIVATE)
+            assertThat(recorder.visibilities).isEmpty()
+            tx.setRollbackOnly()
+        }
+        assertThat(snapshot(f)).isEqualTo(before)
+        assertThat(recorder.visibilities).isEmpty()
     }
 
     private fun fixture(photoCount: Int = 1): Fixture {
@@ -810,13 +1012,18 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2), processingStatus = status))
     }
 
+    private fun visibility(f: Fixture, value: Visibility, version: Long = 0) = service.visibility(
+        BundleActor(f.owner, "session-${f.owner}"), f.bunchId, f.id,
+        BundleVisibilityRequest(value, version, BundleStatus.PUBLISHED), "published-visibility"
+    )
+
     private fun snapshot(f: Fixture) = service.get(f.owner, f.bunchId, f.id)
     private fun save(f: Fixture, request: EditPublishedBundleRequest, actor: Long = f.owner) =
         service.editPublished(BundleActor(actor, "session-$actor"), f.bunchId, f.id, request, "published-edit")
 
     private fun edit(value: BundleSnapshot) = EditPublishedBundleRequest(
-        value.revision, value.title, value.visibility!!, value.date,
-        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) },
+        value.revision, value.title, value.date,
+        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id) },
         value.locations.map { BundleLocationInput(it.provider, it.externalId, it.name, it.address, it.position) }
     )
 
@@ -847,12 +1054,14 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
 
     class EditRecorder {
         val edits = CopyOnWriteArrayList<BundleChangedEvent>()
+        val visibilities = CopyOnWriteArrayList<BundleChangedEvent>()
         val removals = CopyOnWriteArrayList<BundleLocationsRemovedEvent>()
         var rejectRemoval = false
 
         @TransactionalEventListener
         fun edited(event: BundleChangedEvent) {
             if (event.type == BundleEventType.EDITED) edits.add(event)
+            if (event.type == BundleEventType.VISIBILITY) visibilities.add(event)
         }
 
         @EventListener

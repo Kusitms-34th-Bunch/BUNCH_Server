@@ -64,7 +64,6 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM push_jobs")
         jdbc.update("DELETE FROM push_devices")
         jdbc.update("DELETE FROM push_preferences")
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -166,6 +165,42 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `a switched off category keeps the inbox change and creates no transmission job`() {
+        val owner = member()
+        val guest = member()
+        val bunch = create(owner)
+        device(owner)
+        jdbc.update(
+            "INSERT INTO push_preferences(member_id, enabled, categories, updated_at) " +
+                "VALUES (?, true, '{\"MEMBER_ROLE\":false}'::jsonb, CURRENT_TIMESTAMP)",
+            owner
+        )
+
+        join(guest, issue(owner, bunch.id))
+
+        assertThat(countMemberJoinedNotifications()).isEqualTo(1)
+        assertThat(jobCount()).isZero()
+    }
+
+    @Test
+    fun `another switched off category does not stop the transmission job`() {
+        val owner = member()
+        val guest = member()
+        val bunch = create(owner)
+        device(owner)
+        jdbc.update(
+            "INSERT INTO push_preferences(member_id, enabled, categories, updated_at) " +
+                "VALUES (?, true, '{\"FOLLOW\":false,\"REACTION\":false}'::jsonb, CURRENT_TIMESTAMP)",
+            owner
+        )
+
+        join(guest, issue(owner, bunch.id))
+
+        assertThat(countMemberJoinedNotifications()).isEqualTo(1)
+        assertThat(jobCount()).isEqualTo(1)
+    }
+
+    @Test
     fun `activity merge updates only existing jobs and reading does not cancel the scheduled push`() {
         val owner = member()
         val guest = member()
@@ -176,7 +211,7 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
             BundleActor(owner, "atomic-owner"),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(photo(bunchId, guest)))
+            CreateBundleRequest(listOf(photo(bunchId, guest)), participantMemberIds = listOf(guest))
         )
         val firstKey = UUID.randomUUID()
         val firstChange = BundlePhotoChangesRequest(

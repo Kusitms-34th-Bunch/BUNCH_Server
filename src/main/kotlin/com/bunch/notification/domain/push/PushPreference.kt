@@ -1,5 +1,6 @@
 package com.bunch.notification.domain.push
 
+import com.bunch.notification.domain.NotificationType
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
@@ -20,8 +21,18 @@ class PushPreference(
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
-    var types: Map<String, Boolean> = emptyMap(),
+    var categories: Map<String, Boolean> = emptyMap(),
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant
-)
+) {
+    companion object {
+        // A member without settings receives every category. A type without a category is never pushed.
+        fun allows(preference: PushPreference?, type: NotificationType): Boolean {
+            if (preference?.enabled == false) return false
+            if (type in PushCategory.ALWAYS) return true
+            val category = PushCategory.of(type) ?: return false
+            return preference?.categories?.get(category.name) != false
+        }
+    }
+}

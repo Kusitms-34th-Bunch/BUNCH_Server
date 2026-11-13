@@ -56,17 +56,5 @@ class BundlePhoto(
     val addedBy: Long,
 
     @Column(name = "added_at", nullable = false)
-    val addedAt: Instant = Instant.now(),
-
-    @Column(nullable = false, columnDefinition = "text")
-    var caption: String = "",
-
-    @Column(name = "caption_version", nullable = false)
-    var captionVersion: Long = 0,
-
-    @Column(name = "caption_updated_by")
-    var captionUpdatedBy: Long? = null,
-
-    @Column(name = "caption_updated_at")
-    var captionUpdatedAt: Instant? = null
+    val addedAt: Instant = Instant.now()
 )
