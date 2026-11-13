@@ -35,6 +35,27 @@ class PhotoUploadConcurrencyTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `two members uploading different files of one original at once store one photo with two uploaders`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        val original = "c".repeat(64)
+
+        val results = concurrently(
+            listOf(
+                { uploads.upload(command(bunchId, ownerId, originalFileHash = original), image("copy-a")) },
+                { uploads.upload(command(bunchId, otherId, originalFileHash = original), image("copy-b")) }
+            )
+        )
+
+        assertThat(results.all { it.isSuccess }).isTrue()
+        val outcomes = results.map { it.getOrThrow() }
+        assertThat(outcomes.map { it.kind }).containsExactlyInAnyOrder(PhotoUploadKind.STORED, PhotoUploadKind.MERGED)
+        assertThat(outcomes.map { it.photoId }.distinct()).hasSize(1)
+        assertThat(photoCount(bunchId)).isEqualTo(1)
+        assertThat(uploaderCount(outcomes.first().photoId)).isEqualTo(2)
+    }
+
+    @Test
     fun `the same member retrying the same file at once stores it only once`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val photo = image("double-tap")

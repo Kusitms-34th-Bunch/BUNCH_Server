@@ -27,8 +27,11 @@ POST /api/v1/bunches/{bunchId}/photos
 | `uploadBatchId` | UUID | O | 사진 선택창에서 한 번 고른 사진들에 같은 값. 「다시 시도」로 다시 올려도 원래 값을 유지한다(3.2.2 로직 3 ⑤) |
 | `capturedDate` | `yyyy-MM-dd` | 선택 | 앱이 사진 파일 정보에서 뽑은 촬영 현지 날짜. 카메라 촬영은 촬영 시각의 날짜(3.2.3) |
 | `capturedTime` | `HH:mm:ss` | 선택 | 촬영 현지 시각. **`capturedDate` 없이 보낼 수 없다** |
+| `originalFileHash` | 소문자 hex 64자 | 선택 | 앱이 사진을 고른 시점에 **줄이기 전 원본 파일**의 SHA-256으로 계산한 값. 평면 폼 필드이며 JSON 파트가 아니다. 「다시 시도」로 다시 올려도 같은 값을 보낸다. 값이 있으면 대문자·다른 길이·빈 문자열은 거부한다. 필드를 빼면 기존처럼 줄인 파일의 SHA-256으로 판단한다 |
 
 - 촬영 정보가 없어도 업로드는 성공한다(3.2.2 로직 3 ④). 날짜가 없으면 사진은 「촬영 날짜를 확인할 사진」에 모인다.
+- 카메라 촬영(3.2.3)과 번들의 갤러리 가져오기(4.3.7)도 같은 업로드 규칙을 따른다. 앱이 `originalFileHash`를 보내지
+  않으면 기존 방식으로 판단한다.
 - 위치 정보(EXIF·XMP의 GPS 등)는 앱이 보내기 전에 지운다. 남아 있으면 서버가 거부한다.
 - 서버는 리사이즈를 하지 않는다. 긴 변 4096px 초과와 30MiB 초과 파일은 거부한다.
 - 서버는 JPEG만 받는다(확정 대기: 앱이 보낼 형식).
@@ -54,6 +57,10 @@ Content-Disposition: form-data; name="capturedDate"
 Content-Disposition: form-data; name="capturedTime"
 
 14:05:09
+--...
+Content-Disposition: form-data; name="originalFileHash"
+
+f64fdb17c09c54a0775548d2199f43d474bf9b38e9deb42805efabf343e1f743
 --...--
 ```
 
@@ -77,8 +84,10 @@ Content-Disposition: form-data; name="capturedTime"
 | `ALREADY_UPLOADED` | 내가 이미 올린 같은 사진이다 | 변화 없음 |
 
 - 세 경우 모두 `photoId`를 돌려준다. 갤러리에서 가져오기(4.3.7)는 이 `photoId`로 번들에 사진을 넣는다.
-- 같은 사진은 **파일이 완전히 같은 사진**이다. 서버가 업로드된 파일의 SHA-256으로 판단하므로, 같은 원본이
-  기기마다 같은 파일로 나오는지는 앱 연동 뒤에 확인한다.
+- 같은 사진은 **원본 파일이 같은 사진**이다(3.2.2 로직 5). `originalFileHash`가 같은 사진을 같은 번치에서 찾고,
+  이미지가 전혀 다르면 합치지 않는다. 메신저로 받은 사진·스크린샷·편집한 사진은 원본이 달라 따로 저장된다.
+  `originalFileHash`가 없으면 줄인 파일의 SHA-256으로 판단한다. 자세한 순서는 [사진함](photo-box.md)을 따른다.
+- `ALREADY_UPLOADED`도 같은 판단을 따른다. 이미 올라간 기존 사진에는 원본 해시가 없어서 줄인 파일로만 판단한다.
 - 같은 요청을 다시 보내도 사진은 1장만 저장된다. `Idempotency-Key`는 쓰지 않는다.
 
 ## 오류
@@ -87,7 +96,7 @@ Content-Disposition: form-data; name="capturedTime"
 
 | 상태 | 코드 | 원인 | 다시 시도 |
 | --- | --- | --- | --- |
-| 400 | `COMMON_001` | 형식·용량·해상도 초과, 위치 정보 남음, `photo` 누락, UUID·날짜·시각 형식 오류, 날짜 없이 시각만 보냄 | 불가 |
+| 400 | `COMMON_001` | 형식·용량·해상도 초과, 위치 정보 남음, `photo` 누락, UUID·날짜·시각 형식 오류, 날짜 없이 시각만 보냄, `originalFileHash` 형식 오류 | 불가 |
 | 401 | `AUTH_001` | 토큰 없음·만료·세션 없음 | 로그인 후 |
 | 403 | `AUTH_002` | 번치 멤버가 아님(나간 멤버 포함) | 불가 |
 | 403 | `AUTH_015` | 가입이 끝나지 않음 | 불가 |

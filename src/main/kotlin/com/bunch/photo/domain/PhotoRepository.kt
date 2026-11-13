@@ -41,6 +41,8 @@ private const val UNDATED_ORDER = " order by p.id desc"
 interface PhotoRepository : JpaRepository<Photo, Long> {
     fun findByBunchIdAndFileHash(bunchId: Long, fileHash: String): Photo?
 
+    fun findByBunchIdAndOriginalFileHash(bunchId: Long, originalFileHash: String): Photo?
+
     fun countByBunchId(bunchId: Long): Long
 
     @Query(LIST_PHOTOS + AFTER_CURSOR + LIST_ORDER)
