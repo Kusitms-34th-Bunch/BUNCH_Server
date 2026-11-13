@@ -1,6 +1,7 @@
 package com.bunch.bundle.service
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bundle.domain.*
 import com.bunch.bundle.dto.*
@@ -79,7 +80,19 @@ class BundleService(
         }
         // The query applies membership, account and signup status in the database after the bunch lock.
         val currentMembers = memberships.findActiveProfilesForBunches(listOf(bunchId)).map { it.member.id }.toSet()
-        if (request.participantMemberIds.any { it !in currentMembers }) fail(ErrorCode.FORBIDDEN)
+        val selectedParticipantIds = request.participantMemberIds.filter { memberId ->
+            when {
+                memberId in currentMembers -> true
+                memberships.existsByMemberIdAndBunchIdAndStatus(memberId, bunchId) -> fail(ErrorCode.FORBIDDEN)
+                memberships.existsByMemberIdAndBunchIdAndStatus(memberId, bunchId, MembershipStatus.LEFT) ||
+                    memberships.existsByMemberIdAndBunchIdAndStatus(
+                        memberId,
+                        bunchId,
+                        MembershipStatus.REMOVED
+                    ) -> false
+                else -> fail(ErrorCode.FORBIDDEN)
+            }
+        }
         val found = originalPhotos.findAllLockedByIdInOrderByIdAsc(request.photoIds)
         if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
             fail(ErrorCode.INVALID_INPUT)
@@ -102,7 +115,7 @@ class BundleService(
         )
         bundle.titleCrdt = titleCrdt.initialState(bundle.title)
         selected.forEachIndexed { index, photo -> addPhoto(bundle, photo, index, actor.memberId) }
-        val initial = listOf(actor.memberId) + request.participantMemberIds
+        val initial = listOf(actor.memberId) + selectedParticipantIds
         initial.forEach {
             val participant = participants.saveAndFlush(
                 BundleParticipant(bundleId = bundle.id, memberId = it, joinedAt = bundle.createdAt)
