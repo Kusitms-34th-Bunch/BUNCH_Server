@@ -572,8 +572,9 @@ class PhotoService(
         if (date != null) events.publishEvent(PhotoChangedEvent(bunchId, date, photoAdded = false))
     }
 
-    // A co-administrator has the same photo rights (5.6.2). Add that role here when it exists.
-    private fun isAdministrator(role: MembershipRole) = role == MembershipRole.OWNER
+    // The main administrator and a co-administrator have the same photo rights (5.6.2, 3.3.5, 3.4.1).
+    private fun isAdministrator(role: MembershipRole) =
+        role == MembershipRole.OWNER || role == MembershipRole.CO_OWNER
 
     private fun validateReadySelection(
         bunchId: Long,

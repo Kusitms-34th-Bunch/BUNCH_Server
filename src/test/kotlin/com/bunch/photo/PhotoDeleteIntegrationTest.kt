@@ -1,6 +1,7 @@
 package com.bunch.photo
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.dto.BundleActor
@@ -20,6 +21,8 @@ import com.bunch.photo.service.PhotoService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
@@ -141,12 +144,14 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
         assertThat(photos.existsById(joint.id)).isFalse()
     }
 
-    @Test
-    fun `an administrator deletes a photo uploaded only by others whole`() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MembershipRole::class, names = ["OWNER", "CO_OWNER"])
+    fun `an administrator deletes a photo uploaded only by others whole`(role: MembershipRole) {
         val fixture = fixture()
+        val administrator = administrator(fixture.owner, fixture.bunchId, role)
         val others = photo(fixture.bunchId, listOf(fixture.guest, fixture.third))
 
-        delete(fixture.owner, fixture.bunchId, listOf(others.id))
+        delete(administrator, fixture.bunchId, listOf(others.id))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.deletedCount").value(1))
             .andExpect(jsonPath("$.data.uploaderRemovedCount").value(0))
@@ -157,12 +162,14 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
         verify(storage, times(1)).delete(others.imageAsset.publicId)
     }
 
-    @Test
-    fun `an administrator who also uploaded a joint photo removes only their own badge`() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MembershipRole::class, names = ["OWNER", "CO_OWNER"])
+    fun `an administrator who also uploaded a joint photo removes only their own badge`(role: MembershipRole) {
         val fixture = fixture()
-        val joint = photo(fixture.bunchId, listOf(fixture.owner, fixture.guest))
+        val administrator = administrator(fixture.owner, fixture.bunchId, role)
+        val joint = photo(fixture.bunchId, listOf(administrator, fixture.guest))
 
-        delete(fixture.owner, fixture.bunchId, listOf(joint.id))
+        delete(administrator, fixture.bunchId, listOf(joint.id))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.deletedCount").value(0))
             .andExpect(jsonPath("$.data.uploaderRemovedCount").value(1))
