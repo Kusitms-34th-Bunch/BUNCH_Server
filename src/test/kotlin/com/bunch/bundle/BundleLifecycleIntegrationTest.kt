@@ -1,6 +1,7 @@
 package com.bunch.bundle
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.dto.BunchRemovalRequest
 import com.bunch.bunch.dto.BunchMembershipExitRequest
 import com.bunch.bunch.service.BunchMembershipExitService
 import com.bunch.bunch.domain.MembershipRole
@@ -277,6 +278,9 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 )
             }
         }
+        // A historical departure must not bypass validation of an invalid current membership.
+        leaveBunch(selected, bunchId)
+        join(selected, issue(owner, bunchId))
         jdbc.update("UPDATE members SET signup_status = 'IN_PROGRESS' WHERE id = ?", selected)
         assertBundleError(ErrorCode.FORBIDDEN) {
             bundleService.create(
@@ -351,7 +355,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `creation revalidates selected membership after waiting for concurrent departure`() {
+    fun `creation excludes selected membership after waiting for concurrent departure`() {
         val owner = member()
         val selected = member()
         val remaining = member()
@@ -366,10 +370,8 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         try {
             val pending = TransactionTemplate(transactionManager).execute {
                 val bunch = bunchRepository.findLocked(bunchId)!!
-                val creation = executor.submit<Throwable?> {
-                    runCatching {
-                        bundleService.create(actor(owner), bunchId, UUID.randomUUID(), request)
-                    }.exceptionOrNull()
+                val creation = executor.submit<BundleSnapshot> {
+                    bundleService.create(actor(owner), bunchId, UUID.randomUUID(), request)
                 }
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
                 while (true) {
@@ -387,13 +389,84 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                     BunchMembershipExitRequest(membershipId, bunch.membershipVersion))
                 creation
             }!!
-            val error = pending.get(10, TimeUnit.SECONDS)
-            assertThat(error).isInstanceOf(BusinessException::class.java)
-            assertThat((error as BusinessException).errorCode).isEqualTo(ErrorCode.FORBIDDEN)
-            assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isZero()
+            val created = pending.get(10, TimeUnit.SECONDS)
+            assertThat(created.participants.map { it.memberId }).containsExactly(owner)
+            assertThat(created.publishBlockers).contains("PARTICIPANTS_REQUIRED")
+            assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isEqualTo(1)
+            assertThat(creationParticipantNotifications(bunchId)).isEmpty()
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `creation excludes departed selections and replays original input even after rejoining`() {
+        val owner = member()
+        val departed = member()
+        val remaining = member()
+        val bunchId = bunchWithMembers(owner, departed, remaining)
+        val source = photo(bunchId, listOf(owner))
+        val key = UUID.randomUUID()
+        val request = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(departed, remaining))
+        leaveBunch(departed, bunchId)
+
+        val created = bundleService.create(actor(owner), bunchId, key, request)
+        assertThat(created.participants.map { it.memberId }).containsExactly(owner, remaining)
+        assertThat(creationParticipantNotifications(bunchId)).containsExactly(remaining)
+        join(departed, issue(owner, bunchId))
+        val replay = bundleService.create(actor(owner), bunchId, key, request)
+        assertThat(replay.id).isEqualTo(created.id)
+        assertThat(replay.participants.map { it.memberId }).containsExactly(owner, remaining)
+        assertThat(creationParticipantNotifications(bunchId)).containsExactly(remaining)
+        assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            bundleService.create(actor(owner), bunchId, key, request.copy(participantMemberIds = listOf(remaining)))
+        }
+    }
+
+    @Test
+    fun `creation keeps a silent singleton draft after all selected members leave or are removed`() {
+        val owner = member()
+        val departed = member()
+        val removed = member()
+        val unselected = member()
+        val bunchId = bunchWithMembers(owner, departed, removed, unselected)
+        val source = photo(bunchId, listOf(owner))
+        leaveBunch(departed, bunchId)
+        val ownerMembership = activeMembershipId(owner, bunchId)
+        membershipExit.remove(
+            owner, bunchId, activeMembershipId(removed, bunchId),
+            BunchRemovalRequest(ownerMembership, bunchRepository.findById(bunchId).orElseThrow().membershipVersion)
+        )
+
+        val request = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(departed, removed))
+        val created = bundleService.create(actor(owner), bunchId, UUID.randomUUID(), request)
+        assertThat(created.participants.map { it.memberId }).containsExactly(owner)
+        assertThat(created.publishBlockers).contains("PARTICIPANTS_REQUIRED")
+        assertThat(creationParticipantNotifications(bunchId)).isEmpty()
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM notifications WHERE bunch_id = ? AND type = 'DRAFT_PARTICIPANTS_INSUFFICIENT'",
+            Long::class.java, bunchId
+        )).isZero()
+        assertBundleError(ErrorCode.BUNDLE_PUBLISH_BLOCKED) {
+            bundleService.publish(actor(owner), bunchId, created.id, UUID.randomUUID(),
+                PublishBundleRequest(created.revision))
+        }
+    }
+
+    @Test
+    fun `creation still rejects departure that leaves only the creator in the bunch`() {
+        val owner = member()
+        val departed = member()
+        val bunchId = bunchWithMembers(owner, departed)
+        val source = photo(bunchId, listOf(owner))
+        leaveBunch(departed, bunchId)
+
+        assertBundleError(ErrorCode.BUNDLE_LIMIT_EXCEEDED) {
+            bundleService.create(actor(owner), bunchId, UUID.randomUUID(),
+                CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(departed)))
+        }
+        assertThat(bundleRepository.countByBunchIdAndStatus(bunchId, BundleStatus.DRAFT)).isZero()
+        assertThat(creationParticipantNotifications(bunchId)).isEmpty()
     }
 
     @Test
@@ -1776,6 +1849,27 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     private fun lastActivity(bunchId: Long, memberId: Long): Instant? = jdbc.queryForObject(
         "SELECT last_activity_at FROM bunch_memberships WHERE bunch_id = ? AND member_id = ? AND status = 'ACTIVE'",
         { row, _ -> row.getTimestamp(1)?.toInstant() }, bunchId, memberId
+    )
+
+    private fun activeMembershipId(memberId: Long, bunchId: Long): Long = jdbc.queryForObject(
+        "SELECT id FROM bunch_memberships WHERE bunch_id = ? AND member_id = ? AND status = 'ACTIVE'",
+        Long::class.java, bunchId, memberId
+    )!!
+
+    private fun leaveBunch(memberId: Long, bunchId: Long) {
+        membershipExit.leave(
+            memberId, bunchId, UUID.randomUUID(),
+            BunchMembershipExitRequest(
+                activeMembershipId(memberId, bunchId),
+                bunchRepository.findById(bunchId).orElseThrow().membershipVersion
+            )
+        )
+    }
+
+    private fun creationParticipantNotifications(bunchId: Long): List<Long> = jdbc.queryForList(
+        """SELECT recipient_member_id FROM notifications
+            WHERE bunch_id = ? AND type = 'DRAFT_PARTICIPANT_ADDED' ORDER BY id""",
+        Long::class.java, bunchId
     )
 
     private fun createDraft(owner: Long, bunchId: Long, photoIds: List<Long>): BundleSnapshot {
