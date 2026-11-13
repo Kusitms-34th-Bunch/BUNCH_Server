@@ -174,6 +174,74 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `the UTC offset and the original type are stored, and the app's SAVED_IMAGE is kept as SAVED`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        upload(ownerId, bunchId, jpeg(13), capturedUtcOffset = "+09:00", sourceType = "CAMERA")
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(ownerId, bunchId, jpeg(14), capturedUtcOffset = "-12:00", sourceType = "SAVED_IMAGE")
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(ownerId, bunchId, jpeg(15), capturedUtcOffset = "+14:00", sourceType = "SCREENSHOT")
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+
+        assertThat(originsOf(bunchId)).containsExactlyInAnyOrder(
+            "+09:00" to "CAMERA",
+            "-12:00" to "SAVED",
+            "+14:00" to "SCREENSHOT"
+        )
+    }
+
+    @Test
+    fun `an unknown or empty original type and an empty offset count as not sent`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        upload(ownerId, bunchId, jpeg(16), sourceType = "UNKNOWN").andExpect(status().isOk)
+        upload(ownerId, bunchId, jpeg(17), capturedUtcOffset = "", sourceType = "").andExpect(status().isOk)
+        upload(ownerId, bunchId, jpeg(18)).andExpect(status().isOk)
+
+        assertThat(originsOf(bunchId)).containsExactly(null to null, null to null, null to null)
+    }
+
+    @Test
+    fun `a wrong offset or original type is a plain 400 and nothing is stored or uploaded`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val wrongOffsets = listOf(
+            "+9:00", "+0900", "09:00", "+09:60", "+14:01", "-12:01", "+15:00", "-13:00", "Z", "+09:00 "
+        )
+        val wrongTypes = listOf("camera", "Camera", "SAVED", "PNG", "CAMERA ", "0")
+
+        wrongOffsets.forEachIndexed { index, offset ->
+            upload(ownerId, bunchId, jpeg(20 + index), capturedUtcOffset = offset)
+                .expectError(ErrorCode.INVALID_INPUT)
+                .andExpect(jsonPath("$.error.detail").doesNotExist())
+        }
+        wrongTypes.forEachIndexed { index, type ->
+            upload(ownerId, bunchId, jpeg(40 + index), sourceType = type)
+                .expectError(ErrorCode.INVALID_INPUT)
+                .andExpect(jsonPath("$.error.detail").doesNotExist())
+        }
+
+        assertThat(photoCount(bunchId)).isZero()
+        verify(storage, never()).upload(anyImage())
+    }
+
+    @Test
+    fun `an upload of a known photo with the new fields fills what was missing and answers as before`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        val file = jpeg(60)
+
+        upload(ownerId, bunchId, file).andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(otherId, bunchId, file, capturedUtcOffset = "+01:00", sourceType = "SAVED_IMAGE")
+            .andExpect(jsonPath("$.data.result").value("MERGED"))
+        upload(ownerId, bunchId, file, capturedUtcOffset = "+09:00", sourceType = "CAMERA")
+            .andExpect(jsonPath("$.data.result").value("ALREADY_UPLOADED"))
+
+        assertThat(originsOf(bunchId)).containsExactly("+01:00" to "SAVED")
+    }
+
+    @Test
     fun `a full bunch answers with the bunch limit error`() {
         val (ownerId, bunchId) = bunchWithOwner()
         seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_BUNCH)
@@ -198,7 +266,9 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
         batchId: UUID = UUID.randomUUID(),
         capturedDate: String? = null,
         capturedTime: String? = null,
-        contentType: String = "image/jpeg"
+        contentType: String = "image/jpeg",
+        capturedUtcOffset: String? = null,
+        sourceType: String? = null
     ): ResultActions {
         val request = multipart(path(bunchId))
             .file(photoPart(bytes, contentType))
@@ -206,8 +276,19 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
             .header(HttpHeaders.AUTHORIZATION, bearer(memberId))
         if (capturedDate != null) request.param("capturedDate", capturedDate)
         if (capturedTime != null) request.param("capturedTime", capturedTime)
+        if (capturedUtcOffset != null) request.param("capturedUtcOffset", capturedUtcOffset)
+        if (sourceType != null) request.param("sourceType", sourceType)
         return mvc.perform(request)
     }
+
+    // The offset and the original type of every photo of the bunch, oldest first.
+    private fun originsOf(bunchId: Long): List<Pair<String?, String?>> = jdbc.query(
+        """SELECT p.captured_utc_offset AS utc_offset, f.source AS source
+            FROM photos p LEFT JOIN photo_reco_feature f ON f.photo_id = p.id
+            WHERE p.bunch_id = ? ORDER BY p.id""",
+        { rs, _ -> rs.getString("utc_offset") to rs.getString("source") },
+        bunchId
+    )
 
     private fun photoPart(bytes: ByteArray, contentType: String = "image/jpeg") =
         MockMultipartFile("photo", "from-the-app.jpg", contentType, bytes)

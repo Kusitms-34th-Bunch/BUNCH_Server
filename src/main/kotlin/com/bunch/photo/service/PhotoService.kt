@@ -21,6 +21,7 @@ import com.bunch.photo.domain.Photo
 import com.bunch.photo.domain.PhotoImageFingerprint
 import com.bunch.photo.domain.PhotoImageFingerprintRepository
 import com.bunch.photo.domain.PhotoListCursor
+import com.bunch.photo.domain.PhotoRecoFeatureRepository
 import com.bunch.photo.domain.PhotoRepository
 import com.bunch.photo.domain.PhotoUndatedCursor
 import com.bunch.photo.domain.PhotoUploader
@@ -65,6 +66,7 @@ class PhotoService(
     private val photos: PhotoRepository,
     private val uploaders: PhotoUploaderRepository,
     private val fingerprints: PhotoImageFingerprintRepository,
+    private val recoFeatures: PhotoRecoFeatureRepository,
     private val imageAssets: ImageAssetService,
     private val imageAssetRepository: ImageAssetRepository,
     private val storage: PhotoImageStorage,
@@ -173,9 +175,12 @@ class PhotoService(
                 processingStatus = ProcessingStatus.READY,
                 capturedDate = command.capturedDate,
                 capturedTime = command.capturedTime,
-                dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF
+                dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF,
+                capturedUtcOffset = command.capturedUtcOffset
             )
         )
+        // Every new photo gets its row, so the features that come later have a place to be filled in (4-5).
+        recoFeatures.fillSource(photo.id, command.sourceType?.name)
         fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
         locked.membership.recordActivity()
@@ -183,10 +188,13 @@ class PhotoService(
         return PhotoUploadResult(photo.id, PhotoUploadKind.STORED)
     }
 
-    // The existing photo is never changed; only the uploader list grows.
+    // The existing photo is not changed: the uploader list grows, and what the first upload did not say (the UTC
+    // offset, the original type) is filled in. A value that is already known is never replaced.
     private fun joinUpload(locked: UploadLocks, command: PhotoUploadCommand, existing: Photo): PhotoUploadResult {
         val photo = photos.findAllLockedByIdInOrderByIdAsc(listOf(existing.id)).singleOrNull()
             ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        command.capturedUtcOffset?.let { photos.fillUtcOffset(photo.id, it) }
+        command.sourceType?.let { recoFeatures.fillSource(photo.id, it.name) }
         if (uploaders.existsByPhotoIdAndMemberId(photo.id, command.memberId)) {
             return PhotoUploadResult(photo.id, PhotoUploadKind.ALREADY_UPLOADED)
         }
