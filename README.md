@@ -182,8 +182,10 @@ DB에 기록하며, 서버가 재시작돼도 남은 작업을 이어서 처리�
 번들 REST·STOMP 클라이언트 계약은 [번들 API 계약](docs/specs/bundle-api.md)을 따른다.
 REST 기본 경로는 `/api/v1/bunches/{bunchId}/bundles`이고 공동 편집 WebSocket의
 STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
-`type / bunchId / bundleId / revision / requestId / data` 공통 형식으로 전달한다. REST와 STOMP 모두 기존 access JWT의 `sid`를 검증한 활성
-인증 세션을 사용하며, WebSocket 연결의 URL에 토큰을 넣지 않는다.
+`type / bunchId / bundleId / revision / requestId / data` 공통 형식으로 전달한다. REST는 기존 access JWT를 사용하며 STOMP CONNECT는 `POST /api/v1/auth/ws-token`으로
+발급한 60초 WS JWT를 사용한다(기존 access CONNECT도 허용). 둘 다 기존 `sid`의 활성 Redis
+세션을 검증하며 연결 이후에는 JWT 만료 대신 기존 세션·권한 검사를 유지한다.
+WS 토큰은 REST·재발급·토큰 발급 API에서 사용할 수 없다. WebSocket URL에 토큰을 넣지 않는다.
 
 번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
 상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다.

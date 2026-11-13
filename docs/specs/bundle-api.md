@@ -91,8 +91,10 @@ Authorization: Bearer <access-jwt>
 각 요청에서 다시 확인한다. WebSocket은 연결 URL이나 query string으로 credential을
 전달하지 않는다.
 
-STOMP `CONNECT` frame의 native `Authorization` header에만 같은 Bearer access JWT를
-넣는다. 이후 `SEND`, `SUBSCRIBE`, `UNSUBSCRIBE` frame에는 Authorization header를
+STOMP `CONNECT` frame의 native `Authorization` header에는 `POST /api/v1/auth/ws-token`으로
+발급한 Bearer WS JWT를 사용한다. 기존 Bearer access JWT도 계속 허용한다.
+WS JWT는 60초 이내에 연결 시작에 사용하며 재연결 때 새로 발급한다. 연결 이후에는
+기존 Redis 세션·접근 권한 검사만 유지한다. 상세 발급·용도 격리는 [인증 Spec](auth.md#auth-ws-token)을 따른다. 이후 `SEND`, `SUBSCRIBE`, `UNSUBSCRIBE` frame에는 Authorization header를
 보내지 않는다. URL query string이 있으면 WebSocket handshake가 `400 Bad Request`로 거부된다.
 연결 뒤에도 각 frame에서 같은 Redis 세션이 활성인지 검사한다.
 
@@ -709,7 +711,8 @@ nickname/imageUrl/profileAvailable을 제공한다. 비활성 작성자는 conte
 
 ### 연결·구독·명령
 
-endpoint는 `/ws`이며 `CONNECT` native header의 Bearer access JWT로 인증한다.
+endpoint는 `/ws`이며 `CONNECT` native header의 Bearer WS JWT로 인증한다.
+기존 access JWT도 허용하며 WS 토큰은 [발급 계약](auth.md#auth-ws-token)에 따라 사용한다.
 허용 Origin은 `BUNCH_WS_ALLOWED_ORIGINS`로 제한하고 URL query는 거부한다.
 연결 후에도 세션·번치 소속·작업 권한을 다시 검사한다.
 
@@ -739,7 +742,8 @@ presence BEGIN/TYPE와 `COMMENT` 활동은 초안 참여자만 사용할 수 있
 
 공동 편집 화면의 기본 흐름은 다음 순서를 따른다.
 
-1. `/ws`에 `CONNECT`하고 native `Authorization` header로 access JWT를 보낸다. 서버는
+1. 기존 access로 `POST /api/v1/auth/ws-token`을 호출하고, `/ws`의 `CONNECT` native
+   `Authorization` header에 발급된 WS JWT를 보낸다. 기존 access CONNECT도 허용한다. 서버는
    인증된 `memberId`·`sessionId`와 서버 connectionId를 연결 문맥에 둔다.
 2. 번들 topic과 필요한 private queue를 `SUBSCRIBE`한 뒤, REST `GET`으로 현재
    `BundleSnapshot`과 revision을 조회하고, 초안의 현재 presence는 별도 GET으로 복구한다.

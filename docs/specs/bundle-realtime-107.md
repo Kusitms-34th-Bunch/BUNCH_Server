@@ -14,8 +14,9 @@ editing과 typing은 내용 저장이나 잠금이 아니다.
 
 ## 인증과 명령
 
-CONNECT의 access token과 활성 인증 세션으로 연결을 식별하며 매 SEND/구독/전달 시
+CONNECT의 WS 전용 토큰(기존 access도 허용)과 활성 인증 세션으로 연결을 식별하며 매 SEND/구독/전달 시
 기존 인증·번치 멤버십·번들 접근 검증을 적용한다. 본문 memberId는 신뢰하지 않는다.
+WS 토큰의 60초 만료는 연결 시작만 제한하며 연결 후에는 기존 Redis 세션·권한 검사로 유지한다.
 초안 참여자만 BEGIN과 TYPE를 보낼 수 있다. COMMENT는 본인 칸이며
 VIEW는 초안 열람 가능한 멤버가 가능하다.
 발행본에는 새 presence를 만들 수 없다.

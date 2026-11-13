@@ -32,11 +32,15 @@ import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.SignatureAlgorithm
+import io.jsonwebtoken.security.Keys
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.ActiveProfiles
@@ -49,6 +53,9 @@ import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.util.Base64
+import java.util.Date
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
@@ -77,6 +84,9 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var bunchRows: BunchRepository
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
 
+    @Value("\${jwt.secret}")
+    private lateinit var jwtSecret: String
+
     private val connections = mutableListOf<WireClient>()
     private val credentials = mutableListOf<Credential>()
     private val ownAssets = mutableListOf<Long>()
@@ -94,6 +104,105 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         ownAssets.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
+    }
+
+    @Test
+    fun `signed WS CONNECT and legacy access CONNECT share presence and committed REST events`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connectToken(issueWsToken(fixture.guest))
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "PHOTOS"))
+        val guestPresence = guest.presenceAck().path("data")
+        assertThat(editingTargets(guestPresence)).contains(fixture.guest.memberId to "PHOTOS")
+        owner.json {
+            it.path("type").asText() == "PRESENCE" &&
+                editingTargets(it.path("data")).contains(fixture.guest.memberId to "PHOTOS")
+        }
+
+        val requestId = UUID.randomUUID().toString()
+        val saved = putTitle(fixture, "WS 연결에도 저장 결과 전파", requestId)
+        val event = guest.json { it.path("type").asText() == "TITLE" }
+        assertThat(event.path("requestId").asText()).isEqualTo(requestId)
+        assertThat(event.path("revision").asLong()).isEqualTo(saved.path("revision").asLong())
+        assertThat(event.path("data").path("value").asText()).isEqualTo("WS 연결에도 저장 결과 전파")
+        assertThat(getSnapshot(fixture, fixture.guest).path("title").asText())
+            .isEqualTo("WS 연결에도 저장 결과 전파")
+    }
+
+    @Test
+    fun `CONNECT rejects missing invalid expired forged and wrong purpose WS credentials`() {
+        val credential = credential(member())
+        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val cases = linkedMapOf<String, String>()
+        listOf("sub", "sid", "tokenType", "aud", "iat", "exp", "jti").forEach { claim ->
+            cases["missing $claim"] = wsToken(credential, mapOf(claim to null))
+        }
+        cases["blank jti"] = wsToken(credential, mapOf("jti" to ""))
+        cases["wrong audience"] = wsToken(credential, mapOf("aud" to "another-service"))
+        cases["nonpositive subject"] = wsToken(credential, mapOf("sub" to "0"))
+        cases["malformed session"] = wsToken(credential, mapOf("sid" to "not-a-uuid"))
+        cases["foreign session"] = wsToken(credential, mapOf("sid" to UUID.randomUUID().toString()))
+        cases["foreign member"] = wsToken(credential, mapOf("sub" to member().toString()))
+        cases["future issued at"] = wsToken(credential, mapOf(
+            "iat" to Date.from(now.plusSeconds(120)), "exp" to Date.from(now.plusSeconds(180))
+        ))
+        cases["wrong lifetime"] = wsToken(credential, mapOf("exp" to Date.from(now.plusSeconds(600))))
+        cases["expired"] = wsToken(credential, mapOf(
+            "iat" to Date.from(now.minusSeconds(120)), "exp" to Date.from(now.minusSeconds(60))
+        ))
+        cases["forged signature"] = wsToken(credential, forged = true)
+        cases["refresh purpose"] = tokenProvider.createRefreshToken(credential.memberId, credential.sid)
+
+        cases.forEach { (description, token) -> assertConnectRejected(token, description) }
+        // A valid token on the same server still connects; failures above are credential-specific.
+        connectToken(wsToken(credential))
+    }
+
+    @Test
+    fun `expired WS reconnect is denied and a fresh WS credential reconnects without waiting sixty seconds`() {
+        val credential = credential(member())
+        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val expired = wsToken(credential, mapOf(
+            "iat" to Date.from(now.minusSeconds(120)), "exp" to Date.from(now.minusSeconds(60))
+        ))
+
+        assertConnectRejected(expired, "expired reconnect")
+        val fresh = issueWsToken(credential)
+        connectToken(fresh).close()
+        // No single-use token store: a still-valid WS JWT may be used again.
+        connectToken(fresh)
+    }
+
+    @Test
+    fun `revoked WS session loses delivery later SEND and reconnect while access connection remains active`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val ws = issueWsToken(fixture.guest)
+        val guest = connectToken(ws)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        owner.clear()
+        guest.clear()
+
+        assertThat(sessions.delete(fixture.guest.sid, fixture.guest.memberId)).isTrue()
+        putTitle(fixture, "세션 종료 뒤 변경", UUID.randomUUID().toString())
+        owner.json { it.path("type").asText() == "TITLE" }
+        guest.assertNoEvent("TITLE")
+        guest.clear()
+
+        guest.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        guest.assertNoEvent("PRESENCE")
+        assertThat(editingTargets(getPresence(fixture, fixture.owner)))
+            .doesNotContain(fixture.guest.memberId to "DATE")
+        assertConnectRejected(ws, "revoked original WS token")
+        assertConnectRejected(wsToken(fixture.guest), "new JWT cannot reactivate a revoked session")
+
+        owner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(owner.presenceAck().path("data")))
+            .contains(fixture.owner.memberId to "DATE")
     }
 
     @Test
@@ -919,9 +1028,63 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         connections.add(client)
     }
 
-    private fun connect(credential: Credential): WireClient = rawConnection().also {
-        it.sendRaw("CONNECT\naccept-version:1.2\nheart-beat:0,0\nAuthorization:Bearer ${credential.access}\n\n\u0000")
+    private fun connect(credential: Credential): WireClient = connectToken(credential.access)
+
+    private fun connectToken(token: String): WireClient = rawConnection().also {
+        it.sendRaw("CONNECT\naccept-version:1.2\nheart-beat:0,0\nAuthorization:Bearer $token\n\n\u0000")
         assertThat(it.frame { frame -> frame.command == "CONNECTED" }.command).isEqualTo("CONNECTED")
+    }
+
+    private fun assertConnectRejected(token: String, description: String) {
+        val client = rawConnection()
+        client.sendRaw("CONNECT\naccept-version:1.2\nheart-beat:0,0\nAuthorization:Bearer $token\n\n\u0000")
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500)
+        while (System.nanoTime() < deadline) {
+            val frame = client.frames.poll(50, TimeUnit.MILLISECONDS) ?: continue
+            assertThat(frame.command).describedAs(description).isNotEqualTo("CONNECTED")
+        }
+        client.close()
+    }
+
+    private fun issueWsToken(credential: Credential): String {
+        val response = http.send(
+            HttpRequest.newBuilder(URI("http://localhost:$port/api/v1/auth/ws-token"))
+                .header("Authorization", "Bearer ${credential.access}")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build(),
+            HttpResponse.BodyHandlers.ofString()
+        )
+        // Do not include the response body in assertion messages: it contains a credential.
+        assertThat(response.statusCode()).isEqualTo(200)
+        assertThat(response.headers().firstValue("Cache-Control").orElse(""))
+            .isEqualTo("no-store")
+        val data = mapper.readTree(response.body()).path("data")
+        val token = data.path("token").asText()
+        assertThat(token.isNotBlank()).isTrue()
+        assertThat(Instant.parse(data.path("expiresAt").asText())).isAfter(Instant.now())
+        return token
+    }
+
+    private fun wsToken(
+        credential: Credential,
+        overrides: Map<String, Any?> = emptyMap(),
+        forged: Boolean = false
+    ): String {
+        val issuedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).minusSeconds(1)
+        val claims = mapOf<String, Any?>(
+            "sub" to credential.memberId.toString(),
+            "sid" to credential.sid,
+            "tokenType" to "ws",
+            "aud" to "bunch-ws",
+            "iat" to Date.from(issuedAt),
+            "exp" to Date.from(issuedAt.plusSeconds(60)),
+            "jti" to UUID.randomUUID().toString()
+        ) + overrides
+        val keyBytes = if (forged) ByteArray(64) { 42 } else Base64.getDecoder().decode(jwtSecret)
+        return Jwts.builder()
+            .setClaims(claims.filterValues { it != null })
+            .signWith(Keys.hmacShaKeyFor(keyBytes), SignatureAlgorithm.HS512)
+            .compact()
     }
 
     private fun subscribe(client: WireClient, fixture: Fixture) {
