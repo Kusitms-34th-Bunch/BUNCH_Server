@@ -14,5 +14,6 @@ data class PhotoListItem(
     val thumbnailUrl: String,
     val capturedDate: LocalDate,
     val capturedTime: LocalTime?,
-    val uploaderIds: List<Long>
+    val uploaderIds: List<Long>,
+    val usedInDraftBundle: Boolean
 )
