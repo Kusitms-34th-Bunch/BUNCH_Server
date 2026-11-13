@@ -1,6 +1,7 @@
 package com.bunch.bundle.service
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bundle.domain.*
 import com.bunch.bundle.dto.*
@@ -12,8 +13,8 @@ import com.bunch.social.dto.SocialLikeSummary
 import com.bunch.social.service.SocialLikeService
 import com.bunch.social.service.SocialCommentService
 import com.bunch.photo.domain.Photo
+import com.bunch.photo.domain.ProcessingStatus
 import com.bunch.photo.domain.PhotoRepository
-import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.service.PhotoService
 import com.bunch.notification.service.NotificationWriter
 import com.bunch.notification.service.PushJobWriter
@@ -48,7 +49,6 @@ class BundleService(
     private val memberships: BunchMembershipRepository,
     private val photoService: PhotoService,
     private val originalPhotos: PhotoRepository,
-    private val uploaders: PhotoUploaderRepository,
     private val leases: BundleLeaseService,
     private val locations: BundleLocationService,
     private val images: ImageAssetService,
@@ -70,6 +70,35 @@ class BundleService(
             fail(ErrorCode.BUNDLE_LIMIT_EXCEEDED)
         }
         if (request.photoIds.size !in 1..20) fail(ErrorCode.INVALID_INPUT)
+        validIds(request.photoIds)
+        validIds(request.participantMemberIds)
+        if (request.participantMemberIds.isEmpty() || actor.memberId in request.participantMemberIds) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        // The query applies membership, account and signup status in the database after the bunch lock.
+        val currentMembers = memberships.findActiveProfilesForBunches(listOf(bunchId)).map { it.member.id }.toSet()
+        val selectedParticipantIds = request.participantMemberIds.filter { memberId ->
+            when {
+                memberId in currentMembers -> true
+                memberships.existsByMemberIdAndBunchIdAndStatus(memberId, bunchId) -> fail(ErrorCode.FORBIDDEN)
+                memberships.existsByMemberIdAndBunchIdAndStatus(memberId, bunchId, MembershipStatus.LEFT) ||
+                    memberships.existsByMemberIdAndBunchIdAndStatus(
+                        memberId,
+                        bunchId,
+                        MembershipStatus.REMOVED
+                    ) -> false
+                else -> fail(ErrorCode.FORBIDDEN)
+            }
+        }
+        val found = originalPhotos.findAllLockedByIdInOrderByIdAsc(request.photoIds)
+        if (found.any { it.bunch.id != bunchId || it.processingStatus != ProcessingStatus.READY }) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
+        val foundIds = found.map { it.id }.toSet()
+        val missingIds = request.photoIds.filter { it !in foundIds }
+        if (missingIds.isNotEmpty()) {
+            fail(ErrorCode.PHOTO_SELECTION_CHANGED, mapOf("missingPhotoIds" to missingIds))
+        }
         val selected = photoService.lockReadyPhotosForConnection(bunchId, request.photoIds)
         val recommended = request.recommendationId?.let { recommendations.useCandidate(bunchId, it) }
         val bundle = bundles.saveAndFlush(
@@ -82,10 +111,7 @@ class BundleService(
             )
         )
         selected.forEachIndexed { index, photo -> addPhoto(bundle, photo, index, actor.memberId) }
-        val currentMembers = memberships.findAllByBunchIdAndStatus(bunchId).map { it.member.id }.toSet()
-        val initial = linkedSetOf(actor.memberId)
-        uploaders.findAllByPhotoIdInOrderByPhotoIdAndIdAsc(request.photoIds)
-            .map { it.member.id }.filter { it in currentMembers }.forEach(initial::add)
+        val initial = listOf(actor.memberId) + selectedParticipantIds
         initial.forEach {
             val participant = participants.saveAndFlush(
                 BundleParticipant(bundleId = bundle.id, memberId = it, joinedAt = bundle.createdAt)
