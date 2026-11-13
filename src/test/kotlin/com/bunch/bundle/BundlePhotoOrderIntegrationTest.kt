@@ -24,14 +24,21 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 @SpringBootTest
 @ActiveProfiles("test")
+@Import(BundlePhotoOrderIntegrationTest.PrecisionClockConfiguration::class)
 class BundlePhotoOrderIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var service: BundleService
@@ -128,10 +135,11 @@ class BundlePhotoOrderIntegrationTest : BunchIntegrationSupport() {
         val (a, b, c, d) = f.ids
         move(f, d, a, b, "legacy-string-request")
         val last = move(f, d, c, null, "latest-string-request")
+        val persisted = state(f)
         val replay = move(f, d, a, b, "legacy-string-request")
         assertOrder(f, a, b, c, d)
         assertThat(replay.revision).isEqualTo(last.revision)
-        assertThat(replay.updatedAt).isEqualTo(last.updatedAt)
+        assertThat(replay.updatedAt).isEqualTo(persisted.updatedAt)
         assertThat(requestCount(f)).isEqualTo(2)
     }
 
@@ -386,4 +394,15 @@ class BundlePhotoOrderIntegrationTest : BunchIntegrationSupport() {
         val bundleId: Long,
         val ids: List<Long>
     )
+
+    @TestConfiguration
+    class PrecisionClockConfiguration {
+        @Bean
+        @Primary
+        // Exercise PostgreSQL timestamp rounding even on hosts with microsecond clocks.
+        fun nanosecondClock(): Clock = Clock.offset(
+            Clock.tick(Clock.systemUTC(), Duration.ofNanos(1_000)),
+            Duration.ofNanos(789)
+        )
+    }
 }
