@@ -130,6 +130,12 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
         @Param("batchId") batchId: UUID
     ): Int
 
+    // Fills the offset only while it is empty, so a known value is never replaced. The caller holds the photo lock and
+    // does not read the offset afterwards, so the persistence context needs no clearing.
+    @Modifying(flushAutomatically = true)
+    @Query("update Photo p set p.capturedUtcOffset = :offset where p.id = :id and p.capturedUtcOffset is null")
+    fun fillUtcOffset(@Param("id") id: Long, @Param("offset") offset: String): Int
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         "update Photo p set p.capturedDate = null, p.capturedTime = null, p.dateBatchId = null, " +

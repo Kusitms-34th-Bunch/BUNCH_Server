@@ -4,6 +4,7 @@ import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.photo.domain.PhotoSourceType
 import com.bunch.photo.service.PhotoService
 import com.bunch.photo.service.PhotoUploadCommand
 import org.junit.jupiter.api.AfterEach
@@ -60,8 +61,18 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         memberId: Long,
         batchId: UUID = UUID.randomUUID(),
         capturedDate: LocalDate? = null,
-        capturedTime: LocalTime? = null
-    ) = PhotoUploadCommand(bunchId, memberId, batchId, capturedDate, capturedTime)
+        capturedTime: LocalTime? = null,
+        capturedUtcOffset: String? = null,
+        sourceType: PhotoSourceType? = null
+    ) = PhotoUploadCommand(
+        bunchId = bunchId,
+        memberId = memberId,
+        uploadBatchId = batchId,
+        capturedDate = capturedDate,
+        capturedTime = capturedTime,
+        capturedUtcOffset = capturedUtcOffset,
+        sourceType = sourceType
+    )
 
     protected fun image(seed: String) = PhotoImage(seed.toByteArray(), 1200, 800)
 

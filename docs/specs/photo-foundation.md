@@ -44,6 +44,7 @@ Photo는 번치 사진함의 한 기록이다. 실제 파일은 `ImageAsset`가 
 | `capturedTime` | 선택 `LocalTime`, 날짜가 있을 때만 허용 |
 | `dateSource` | `EXIF`, `USER`, `UNKNOWN`, varchar(16) |
 | `createdAt` | 필수 `Instant`, `timestamptz` |
+| `capturedUtcOffset` | 선택 `String` `±HH:mm`, varchar(6). 촬영 현지 시각의 UTC 오프셋. 서버는 `-12:00`~`+14:00`을 검사하고 DB CHECK는 모양만 검사한다. 없으면 추천에서 `Asia/Seoul`로 본다 |
 
 날짜 출처의 저장 계약은 다음과 같다.
 
@@ -64,6 +65,21 @@ PostgreSQL의 `captured_time TIME`은 `time(6)` 정밀도 계약이다. 앱 입�
 정밀도를 기준으로 하며, Java `LocalTime`의 나노초 값을 임의로 넣어 DB에서 원문
 그대로 보존된다고 가정하지 않는다. 마이크로초보다 세밀한 값은 PostgreSQL 저장
 과정에서 표현되지 않을 수 있다.
+
+### PhotoRecoFeature
+
+추천 번들이 쓰는 사진의 특성이다(추천 번들 조합 명세 4-5). 사진당 1행이고 키는 `photo_id`이며,
+Photo가 지워지면 DB가 함께 지운다(`photo_image_fingerprints`와 같은 보조 테이블 방식). 지금은 원본 유형만 있고,
+AI 분석·품질 컬럼은 그것을 계산하는 이슈에서 추가한다.
+
+| 필드 | 타입·제약 |
+| --- | --- |
+| `photoId` | `Long`, PK, `photos.id` 참조 |
+| `source` | 선택 `CAMERA`, `SCREENSHOT`, `SAVED`, varchar(16). 비어 있으면 원본 유형을 모른다 |
+
+- 새 사진은 항상 행을 만든다. 값은 업로드 요청의 `sourceType`에서 온다(`SAVED_IMAGE`는 `SAVED`로 바꾸고 `UNKNOWN`은 비운다).
+- 이 테이블을 만들기 전에 올라온 사진은 행이 없다. 행이 없는 것은 값이 비어 있는 것과 같다.
+- 합쳐지거나 다시 올라온 사진은 `source`가 비어 있을 때만 새 값으로 채운다(행이 없으면 값이 있을 때 만든다). 있는 값은 바꾸지 않는다.
 
 ### PhotoUploader
 
