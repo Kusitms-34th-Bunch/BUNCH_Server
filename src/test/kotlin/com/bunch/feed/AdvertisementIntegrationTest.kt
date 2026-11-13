@@ -6,7 +6,7 @@ import com.bunch.feed.service.AdvertisementService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.service.KokService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -48,7 +48,7 @@ class AdvertisementIntegrationTest : BunchIntegrationSupport() {
     private lateinit var transactions: PlatformTransactionManager
 
     @Autowired
-    private lateinit var pins: PinnedPlaceService
+    private lateinit var pins: KokService
 
     @Autowired
     private lateinit var mapper: ObjectMapper

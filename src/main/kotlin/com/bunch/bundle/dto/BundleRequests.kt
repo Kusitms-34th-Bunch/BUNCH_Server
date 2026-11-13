@@ -9,8 +9,13 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class CreateBundleRequest(
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
     val photoIds: List<Long>,
-    val recommendationId: Long? = null
+
+    val recommendationId: Long? = null,
+
+    @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
+    val participantMemberIds: List<Long> = emptyList()
 )
 
 data class BundleTextRequest(
@@ -22,6 +27,9 @@ data class BundleTextRequest(
 
 data class BundleVisibilityRequest(
     val value: Visibility,
+
+    @param:JsonProperty(value = "expectedVersion", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
     val expectedVersion: Long,
     val mode: BundleStatus
 )
@@ -75,7 +83,6 @@ data class PublishBundleRequest(val expectedRevision: Long)
 data class EditPublishedBundleRequest(
     val expectedRevision: Long,
     val title: String,
-    val visibility: Visibility,
     val date: LocalDate?,
     val photos: List<PublishedBundlePhotoInput>,
     val locations: List<BundleLocationInput>
