@@ -47,10 +47,7 @@ class BundleRealtimeAuthInterceptor(
             ?.takeIf { it.isNotBlank() }
             ?: return null
         val authentication = try {
-            if (!tokenProvider.validateToken(token) || !tokenProvider.isAccessToken(token)) {
-                return null
-            }
-            tokenProvider.getAuthentication(token)
+            tokenProvider.getConnectAuthentication(token)
         } catch (_: RuntimeException) {
             return null
         }

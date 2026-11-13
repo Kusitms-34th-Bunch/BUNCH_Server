@@ -122,6 +122,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | --- | --- | --- |
 | POST /api/v1/auth/{apple,google,kakao}/login | 기존 idToken/nonce | 기존 accessToken/refreshToken, 독립 sid |
 | POST /api/v1/auth/reissue | 기존 refreshToken | 같은 sid의 새 토큰 쌍 |
+| POST /api/v1/auth/ws-token | 기존 access JWT·활성 세션·ACTIVE 회원 | 60초 WS 연결 토큰 token·expiresAt, no-store. [상세 계약](auth.md#auth-ws-token) |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
 | PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |

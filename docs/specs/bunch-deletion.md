@@ -84,10 +84,10 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
 
 1. 기존 caller의 실제 lock graph를 기준으로 삭제자 회원 row를 먼저 잠근 뒤 대상
    번치 row를 잠근다. 이후 수신자 member/device row를 잠그지 않고, 번치 아래
-   bundle/photo/lease를 ID 오름차순으로 처리한다. 현재 코드의 근거는 다음과 같다.
+   bundle/photo를 ID 오름차순으로 처리한다. 현재 코드의 근거는 다음과 같다.
 
    - `BundleAccessService`/`BundleService`와 `PhotoService`는 `bunches.findLocked`
-     후 bundle/photo/lease를 잠근다.
+     후 bundle/photo를 잠근다.
    - `PhotoService.upload`는 upload-batch advisory lock → bunch row lock →
      non-locking member 조회 → membership/photo 잠금 순서다.
    - `BunchService` 프로필/last-used와 `#49` 관리 service는 member row lock 후
@@ -108,11 +108,11 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
    발행 `bundle_photos.image_asset_id`를 먼저 수집한다. ImageAsset은 ID만 수집하고
    공유 여부는 restrictive FK와 commit 후 정리에 맡긴다.
 5. 현재 실제 모델의 repository와 callback을 사용해 다음 순서로 하위 관계를
-   명시적으로 정리한다. DB cascade가 callback·lease·registry·파일 정리를
+   명시적으로 정리한다. DB cascade가 callback·registry·파일 정리를
    대신한다고 가정하지 않는다.
 
    - 초대, 알림/리마인드의 번치 소유 행, draft·published Bundle의 참여·코멘트·사진,
-     bundle request 중 번치 FK를 가진 행, bundle edit lease
+     bundle request 중 번치 FK를 가진 행
    - Photo uploader와 Photo, 번치 프로필 참조 및 번치 소속/역할/종료 이력
    - #51의 실제 양방향 follow/block/report 관계
    - 번치 본체
@@ -129,8 +129,9 @@ character type, 참여 회차를 snapshot으로 확보한다. 각 수신자에�
    `BunchActionRequestRepository`에 같은 transaction으로 직접 저장한다. #49의
    `Map<String, Any?>` result shape와 `expiresAt=+30일`을 재사용하고 entity/repository
    계약은 수정하지 않는다.
-8. DB lease row는 번치 삭제 transaction 안에서 명시적으로 release하고, 외부 파일은
-   `releaseAfterCommit`으로 commit 뒤에만 정리한다. #59의 실제
+8. 외부 파일은 `releaseAfterCommit`으로 commit 뒤에만 정리한다.
+   구형 편집권 런타임 정리는 2026-11-14 결정으로 제거하며 적용된 스키마 이력은 보존한다.
+   #59의 실제
    `BundleRealtimeSessionRegistry`에 있는 concrete 번치별 제거 경계를 삭제 service가
    transaction `afterCommit`에서 호출해 열린 subscription/session을 제거한다. 그 전후
    권한 검증은 삭제된 번치/번들 상태를 다시 확인해 command/subscription과 발신 frame을
@@ -170,7 +171,7 @@ DB·공유 Redis key를 사용하지 않는다.
 ### 원자 정리·참조 보존
 
 - 프로필 asset, 사진함 Photo·uploader, draft/published bundle의 photo/
-  participant/comment/reminder/lease, 초대, 번치 소속, #51의 양방향 social FK가
+  participant/comment/reminder, 초대, 번치 소속, #51의 양방향 social FK가
   실제 모델 기준으로 모두 정리된다.
 - 발행 bundle이 공유하는 ImageAsset, 다른 회원/번치가 참조하는 ImageAsset,
   발행본의 photo가 참조하는 asset은 보존된다. 삭제 전 수집한 asset만
@@ -192,8 +193,8 @@ DB·공유 Redis key를 사용하지 않는다.
   먼저 성공한 업무는 자기 원자성 규칙을 유지한다.
 - 삭제 후 재생·재조회·새 업로드·새 bundle 접근·STOMP command/subscription은
   서버 권한 검증에서 거부된다. 발신 registry 정리 전후 모두 접근 차단을 유지한다.
-- lease가 존재하는 draft를 삭제한 뒤 lease row가 정리되고, 만료 lease가 새 접근을
-  허용하는 우회가 없다. registry/session 제거 hook은 #59 부모 통합에서 실제 연결한다.
+- 초안 삭제 뒤 presence와 registry/session을 커밋 후 정리하고 현재 접근 검증으로
+  새 명령·구독을 차단한다. DB 행 잠금과 삭제 트랜잭션의 원자성은 유지한다.
 - AccessNotice는 본인 수신자만 조회/확인할 수 있고, `LEFT`/`REMOVED` 번치에
   새 참여 회차가 생긴 경우에도 과거 notice를 혼동하지 않는다. 영구 삭제된
   번치에는 새 참여 회차가 생기지 않는다. 확인은 200 no-op 또는 성공 후 목록에서

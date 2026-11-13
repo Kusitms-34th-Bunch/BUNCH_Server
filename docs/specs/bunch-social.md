@@ -106,7 +106,7 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 직접 반환한다. `role`은 `OWNER→CO_OWNER→MEMBER`를 유지하고 메인/공동 관리자 배지는 [PRD 정렬 커밋 `d898c21`](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/commit/d898c21691201c1768f5f90e9e336d4cadd369e1)에
 기록된 2026-10-29 제품 승인 근거를 따른다. `memberId`는 목록 연결용 기술 ID 예외이며,
 출생연도·성별·가입일·계정 상태·세션·관리 action·개인 프로필 이동·사진함·초안·PRIVATE 발행본·
-편집권은 반환하지 않는다.
+초안 수정 권한은 반환하지 않는다.
 
 PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`다.
 페이지는 `{items,page,size,totalElements,hasNext}`이며 `publishedAt DESC,id DESC`로 조회한다.

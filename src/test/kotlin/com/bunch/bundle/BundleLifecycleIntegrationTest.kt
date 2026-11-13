@@ -22,7 +22,6 @@ import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.dto.MoveBundlePhotoRequest
 import com.bunch.bundle.dto.PublishBundleRequest
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -37,13 +36,6 @@ import com.bunch.photo.domain.PhotoUploaderRepository
 import com.bunch.photo.domain.ProcessingStatus
 import com.bunch.photo.service.PhotoUploaderRemovalResult
 import com.bunch.photo.service.PhotoService
-import com.bunch.bundle.controller.BundleSocketController
-import com.bunch.bundle.dto.BundleLeaseCommand
-import com.bunch.bundle.service.BundleRealtimeSessionRegistry
-import com.bunch.global.security.JwtSessionDetails
-import org.springframework.messaging.simp.stomp.StompCommand
-import org.springframework.messaging.simp.stomp.StompHeaderAccessor
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.assertj.core.api.Assertions.assertThat
@@ -75,9 +67,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     private lateinit var bundleService: BundleService
 
     @Autowired
-    private lateinit var bundleLeases: BundleLeaseService
-
-    @Autowired
     private lateinit var bunchRepository: BunchRepository
 
     @Autowired
@@ -107,12 +96,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     @MockitoBean
     private lateinit var storage: ProfileImageStorage
 
-    @Autowired
-    private lateinit var socketController: BundleSocketController
-
-    @Autowired
-    private lateinit var realtimeRegistry: BundleRealtimeSessionRegistry
-
     private val ownedBunchIds = mutableListOf<Long>()
     private val ownedAssetIds = mutableListOf<Long>()
 
@@ -123,7 +106,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         jdbc.execute("DROP TRIGGER IF EXISTS bundle_test_reject_participant ON bundle_participants")
         jdbc.execute("DROP TRIGGER IF EXISTS bundle_test_reject_photo ON bundle_photos")
         jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -645,12 +627,11 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val draft = createDraft(owner, bunchId, selected.map { it.id })
         assertThat(draft.dateChips).containsExactly(dayTwo, dayOne, dayThree)
 
-        val token = bundleLeases.acquire(actor(owner), bunchId, draft.id, "DATE", "date-connection").token
         val dated = bundleService.date(
             actor(owner),
             bunchId,
             draft.id,
-            BundleDateRequest(dayFour, 0, BundleStatus.DRAFT, token),
+            BundleDateRequest(dayFour, 0, BundleStatus.DRAFT),
             "set-date"
         )
         assertThat(dated.date).isEqualTo(dayFour)
@@ -707,6 +688,225 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             additions[1].id
         )
         assertThat(final.photos.map { it.position }).containsExactlyElementsOf((0..2).toList())
+    }
+
+    @Test
+    fun `picker reselection appends existing and new photos in selected number order without recreating rows`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..5).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.take(3).map { it.id })
+        val original = draft.photos.first()
+        jdbc.update("UPDATE bundle_photos SET caption = 'keep caption', caption_version = 7 WHERE id = ?", original.id)
+
+        val changed = bundleService.changePhotos(
+            actor(owner), bunchId, draft.id, UUID.randomUUID(),
+            BundlePhotoChangesRequest(
+                addPhotoIds = listOf(source[3].id, source[0].id, source[4].id),
+                mode = BundleStatus.DRAFT,
+                reselectedPhotoIds = listOf(source[0].id)
+            )
+        )
+
+        assertThat(changed.photos.map { it.photoId }).containsExactly(
+            source[1].id, source[2].id, source[3].id, source[0].id, source[4].id
+        )
+        assertThat(changed.photos[3].id).isEqualTo(original.id)
+        assertThat(jdbc.queryForObject(
+            "SELECT caption FROM bundle_photos WHERE id = ?", String::class.java, original.id
+        )).isEqualTo("keep caption")
+        assertThat(jdbc.queryForObject(
+            "SELECT caption_version FROM bundle_photos WHERE id = ?", Long::class.java, original.id
+        )).isEqualTo(7L)
+        assertThat(changed.revision).isEqualTo(draft.revision + 1)
+        assertThat(changed.photoChangeResult!!.addedPhotoIds).containsExactly(source[3].id, source[4].id)
+    }
+
+    @Test
+    fun `picker reselection preserves concurrent moves additions and deletions`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..6).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.take(4).map { it.id })
+        val pending = BundlePhotoChangesRequest(
+            addPhotoIds = listOf(source[5].id, source[1].id),
+            removeBundlePhotoIds = listOf(draft.photos[2].id),
+            mode = BundleStatus.DRAFT,
+            reselectedPhotoIds = listOf(source[1].id)
+        )
+        bundleService.move(
+            actor(owner), bunchId, draft.id, draft.photos[3].id,
+            MoveBundlePhotoRequest(nextBundlePhotoId = draft.photos[0].id, mode = BundleStatus.DRAFT),
+            "other-photo-move"
+        )
+        bundleService.changePhotos(
+            actor(owner), bunchId, draft.id, UUID.randomUUID(),
+            BundlePhotoChangesRequest(
+                addPhotoIds = listOf(source[4].id),
+                removeBundlePhotoIds = listOf(draft.photos[2].id),
+                mode = BundleStatus.DRAFT
+            )
+        )
+
+        val changed = bundleService.changePhotos(actor(owner), bunchId, draft.id, UUID.randomUUID(), pending)
+
+        assertThat(changed.photos.map { it.photoId }).containsExactly(
+            source[3].id, source[0].id, source[4].id, source[5].id, source[1].id
+        )
+        assertThat(changed.photos.map { it.position }).containsExactly(0, 1, 2, 3, 4)
+    }
+
+    @Test
+    fun `picker reselection never readds a photo removed while picker was open`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..3).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.take(2).map { it.id })
+        bundleService.changePhotos(
+            actor(owner), bunchId, draft.id, UUID.randomUUID(),
+            BundlePhotoChangesRequest(removeBundlePhotoIds = listOf(draft.photos[0].id), mode = BundleStatus.DRAFT)
+        )
+
+        val changed = bundleService.changePhotos(
+            actor(owner), bunchId, draft.id, UUID.randomUUID(),
+            BundlePhotoChangesRequest(
+                addPhotoIds = listOf(source[0].id, source[2].id),
+                mode = BundleStatus.DRAFT,
+                reselectedPhotoIds = listOf(source[0].id)
+            )
+        )
+
+        assertThat(changed.photos.map { it.photoId }).containsExactly(source[1].id, source[2].id)
+    }
+
+    @Test
+    fun `picker reselection retries never undo later moves and new intent conflicts with reused key`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..3).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.map { it.id })
+        val key = UUID.randomUUID()
+        val request = BundlePhotoChangesRequest(
+            addPhotoIds = listOf(source[0].id), mode = BundleStatus.DRAFT,
+            reselectedPhotoIds = listOf(source[0].id)
+        )
+        bundleService.changePhotos(actor(owner), bunchId, draft.id, key, request)
+        val moved = bundleService.move(
+            actor(owner), bunchId, draft.id, draft.photos[0].id,
+            MoveBundlePhotoRequest(nextBundlePhotoId = draft.photos[1].id, mode = BundleStatus.DRAFT),
+            "after-picker-move"
+        )
+        val replayed = bundleService.changePhotos(actor(owner), bunchId, draft.id, key, request)
+        assertThat(replayed.photos).isEqualTo(moved.photos)
+        assertThat(replayed.revision).isEqualTo(moved.revision)
+        assertThat(replayed.photoChangeResult!!.replayed).isTrue()
+        assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            bundleService.changePhotos(actor(owner), bunchId, draft.id, key, request.copy(reselectedPhotoIds = emptyList()))
+        }
+    }
+
+    @Test
+    fun `picker reselection invalidates old move gap without affecting later gap moves`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..4).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.map { it.id })
+        bundleService.move(
+            actor(owner), bunchId, draft.id, draft.photos[2].id,
+            MoveBundlePhotoRequest(previousBundlePhotoId = draft.photos[0].id, mode = BundleStatus.DRAFT),
+            "before-picker-gap"
+        )
+        bundleService.changePhotos(
+            actor(owner), bunchId, draft.id, UUID.randomUUID(),
+            BundlePhotoChangesRequest(
+                addPhotoIds = listOf(source[2].id), mode = BundleStatus.DRAFT,
+                reselectedPhotoIds = listOf(source[2].id)
+            )
+        )
+        val moved = bundleService.move(
+            actor(owner), bunchId, draft.id, draft.photos[1].id,
+            MoveBundlePhotoRequest(previousBundlePhotoId = draft.photos[0].id, mode = BundleStatus.DRAFT),
+            "after-picker-gap"
+        )
+        assertThat(moved.photos.map { it.photoId }).containsExactly(source[0].id, source[1].id, source[3].id, source[2].id)
+    }
+
+    @Test
+    fun `picker reselection capacity failure rolls back removal order and receipt`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..22).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.take(20).map { it.id })
+        val key = UUID.randomUUID()
+        assertBundleError(ErrorCode.BUNDLE_PHOTO_CONFLICT) {
+            bundleService.changePhotos(
+                actor(owner), bunchId, draft.id, key,
+                BundlePhotoChangesRequest(
+                    addPhotoIds = listOf(source[20].id, source[0].id, source[21].id),
+                    removeBundlePhotoIds = listOf(draft.photos[1].id),
+                    mode = BundleStatus.DRAFT,
+                    reselectedPhotoIds = listOf(source[0].id)
+                )
+            )
+        }
+        val after = bundleService.get(owner, bunchId, draft.id)
+        assertThat(after.photos).isEqualTo(draft.photos)
+        assertThat(after.revision).isEqualTo(draft.revision)
+        assertThat(after.updatedAt).isEqualTo(draft.updatedAt)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bundle_requests WHERE request_key = ?", Long::class.java, key
+        )).isZero()
+    }
+
+    @Test
+    fun `picker reselection validates subset duplicates and partial mode without mutation`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = (1..3).map { photo(bunchId, listOf(owner)) }
+        val draft = createDraft(owner, bunchId, source.map { it.id })
+        val base = BundlePhotoChangesRequest(
+            addPhotoIds = listOf(source[0].id), mode = BundleStatus.DRAFT,
+            reselectedPhotoIds = listOf(source[0].id)
+        )
+        val invalid = listOf(
+            base.copy(reselectedPhotoIds = listOf(source[1].id)),
+            base.copy(reselectedPhotoIds = listOf(source[0].id, source[0].id)),
+            base.copy(capacityMode = com.bunch.bundle.domain.BundlePhotoCapacityMode.PARTIAL_ADD)
+        )
+        invalid.forEach { request ->
+            assertBundleError(ErrorCode.INVALID_INPUT) {
+                bundleService.changePhotos(actor(owner), bunchId, draft.id, UUID.randomUUID(), request)
+            }
+        }
+        assertThat(bundleService.get(owner, bunchId, draft.id).photos).isEqualTo(draft.photos)
+    }
+
+    @Test
+    fun `picker reselection of last photo is a no op and preserves last photo protection`() {
+        val owner = member()
+        val guest = member()
+        val bunchId = bunchWithMembers(owner, guest)
+        val source = photo(bunchId, listOf(owner))
+        val draft = createDraft(owner, bunchId, listOf(source.id))
+        val request = BundlePhotoChangesRequest(
+            addPhotoIds = listOf(source.id), mode = BundleStatus.DRAFT, reselectedPhotoIds = listOf(source.id)
+        )
+        val repeated = bundleService.changePhotos(actor(owner), bunchId, draft.id, UUID.randomUUID(), request)
+        assertThat(repeated.photos).isEqualTo(draft.photos)
+        assertThat(repeated.revision).isEqualTo(draft.revision)
+        assertBundleError(ErrorCode.BUNDLE_PHOTO_CONFLICT) {
+            bundleService.changePhotos(
+                actor(owner), bunchId, draft.id, UUID.randomUUID(),
+                BundlePhotoChangesRequest(removeBundlePhotoIds = listOf(draft.photos.single().id), mode = BundleStatus.DRAFT)
+            )
+        }
     }
 
     @Test
@@ -789,7 +989,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `expired lease can be reacquired and its late save cannot overwrite the new editor`() {
+    fun `separate participant sessions save titles using the latest field version`() {
         val owner = member()
         val guest = member()
         val bunchId = bunchWithMembers(owner, guest)
@@ -797,202 +997,16 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val draft = createDraft(owner, bunchId, listOf(source.id))
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "add-guest")
 
-        val firstActor = actor(owner, "session-old")
-        val first = bundleLeases.acquire(firstActor, bunchId, draft.id, "TITLE", "connection-old")
-        jdbc.update(
-            """UPDATE bundle_edit_leases
-               SET last_heartbeat_at = CURRENT_TIMESTAMP - INTERVAL '16 seconds'
-               WHERE bundle_id = ? AND target = 'TITLE'""",
-            draft.id
+        val firstSaved = bundleService.title(
+            actor(owner, "session-first"), bunchId, draft.id,
+            BundleTextRequest("first title", 0, BundleStatus.DRAFT), "first-save"
         )
-        val secondActor = actor(guest, "session-new")
-        val second = bundleLeases.acquire(secondActor, bunchId, draft.id, "TITLE", "connection-new")
-        assertThat(second.token).isNotEqualTo(first.token)
-        assertThat(second.leaseVersion).isEqualTo(first.leaseVersion + 1)
-
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleService.title(
-                firstActor,
-                bunchId,
-                draft.id,
-                BundleTextRequest("late old title", 0, BundleStatus.DRAFT, first.token),
-                "late-old-save"
-            )
-        }
         val saved = bundleService.title(
-            secondActor,
-            bunchId,
-            draft.id,
-            BundleTextRequest("new title", 0, BundleStatus.DRAFT, second.token),
-            "new-save"
+            actor(guest, "session-second"), bunchId, draft.id,
+            BundleTextRequest("new title", firstSaved.titleVersion, BundleStatus.DRAFT), "second-save"
         )
         assertThat(saved.title).isEqualTo("new title")
-    }
-
-    @Test
-    fun `active lease can rotate only on the same connection and stale operations cannot use the old token`() {
-        val owner = member()
-        val guest = member()
-        val bunchId = bunchWithMembers(owner, guest)
-        val source = photo(bunchId, listOf(owner))
-        val draft = createDraft(owner, bunchId, listOf(source.id))
-        val actor = actor(owner, "shared-session")
-
-        val first = bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-a")
-        val rotated = bundleLeases.acquire(
-            actor,
-            bunchId,
-            draft.id,
-            "TITLE",
-            "connection-a"
-        )
-
-        assertThat(rotated.token).isNotEqualTo(first.token)
-        assertThat(rotated.leaseVersion).isEqualTo(first.leaseVersion + 1)
-        assertThat(rotated.revision).isEqualTo(first.revision)
-
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-b")
-        }
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleLeases.heartbeat(
-                actor = actor,
-                bunchId = bunchId,
-                bundleId = draft.id,
-                target = "TITLE",
-                token = first.token,
-                connectionId = "connection-a"
-            )
-        }
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleLeases.release(
-                actor = actor,
-                bunchId = bunchId,
-                bundleId = draft.id,
-                target = "TITLE",
-                token = first.token,
-                connectionId = "connection-a"
-            )
-        }
-        assertBundleError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            bundleService.title(
-                actor,
-                bunchId,
-                draft.id,
-                BundleTextRequest("stale title", 0, BundleStatus.DRAFT, first.token),
-                "stale-token-save"
-            )
-        }
-
-        val saved = bundleService.title(
-            actor,
-            bunchId,
-            draft.id,
-            BundleTextRequest("current title", 0, BundleStatus.DRAFT, rotated.token),
-            "current-token-save"
-        )
-        assertThat(saved.title).isEqualTo("current title")
-    }
-
-    @Test
-    fun `concurrent acquire for one member session still permits only one connection`() {
-        val owner = member()
-        val guest = member()
-        val bunchId = bunchWithMembers(owner, guest)
-        val source = photo(bunchId, listOf(owner))
-        val draft = createDraft(owner, bunchId, listOf(source.id))
-        val actor = actor(owner, "concurrent-session")
-
-        val results = concurrently(
-            listOf(
-                { bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-a") },
-                { bundleLeases.acquire(actor, bunchId, draft.id, "TITLE", "connection-b") }
-            )
-        )
-
-        assertThat(results.count { it.isSuccess }).isEqualTo(1)
-        assertThat(results.count { errorCode(it.exceptionOrNull()) == ErrorCode.BUNDLE_LEASE_CONFLICT }).isEqualTo(1)
-    }
-
-    @Test
-    fun `late disconnect from an expired connection cannot release its replacement lease`() {
-        val owner = member()
-        val guest = member()
-        val bunchId = bunchWithMembers(owner, guest)
-        val source = photo(bunchId, listOf(owner))
-        val draft = createDraft(owner, bunchId, listOf(source.id))
-        val first = bundleLeases.acquire(
-            actor(owner, "shared-session"), bunchId, draft.id, "TITLE", "connection-old"
-        )
-        jdbc.update(
-            """UPDATE bundle_edit_leases
-               SET last_heartbeat_at = CURRENT_TIMESTAMP - INTERVAL '16 seconds'
-               WHERE bundle_id = ? AND target = 'TITLE'""",
-            draft.id
-        )
-
-        val replacement = bundleLeases.acquire(
-            actor(owner, "shared-session"), bunchId, draft.id, "TITLE", "connection-new"
-        )
-        assertThat(replacement.leaseVersion).isEqualTo(first.leaseVersion + 1)
-
-        bundleLeases.clearConnection("connection-old")
-
-        val current = bundleLeases.publicStates(draft.id).single()
-        assertThat(current.memberId).isEqualTo(owner)
-        assertThat(current.leaseVersion).isEqualTo(replacement.leaseVersion)
-    }
-
-    @Test
-    fun `disconnect before a blocked acquire commits cannot leave an active lease`() {
-        val owner = member()
-        val guest = member()
-        val bunchId = bunchWithMembers(owner, guest)
-        val draft = createDraft(owner, bunchId, listOf(photo(bunchId, listOf(owner)).id))
-        val connectionId = UUID.randomUUID().toString()
-        val sessionId = UUID.randomUUID().toString()
-        realtimeRegistry.bind(connectionId, BundleActor(owner, sessionId))
-        val headers = StompHeaderAccessor.create(StompCommand.SEND).apply {
-            this.sessionId = connectionId
-            user = UsernamePasswordAuthenticationToken(owner.toString(), null).apply {
-                details = JwtSessionDetails(sessionId)
-            }
-        }
-        val executor = Executors.newSingleThreadExecutor()
-        try {
-            val pending = TransactionTemplate(transactionManager).execute {
-                bunchRepository.findLocked(bunchId)
-                val acquisition = executor.submit<Throwable?> {
-                    runCatching {
-                        socketController.acquire(headers, bunchId, draft.id, BundleLeaseCommand("TITLE"))
-                    }.exceptionOrNull()
-                }
-                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                while (true) {
-                    jdbc.execute("SELECT pg_stat_clear_snapshot()")
-                    val waiting = jdbc.queryForObject(
-                        """SELECT count(*) FROM pg_stat_activity
-                           WHERE datname = current_database() AND wait_event_type = 'Lock'
-                           AND lower(query) LIKE '%bunches%'""",
-                        Long::class.java
-                    ) ?: 0L
-                    if (waiting > 0) break
-                    check(!acquisition.isDone) { "Acquire completed before waiting: ${acquisition.get()}" }
-                    check(System.nanoTime() < deadline) { "Acquire did not wait for the bunch lock" }
-                    Thread.sleep(10)
-                }
-                realtimeRegistry.remove(connectionId)
-                bundleLeases.clearConnection(connectionId)
-                acquisition
-            }!!
-            val error = pending.get(5, TimeUnit.SECONDS)
-            assertThat(error).isInstanceOf(BusinessException::class.java)
-            assertThat((error as BusinessException).errorCode).isEqualTo(ErrorCode.UNAUTHORIZED)
-            assertThat(bundleLeases.publicStates(draft.id)).isEmpty()
-        } finally {
-            realtimeRegistry.remove(connectionId)
-            executor.shutdownNow()
-        }
+        assertThat(saved.titleVersion).isEqualTo(firstSaved.titleVersion + 1)
     }
 
     @Test
@@ -1002,13 +1016,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, listOf(owner))
         val draft = createDraft(owner, bunchId, listOf(source.id))
-        val token = bundleLeases.acquire(actor(owner), bunchId, draft.id, "TITLE", "version-connection").token
 
         val first = bundleService.title(
             actor(owner),
             bunchId,
             draft.id,
-            BundleTextRequest("first title", 0, BundleStatus.DRAFT, token),
+            BundleTextRequest("first title", 0, BundleStatus.DRAFT),
             "first-title"
         )
         assertBundleError(ErrorCode.BUNDLE_VERSION_CONFLICT) {
@@ -1016,7 +1029,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 actor(owner),
                 bunchId,
                 draft.id,
-                BundleTextRequest("stale title", 0, BundleStatus.DRAFT, token),
+                BundleTextRequest("stale title", 0, BundleStatus.DRAFT),
                 "stale-title"
             )
         }
@@ -1145,29 +1158,14 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             BundleTextRequest("participant before departure", departureCommentVersion, BundleStatus.DRAFT),
             "departure-comment"
         )
-        bundleLeases.acquire(actor(participant), bunchId, participantDraft.id, "TITLE", "departure-connection")
 
         inTransaction { bundleService.memberDeparted(bunchId, participant) }
 
         val afterParticipantDeparture = bundleService.get(owner, bunchId, participantDraft.id)
         assertThat(afterParticipantDeparture.participants.map { it.memberId }).containsExactly(owner, remaining)
         assertThat(afterParticipantDeparture.comments).isEmpty()
-        assertThat(afterParticipantDeparture.leases).isEmpty()
         assertThat(bundlePhotos.findAllByBundleIdOrderByPositionAscIdAsc(participantDraft.id)).hasSize(1)
         assertThat(photos.existsById(participantPhoto.id)).isTrue()
-        assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM bundle_edit_leases WHERE bundle_id = ? AND member_id = ?",
-            Long::class.java,
-            participantDraft.id,
-            participant
-        )).isEqualTo(1)
-        assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM bundle_edit_leases " +
-                "WHERE bundle_id = ? AND member_id = ? AND released_at IS NULL",
-            Long::class.java,
-            participantDraft.id,
-            participant
-        )).isZero()
 
         val creatorPhoto = photo(bunchId, uploadedBy = listOf(remaining))
         val creatorDraft = createDraft(owner, bunchId, listOf(creatorPhoto.id))
@@ -1180,7 +1178,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `member departure cleanup rolls back participation comment and lease together`() {
+    fun `member departure cleanup rolls back participation and comment together`() {
         val owner = member()
         val participant = member()
         val bunchId = bunchWithMembers(owner, participant)
@@ -1196,7 +1194,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             BundleTextRequest("must survive rollback", rollbackCommentVersion, BundleStatus.DRAFT),
             "rollback-comment"
         )
-        bundleLeases.acquire(actor(participant), bunchId, draft.id, "TITLE", "rollback-connection")
         rejectWrite("bundle_test_reject_participant", "bundle_participants", "DELETE")
 
         assertThatThrownBy {
@@ -1206,7 +1203,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val afterRollback = bundleService.get(owner, bunchId, draft.id)
         assertThat(afterRollback.participants.map { it.memberId }).containsExactly(owner, participant)
         assertThat(afterRollback.comments.map { it.memberId }).containsExactly(participant)
-        assertThat(afterRollback.leases.map { it.target }).contains("TITLE")
         assertThat(bundlePhotos.findAllByBundleIdOrderByPositionAscIdAsc(draft.id)).hasSize(1)
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM photo_uploaders WHERE photo_id = ? AND member_id = ?",
@@ -1326,12 +1322,11 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "publish-add-guest")
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
             .comments.firstOrNull { it.memberId == guest }?.version ?: 0
-        val titleGrant = bundleLeases.acquire(actor(owner), bunchId, draft.id, "TITLE", "publish-title").token
         bundleService.title(
             actor(owner),
             bunchId,
             draft.id,
-            BundleTextRequest("publishable", 0, BundleStatus.DRAFT, titleGrant),
+            BundleTextRequest("publishable", 0, BundleStatus.DRAFT),
             "publish-title-save"
         )
         bundleService.visibility(
@@ -1390,7 +1385,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 actor(owner),
                 bunchId,
                 draft.id,
-                BundleTextRequest("late draft save", published.titleVersion, BundleStatus.DRAFT, titleGrant),
+                BundleTextRequest("late draft save", published.titleVersion, BundleStatus.DRAFT),
                 "late-draft-save"
             )
         }
@@ -1656,7 +1651,11 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                     PublishBundleRequest(draft.revision))
             }
             assertBundleError(ErrorCode.FORBIDDEN) {
-                bundleLeases.acquire(actor(administrator), bunchId, draft.id, "TITLE", "nonparticipant-lease")
+                bundleService.title(
+                    actor(administrator), bunchId, draft.id,
+                    BundleTextRequest("forbidden title", draft.titleVersion, BundleStatus.DRAFT),
+                    "nonparticipant-title"
+                )
             }
         }
         bundleService.addParticipant(actor(creator), bunchId, draft.id, participant, "add-member")
@@ -1689,12 +1688,16 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         assertThat(published.permissions.canEdit).isFalse()
         assertThat(published.permissions.canDelete).isFalse()
         assertBundleError(ErrorCode.BUNDLE_STATE_CONFLICT) {
-            bundleLeases.acquire(actor(coOwner), bunchId, ready.id, "TITLE", "published-lease")
+            bundleService.title(
+                actor(coOwner), bunchId, ready.id,
+                BundleTextRequest("late title", published.titleVersion, BundleStatus.DRAFT),
+                "published-title"
+            )
         }
     }
 
     @Test
-    fun `draft list follows actual content update then id while lease heartbeat and reads preserve order`() {
+    fun `draft list follows actual content update then id while reads preserve order`() {
         val owner = member()
         val guest = member()
         val bunchId = bunchWithMembers(owner, guest)
@@ -1714,12 +1717,10 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         fun ordered() = bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 2)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         assertThat(ordered().total).isEqualTo(3)
-        val lease = bundleLeases.acquire(actor(owner), bunchId, first.id, "TITLE", "sort-title")
-        bundleLeases.heartbeat(actor(owner), bunchId, first.id, "TITLE", lease.token, "sort-title")
         bundleService.get(owner, bunchId, first.id)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         bundleService.title(actor(owner), bunchId, first.id,
-            BundleTextRequest("recent edit", 0, BundleStatus.DRAFT, lease.token), "sort-edit")
+            BundleTextRequest("recent edit", 0, BundleStatus.DRAFT), "sort-edit")
         assertThat(ordered().items.map { it.id }).containsExactly(first.id, third.id)
         assertThat(bundleService.list(owner, bunchId, BundleStatus.DRAFT, 1, 2).items.map { it.id })
             .containsExactly(second.id)
@@ -1739,18 +1740,16 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             jdbc.update("UPDATE bunch_memberships SET last_activity_at = ? WHERE bunch_id = ? AND member_id = ?",
                 java.sql.Timestamp.from(baseline), bunchId, owner)
         }
-        val titleLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "TITLE", "activity-title")
-        val dateLease = bundleLeases.acquire(actor(owner), bunchId, draft.id, "DATE", "activity-date")
         val photoId = draft.photos.single().id
         val photoKey = UUID.randomUUID()
         val photoRequest = BundlePhotoChangesRequest(listOf(addition.id), mode = BundleStatus.DRAFT)
         val edits = listOf<() -> Any?>(
             { bundleService.title(actor(owner), bunchId, draft.id,
-                BundleTextRequest("activity title", 0, BundleStatus.DRAFT, titleLease.token), "activity-title") },
+                BundleTextRequest("activity title", 0, BundleStatus.DRAFT), "activity-title") },
             { bundleService.visibility(actor(owner), bunchId, draft.id,
                 BundleVisibilityRequest(Visibility.PRIVATE, 0, BundleStatus.DRAFT), "activity-visibility") },
             { bundleService.date(actor(owner), bunchId, draft.id,
-                BundleDateRequest(LocalDate.of(2024, 1, 1), 0, BundleStatus.DRAFT, dateLease.token), "activity-date") },
+                BundleDateRequest(LocalDate.of(2024, 1, 1), 0, BundleStatus.DRAFT), "activity-date") },
             { bundleService.changePhotos(actor(owner), bunchId, draft.id, photoKey, photoRequest) },
             { bundleService.move(actor(owner), bunchId, draft.id, photoId,
                 MoveBundlePhotoRequest(bundleService.get(owner, bunchId, draft.id).photos.last().id,
@@ -1768,9 +1767,8 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val unchanged = bundleService.get(owner, bunchId, draft.id)
         bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 20)
         bundleService.summary(owner, bunchId)
-        bundleLeases.heartbeat(actor(owner), bunchId, draft.id, "TITLE", titleLease.token, "activity-title")
         bundleService.title(actor(owner), bunchId, draft.id,
-            BundleTextRequest(unchanged.title, unchanged.titleVersion, BundleStatus.DRAFT, titleLease.token), "noop-title")
+            BundleTextRequest(unchanged.title, unchanged.titleVersion, BundleStatus.DRAFT), "noop-title")
         bundleService.visibility(actor(owner), bunchId, draft.id,
             BundleVisibilityRequest(requireNotNull(unchanged.visibility), unchanged.visibilityVersion, BundleStatus.DRAFT), "noop-visibility")
         bundleService.comment(actor(owner), bunchId, draft.id,
@@ -1778,7 +1776,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         bundleService.changePhotos(actor(owner), bunchId, draft.id, photoKey, photoRequest)
         assertBundleError(ErrorCode.BUNDLE_VERSION_CONFLICT) {
             bundleService.title(actor(owner), bunchId, draft.id,
-                BundleTextRequest("stale save", 0, BundleStatus.DRAFT, titleLease.token), "stale-title")
+                BundleTextRequest("stale save", 0, BundleStatus.DRAFT), "stale-title")
         }
         assertThatThrownBy {
             inTransaction {
@@ -1853,18 +1851,11 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "$label-add-participant")
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
             .comments.firstOrNull { it.memberId == guest }?.version ?: 0
-        val titleGrant = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            draft.id,
-            "TITLE",
-            "$label-title-connection"
-        )
         bundleService.title(
             actor(owner),
             bunchId,
             draft.id,
-            BundleTextRequest("$label title", 0, BundleStatus.DRAFT, titleGrant.token),
+            BundleTextRequest("$label title", 0, BundleStatus.DRAFT),
             "$label-title"
         )
         bundleService.visibility(

@@ -1,5 +1,6 @@
 package com.bunch.bundle.dto
 
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
 import com.fasterxml.jackson.annotation.JsonInclude
@@ -23,7 +24,9 @@ data class BundleParticipantResponse(
     val joinedAt: Instant,
     val nickname: String? = null,
     val imageUrl: String? = null,
-    val profileAvailable: Boolean = false
+    val profileAvailable: Boolean = false,
+    val role: MembershipRole? = null,
+    val creator: Boolean = false
 )
 
 data class BundleCommentResponse(
@@ -89,7 +92,6 @@ data class BundleSnapshot(
     val dateChips: List<LocalDate>,
     val publishBlockers: List<String>,
     val permissions: BundlePermissions,
-    val leases: List<LeaseState>,
     val createdAt: Instant,
     val updatedAt: Instant,
     val publishedAt: Instant?,
@@ -97,7 +99,12 @@ data class BundleSnapshot(
     val locations: List<BundleLocationResponse>,
     val likeCount: Long = 0,
     val likedByCurrentBunch: Boolean = false,
-    val commentCount: Long = 0
+    val commentCount: Long = 0,
+    val publishedBy: Long? = null,
+    val publisherNickname: String? = null,
+    val titleCrdtState: ByteArray? = null,
+    val titleTooLong: Boolean = false,
+    val photoChangeResult: BundlePhotoChangeResult? = null
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
@@ -110,10 +117,36 @@ data class BundleAttribution(
     val comments: List<BundleCommentResponse>
 )
 
+data class BundlePhotoChangeResult(
+    val addedPhotoIds: List<Long>,
+    val rejectedPhotoIds: List<Long>,
+    val replayed: Boolean = false
+)
+
 
 data class BundlePhotoPicks(
     val count: Int = 0,
     val pickedByMe: Boolean = false,
     val version: Long = 0,
     val members: List<BundleParticipantResponse> = emptyList()
+)
+
+data class BundleTitleState(
+    val title: String,
+    val titleCrdtState: ByteArray,
+    val titleVersion: Long,
+    val titleTooLong: Boolean
+)
+
+data class TitleMergeResult(val state: ByteArray, val value: String, val tooLong: Boolean)
+
+data class TitleDocument(val value: String, val tooLong: Boolean)
+
+data class BundleLocationIntentResponse(
+    val bundleId: Long,
+    val revision: Long,
+    val locationVersion: Long,
+    val changed: Boolean,
+    val acceptedCount: Int,
+    val locations: List<BundleLocationResponse>
 )

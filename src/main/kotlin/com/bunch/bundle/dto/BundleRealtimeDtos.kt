@@ -3,7 +3,6 @@ package com.bunch.bundle.dto
 import com.bunch.bundle.domain.BundleActivityType
 import com.bunch.bundle.domain.BundleEventType
 import java.time.Instant
-import java.util.UUID
 
 data class BundleActor(
     val memberId: Long,
@@ -19,48 +18,9 @@ data class BundleRealtimeMessage<T>(
     val data: T
 )
 
-data class BundleLeaseData(
-    val target: String,
-    val token: UUID,
-    val leaseVersion: Long,
-    val expiresAt: Instant
-)
-
-data class BundleLeaseStatesData(val states: List<LeaseState>)
-
 data class BundleActivityData(val memberId: Long, val activity: BundleActivityType)
 
-data class BundleLeaseReleasedData(val target: String)
-
 data class BundleCommandRejectedData(val code: String)
-
-data class LeaseGrant(
-    val bunchId: Long,
-    val bundleId: Long,
-    val target: String,
-    val token: UUID,
-    val leaseVersion: Long,
-    val expiresAt: Instant,
-    val revision: Long
-) {
-    fun toMessage(type: BundleEventType): BundleRealtimeMessage<BundleLeaseData> {
-        require(type == BundleEventType.LEASE_GRANTED || type == BundleEventType.LEASE_HEARTBEAT)
-        return BundleRealtimeMessage(
-            type = type,
-            bunchId = bunchId,
-            bundleId = bundleId,
-            revision = revision,
-            data = BundleLeaseData(target, token, leaseVersion, expiresAt)
-        )
-    }
-}
-
-data class LeaseState(
-    val target: String,
-    val memberId: Long,
-    val expiresAt: Instant,
-    val leaseVersion: Long
-)
 
 data class BundleChangedEvent(
     val bunchId: Long,
@@ -80,26 +40,6 @@ data class BundleChangedEvent(
 data class BundleLocationsRemovedEvent(
     val bundleId: Long,
     val locationIds: List<Long>
-)
-
-data class BundleLeaseStateChangedEvent(
-    val bunchId: Long,
-    val bundleId: Long,
-    val revision: Long,
-    val states: List<LeaseState>
-) {
-    fun toMessage() = BundleRealtimeMessage(
-        type = BundleEventType.LEASES,
-        bunchId = bunchId,
-        bundleId = bundleId,
-        revision = revision,
-        data = BundleLeaseStatesData(states)
-    )
-}
-
-data class BundleLeaseCommand(
-    val target: String,
-    val token: UUID? = null
 )
 
 data class BundleActivityCommand(
@@ -122,17 +62,39 @@ data class BundleActivityEvent(
     )
 }
 
-data class BundleLeaseReleaseAck(
-    val bunchId: Long,
-    val bundleId: Long,
+data class BundlePresenceCommand(
+    val action: String,
+    val target: String? = null,
+    val text: String? = null
+)
+
+data class BundlePresenceMember(
+    val memberId: Long,
+    val expiresAt: Instant
+)
+
+data class BundleTypingState(
+    val memberId: Long,
     val target: String,
-    val revision: Long
+    val text: String,
+    val expiresAt: Instant
+)
+
+data class BundleEditingState(
+    val memberId: Long,
+    val target: String,
+    val expiresAt: Instant
+)
+
+data class BundlePresenceData(
+    val members: List<BundlePresenceMember>,
+    val typing: List<BundleTypingState>,
+    val editing: List<BundleEditingState> = emptyList()
 ) {
-    fun toMessage() = BundleRealtimeMessage(
-        type = BundleEventType.LEASE_RELEASED,
+    fun toMessage(bunchId: Long, bundleId: Long) = BundleRealtimeMessage(
+        type = BundleEventType.PRESENCE,
         bunchId = bunchId,
         bundleId = bundleId,
-        revision = revision,
-        data = BundleLeaseReleasedData(target)
+        data = this
     )
 }

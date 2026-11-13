@@ -20,20 +20,15 @@ class BundleAttributionService(
     private val memberships: BunchMembershipRepository
 ) {
     @Transactional(readOnly = true)
-    fun published(bundle: Bundle): BundleAttribution = publishedAll(listOf(bundle)).getValue(bundle.id)
+    fun draft(bundle: Bundle): BundleAttribution {
+        if (bundle.id <= 0 || bundle.status != BundleStatus.DRAFT) {
+            throw BusinessException(ErrorCode.INVALID_INPUT)
+        }
+        return assemble(listOf(bundle)).getValue(bundle.id)
+    }
 
     @Transactional(readOnly = true)
-    fun draftParticipants(bundle: Bundle): List<BundleParticipantResponse> {
-        if (bundle.status != BundleStatus.DRAFT) throw BusinessException(ErrorCode.BUNDLE_STATE_CONFLICT)
-        val profiles = memberships.findActiveProfilesForBunches(listOf(bundle.bunchId))
-            .associateBy { it.member.id }
-        return participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id).map { row ->
-            val profile = profiles[row.memberId]?.member
-            BundleParticipantResponse(
-                row.memberId, row.joinedAt, profile?.nickname ?: "작성자", profile?.imageUrl, profile != null
-            )
-        }
-    }
+    fun published(bundle: Bundle): BundleAttribution = publishedAll(listOf(bundle)).getValue(bundle.id)
 
     /** Internal assembler: caller must authorize all bundles before passing them here. Three bounded queries. */
     @Transactional(readOnly = true)
@@ -41,6 +36,10 @@ class BundleAttributionService(
         if (bundles.size > 500 || bundles.any { it.id <= 0 || it.status != BundleStatus.PUBLISHED }) {
             throw BusinessException(ErrorCode.INVALID_INPUT)
         }
+        return assemble(bundles)
+    }
+
+    private fun assemble(bundles: Collection<Bundle>): Map<Long, BundleAttribution> {
         if (bundles.isEmpty()) return emptyMap()
         val ids = bundles.map { it.id }.distinct()
         val peopleByBundle = participants.findAllByBundleIdInOrderByBundleIdAscJoinedAtAscIdAsc(ids)
@@ -50,10 +49,14 @@ class BundleAttributionService(
             .associateBy { it.bunch.id to it.member.id }
         return bundles.associate { bundle ->
             val people = peopleByBundle[bundle.id].orEmpty().map { row ->
-                val profile = profiles[bundle.bunchId to row.memberId]?.member
-                BundleParticipantResponse(
+                val currentMembership = profiles[bundle.bunchId to row.memberId]
+                val profile = currentMembership?.member
+                val person = BundleParticipantResponse(
                     row.memberId, row.joinedAt, profile?.nickname ?: "작성자", profile?.imageUrl, profile != null
                 )
+                if (bundle.status == BundleStatus.DRAFT) {
+                    person.copy(role = currentMembership?.role, creator = bundle.createdBy == row.memberId)
+                } else person
             }
             val notes = notesByBundle[bundle.id].orEmpty().associateBy { it.memberId }
             val displayedNotes = people.mapNotNull { person ->

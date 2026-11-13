@@ -1,6 +1,11 @@
 package com.bunch.global.security
 
 import com.bunch.global.redis.RefreshTokenRepository
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.SignatureAlgorithm
+import io.jsonwebtoken.security.Keys
+import java.util.Date
+import java.util.UUID
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import jakarta.servlet.FilterChain
 import org.junit.jupiter.api.AfterEach
@@ -27,6 +32,27 @@ class JwtAuthenticationFilterTest {
     fun clearContext() {
         SecurityContextHolder.clearContext()
         MDC.clear()
+    }
+
+    @Test
+    fun `WS bearer cannot reach even a public token issuing route`() {
+        for (expired in listOf(false, true)) {
+            val issuedAt = Date(System.currentTimeMillis() - if (expired) 120_000 else 10_000)
+            val token = Jwts.builder().setSubject("7").claim("sid", UUID.randomUUID().toString())
+                .claim("tokenType", "ws").setAudience("bunch-ws").setId(UUID.randomUUID().toString())
+                .setIssuedAt(issuedAt).setExpiration(Date(issuedAt.time + 60_000))
+                .signWith(Keys.hmacShaKeyFor(ByteArray(64) { 7 }), SignatureAlgorithm.HS512).compact()
+            val wsRequest = MockHttpServletRequest("POST", "/api/v1/auth/dev/token")
+            wsRequest.addHeader("Authorization", "Bearer $token")
+            val wsResponse = MockHttpServletResponse()
+
+            filter.doFilter(wsRequest, wsResponse, chain)
+
+            assertEquals(401, wsResponse.status)
+            assertNull(SecurityContextHolder.getContext().authentication)
+            assertEquals("AUTH_001", objectMapper.readTree(wsResponse.contentAsString).path("error").path("code").asText())
+        }
+        verifyNoInteractions(sessions, chain)
     }
 
     @Test

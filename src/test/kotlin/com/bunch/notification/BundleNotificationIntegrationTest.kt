@@ -16,7 +16,6 @@ import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.dto.PublishBundleRequest
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.image.domain.ImageAsset
@@ -52,9 +51,6 @@ import java.util.UUID
 class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var bundleService: BundleService
-
-    @Autowired
-    private lateinit var bundleLeases: BundleLeaseService
 
     @Autowired
     private lateinit var bunchRepository: BunchRepository
@@ -96,7 +92,6 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     @AfterEach
     fun cleanBundleReferencesBeforeBunchSupport() {
         allowNotificationWrites()
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -596,18 +591,11 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
 
     private fun writeTitle(owner: Long, bunchId: Long, bundleId: Long, value: String, label: String) {
         val current = bundleService.get(owner, bunchId, bundleId)
-        val lease = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            bundleId,
-            "TITLE",
-            "$label-${UUID.randomUUID()}"
-        )
         bundleService.title(
             actor(owner),
             bunchId,
             bundleId,
-            BundleTextRequest(value, current.titleVersion, BundleStatus.DRAFT, lease.token),
+            BundleTextRequest(value, current.titleVersion, BundleStatus.DRAFT),
             label
         )
     }

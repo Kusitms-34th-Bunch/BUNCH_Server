@@ -7,6 +7,7 @@ import com.bunch.global.security.TokenPair
 import com.bunch.global.common.ApiResponse
 import com.bunch.global.oidc.AuthProvider
 import jakarta.validation.Valid
+import org.springframework.http.CacheControl
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import com.bunch.global.security.JwtSessionDetails
@@ -44,6 +45,17 @@ class AuthController(private val authService: AuthService) {
         @RequestBody
         request: AuthRequests.DevTokenRequest
     ) = ResponseEntity.ok(ApiResponse.ok(authService.issueDevToken(request.nickname)))
+
+    @PostMapping("/ws-token")
+    fun wsToken(authentication: Authentication): ResponseEntity<ApiResponse<AuthResponses.WsTokenResponse>> {
+        val userId = (authentication.principal as? String)?.toLongOrNull()
+            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        val session = authentication.details as? JwtSessionDetails
+            ?: throw BusinessException(ErrorCode.UNAUTHORIZED)
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(ApiResponse.ok(authService.issueWsToken(userId, session.sessionId)))
+    }
 
     @PostMapping("/reissue")
     fun reissue(

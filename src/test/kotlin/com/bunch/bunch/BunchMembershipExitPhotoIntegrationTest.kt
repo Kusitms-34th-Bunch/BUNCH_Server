@@ -69,7 +69,6 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
 
     @AfterEach
     fun cleanPhotoAndBundleRowsBeforeBunchSupport() {
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")

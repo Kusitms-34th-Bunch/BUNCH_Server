@@ -64,7 +64,8 @@ nullable로 맞춰야 한다. 기존 클라이언트 문서의 BFF/백엔드 호
 V36은 bundle_locations.address, pinned_places.address,
 feed_advertisements.place_address의 NOT NULL만 제거한다. 기존 CHECK는 null에서 통과하고
 빈 주소는 계속 거부한다. 기존 주소·ID·키·출처를 갱신하지 않으며 과거 Flyway 파일을 수정하지 않는다.
-기존 dev의 V35 다음에 V36을 적용하며, 후속 PR의 새 마이그레이션도 순번을 이어간다.
+V35 이후 주소 계약(V36), 콕 목록(V37), 픽(V38~39),
+공동 편집(V40~42)을 순서대로 적용한다.
 
 기존 유효 문자열 입력은 그대로 호환된다. 클라이언트는 nullable 응답을 처리한 뒤
 주소 없는 결과를 보내야 한다. 기존 앱이 address를 항상 문자열로 가정하면 표시·복사가 실패할 수 있다.
@@ -72,8 +73,8 @@ feed_advertisements.place_address의 NOT NULL만 제거한다. 기존 CHECK는 n
 
 ## 연계·검증
 
-- #107 소유인 위치 추가·삭제·교체·이동 동시 처리와 lease 제거는 중복 구현하지 않는다.
-  이 브랜치에서는 기존 저장 요청의 version/lease를 유지하며 통합 시 그 최신 요청에도 같은 주소 계약을 적용한다.
+- #107의 위치 추가·삭제·교체·이동 동시 처리는 [장소 계약](bundle-locations.md)을 따른다.
+  현재 요청에는 구형 편집권 필드를 사용하지 않으며 같은 nullable 주소 계약을 적용한다.
 - #125의 목록·필터·개수는 중복 구현하지 않는다. 핀 공통 DTO의 nullable 주소를 목록에서도 유지하고,
   주소 복사 fallback은 앱에서 적용한다.
 - 자동 검증은 명시적 null HTTP 저장·snapshot, 누락/빈 주소 거부의 원자성, 실제 번들/광고에서
