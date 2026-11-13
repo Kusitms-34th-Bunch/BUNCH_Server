@@ -27,6 +27,9 @@ data class BundleTextRequest(
 
 data class BundleVisibilityRequest(
     val value: Visibility,
+
+    @param:JsonProperty(value = "expectedVersion", required = true)
+    @param:JsonSetter(nulls = Nulls.FAIL)
     val expectedVersion: Long,
     val mode: BundleStatus
 )
@@ -80,7 +83,6 @@ data class PublishBundleRequest(val expectedRevision: Long)
 data class EditPublishedBundleRequest(
     val expectedRevision: Long,
     val title: String,
-    val visibility: Visibility,
     val date: LocalDate?,
     val photos: List<PublishedBundlePhotoInput>,
     val locations: List<BundleLocationInput>

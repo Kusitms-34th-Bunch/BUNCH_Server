@@ -1534,12 +1534,12 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val updated = bundleService.editPublished(
             actor(owner), bunchId, published.id,
             publishedEdit(published).copy(
-                title = "updated title", visibility = Visibility.PUBLIC, date = LocalDate.of(2024, 2, 1),
+                title = "updated title", date = LocalDate.of(2024, 2, 1),
                 photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = publishedPhoto.id, caption = "published caption"))
             ), "published-save"
         )
         assertThat(updated.title).isEqualTo("updated title")
-        assertThat(updated.visibility).isEqualTo(Visibility.PUBLIC)
+        assertThat(updated.visibility).isEqualTo(published.visibility)
         assertThat(updated.date).isEqualTo(LocalDate.of(2024, 2, 1))
         assertThat(updated.photos.single().caption).isEqualTo("published caption")
         assertBundleError(ErrorCode.FORBIDDEN) {
@@ -1575,9 +1575,10 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             val source = photo(bunchId, listOf(owner))
             val published = publishReadyBundle(owner, guest, bunchId, source, "stage-$offset")
             if (offset % 2 == 0) {
-                bundleService.editPublished(
+                bundleService.visibility(
                     actor(owner), bunchId, published.id,
-                    publishedEdit(published).copy(visibility = Visibility.PUBLIC), "stage-public-$offset"
+                    BundleVisibilityRequest(Visibility.PUBLIC, published.visibilityVersion, BundleStatus.PUBLISHED),
+                    "stage-public-$offset"
                 )
             }
             publishedIds += published.id
@@ -1958,7 +1959,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun publishedEdit(value: BundleSnapshot) = EditPublishedBundleRequest(
-        value.revision, value.title, value.visibility!!, value.date,
+        value.revision, value.title, value.date,
         value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) },
         emptyList()
     )
