@@ -3,6 +3,7 @@ package com.bunch.bundle.controller
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.*
 import com.bunch.bundle.service.BundleLocationService
+import com.bunch.bundle.service.BundlePhotoPickService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.common.ApiResponse
 import com.bunch.global.exception.BusinessException
@@ -16,7 +17,8 @@ import java.util.UUID
 @RequestMapping("/api/v1/bunches/{bunchId}/bundles")
 class BundleController(
     private val bundles: BundleService,
-    private val locations: BundleLocationService
+    private val locations: BundleLocationService,
+    private val picks: BundlePhotoPickService
 ) {
     @PostMapping
     fun create(
@@ -146,17 +148,14 @@ class BundleController(
         bundles.move(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
     )
 
-    @PutMapping("/{id}/photos/{photoId}/caption")
-    fun caption(
+    @PutMapping("/{id}/photos/{photoId}/pick")
+    fun pick(
         authentication: Authentication,
         @PathVariable bunchId: Long,
         @PathVariable id: Long,
         @PathVariable photoId: Long,
-        @RequestHeader("X-Request-Id", required = false) requestId: UUID?,
-        @RequestBody request: BundleTextRequest
-    ) = ApiResponse.ok(
-        bundles.caption(actor(authentication), bunchId, id, photoId, request, correlation(requestId))
-    )
+        @RequestBody request: BundlePhotoPickRequest
+    ) = ApiResponse.ok(picks.save(userId(authentication), bunchId, id, photoId, request))
 
     @PostMapping("/{id}/publish")
     fun publish(

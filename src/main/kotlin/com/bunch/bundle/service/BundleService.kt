@@ -38,6 +38,7 @@ class BundleService(
     private val access: BundleAccessService,
     private val feedAccess: FeedAccessService,
     private val attribution: BundleAttributionService,
+    private val picks: BundlePhotoPickService,
     private val likes: SocialLikeService,
     private val socialComments: SocialCommentService,
     private val bunches: BunchRepository,
@@ -258,41 +259,18 @@ class BundleService(
     }
 
     @Transactional
-    fun caption(
-        actor: BundleActor,
-        bunchId: Long,
-        id: Long,
-        photoId: Long,
-        request: BundleTextRequest,
-        requestId: String
-    ): BundleSnapshot {
-        val bundle = editable(actor, bunchId, id, request.mode)
-        val photo = bundlePhoto(id, photoId)
-        leases.requireLease(bundle, actor, "PHOTO:$photoId", request.leaseToken)
-        version(photo.captionVersion, request.expectedVersion, mapOf(
-            "value" to photo.caption,
-            "bundlePhotoId" to photoId
-        ))
-        val value = validateText { BundleText.caption(request.value) }
-        if (photo.caption != value) {
-            photo.caption = value
-            photo.captionVersion++
-            photo.captionUpdatedBy = actor.memberId
-            photo.captionUpdatedAt = Instant.now()
-            changed(bundle, requestId, BundleEventType.CAPTION, photoResponse(photo))
-            recordActivity(bundle, actor.memberId)
-        }
-        return snapshot(bundle, actor.memberId)
-    }
-
-    @Transactional
     fun addParticipant(actor: BundleActor, bunchId: Long, id: Long, memberId: Long, requestId: String): BundleSnapshot {
         val bundle = access.lock(actor.memberId, bunchId, id)
         access.requireParticipant(actor.memberId, bundle)
         access.requireMember(memberId, bunchId)
         if (!access.isParticipant(memberId, id)) {
             val participant = participants.saveAndFlush(
-                BundleParticipant(bundleId = id, memberId = memberId, joinedAt = clock.instant())
+                BundleParticipant(
+                    bundleId = id,
+                    memberId = memberId,
+                    joinedAt = clock.instant(),
+                    pickInitialVersion = bundle.revision + 1
+                )
             )
             // A newly added participation starts above every prior comment version. Removing
             // and re-adding a member must not let an old expectedVersion=0 save become valid.
@@ -470,7 +448,6 @@ class BundleService(
             request.date?.isAfter(LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))) == true) {
             fail(ErrorCode.INVALID_INPUT)
         }
-        val captions = request.photos.map { validateText { BundleText.caption(it.caption) } }
         request.photos.forEach {
             if ((it.bundlePhotoId == null) == (it.photoId == null)) fail(ErrorCode.INVALID_INPUT)
         }
@@ -498,13 +475,6 @@ class BundleService(
                 ?: addPhoto(bundle, additions.getValue(input.photoId!!), index, actor.memberId)
             if (row.position != index) {
                 row.position = index
-                edited = true
-            }
-            if (row.caption != captions[index]) {
-                row.caption = captions[index]
-                row.captionVersion++
-                row.captionUpdatedBy = actor.memberId
-                row.captionUpdatedAt = clock.instant()
                 edited = true
             }
         }
@@ -554,7 +524,7 @@ class BundleService(
             val bundle = bundles.findLocked(bundleId) ?: return@forEach
             if (bundle.status == BundleStatus.PUBLISHED) {
                 rows.forEach { it.photoId = null }
-                // Source metadata is part of snapshots; retained image, caption and order remain unchanged.
+                // Source metadata is part of snapshots; retained image and order remain unchanged.
                 changed(bundle, UUID.randomUUID().toString(), BundleEventType.PHOTOS, photoChanges(bundle))
             } else {
                 rows.forEach { leases.clearPhoto(bundleId, it.id) }
@@ -671,9 +641,6 @@ class BundleService(
 
     private fun photoRows(id: Long) = photos.findAllByBundleIdOrderByPositionAscIdAsc(id)
 
-    private fun bundlePhoto(id: Long, photoId: Long) = photos.findById(photoId).orElse(null)
-        ?.takeIf { it.bundleId == id } ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-
     private fun version(current: Long, expected: Long, values: Map<String, Any?>) {
         if (current != expected) fail(ErrorCode.BUNDLE_VERSION_CONFLICT, values + ("version" to current))
     }
@@ -733,15 +700,18 @@ class BundleService(
     ): BundleSnapshot {
         val draft = bundle.status == BundleStatus.DRAFT
         val publishedPeople = if (draft) null else attribution.published(bundle)
+        val people = publishedPeople?.participants ?: attribution.draftParticipants(bundle)
+        val photoPicks = picks.summaries(bundle, userId, people)
         val social = if (draft) SocialLikeSummary() else
             likeSummary ?: likes.summaries(userId, listOf(bundle.id))[bundle.id] ?: SocialLikeSummary()
         val count = if (draft) 0 else commentTotal ?: socialComments.counts(userId, listOf(bundle.id))[bundle.id] ?: 0
         return BundleSnapshot(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
-            photoRows(bundle.id).map(::photoResponse),
-            publishedPeople?.participants ?: participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
-                .map { BundleParticipantResponse(it.memberId, it.joinedAt) },
+            photoRows(bundle.id).map {
+                photoResponse(it).copy(picks = photoPicks.getValue(it.id))
+            },
+            people,
             publishedPeople?.comments ?: comments.findAllByBundleIdOrderByIdAsc(bundle.id).map(::commentResponse),
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
             access.permissions(userId, bundle),
@@ -775,8 +745,7 @@ class BundleService(
     }
 
     private fun photoResponse(row: BundlePhoto) = BundlePhotoResponse(
-        row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt,
-        row.caption, row.captionVersion, row.captionUpdatedBy, row.captionUpdatedAt
+        row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt
     )
 
     private fun commentResponse(row: BundleComment) = BundleCommentResponse(

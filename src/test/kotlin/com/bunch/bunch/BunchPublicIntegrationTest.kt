@@ -212,8 +212,9 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         val detail = data(read(viewerOwner, target, "published-bundles/$last", target))
         assertThat(detail.path("photos").single().path("id").asLong()).isEqualTo(photoId)
         assertThat(detail.path("photos").single().fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
-            "id", "imageUrl", "position", "caption"
+            "id", "imageUrl", "position", "picks"
         )
+        assertThat(detail.path("photos").single().path("picks").path("count").asInt()).isZero()
         assertThat(detail.path("location").isNull).isTrue()
         assertThat(detail.path("permissions").path("canEdit").asBoolean()).isFalse()
         assertThat(detail.path("permissions").path("canDelete").asBoolean()).isFalse()

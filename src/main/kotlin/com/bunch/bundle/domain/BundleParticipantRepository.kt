@@ -11,6 +11,11 @@ interface BundleParticipantRepository : JpaRepository<BundleParticipant, Long> {
 
     fun findByBundleIdAndMemberId(bundleId: Long, memberId: Long): BundleParticipant?
 
+    // Scalar reads retain the current participation generation even in a parent's stale entity context.
+    @Query("select participant.pickInitialVersion from BundleParticipant participant " +
+        "where participant.bundleId = :bundleId and participant.memberId = :memberId")
+    fun findPickInitialVersion(bundleId: Long, memberId: Long): Long?
+
     @Query(
         value = """
             SELECT participant.id AS "participantId", participant.bundle_id AS "bundleId"

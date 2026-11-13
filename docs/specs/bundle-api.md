@@ -3,7 +3,13 @@
 2026-11-07 승인한 [발행본 계약](published-bundle-edit.md)과 2026-11-10 재전달된
 6.2.12·6.2.15(#124)를 따른다. 발행본 내용은 `PUT /{bundleId}/published`, 공개 범위는
 기존 `PUT /{bundleId}/visibility`로 분리한다. 나머지 개별 내용 저장 API는 DRAFT 전용이다.
+사진 픽도 DRAFT에서만 변경할 수 있고, 발행본에서는 상세 조회로만 반환한다.
 발행 후 참여자·멤버별 코멘트는 변경할 수 없다. 기존 comments 필드는 참여자 코멘트로 유지한다.
+
+캡션은 현재 활성 API 계약에서 제거한다. 캡션 쓰기·편집 경로, 발행 입력, 번들·공개·피드
+응답 필드, `CAPTION` 이벤트와 캡션 검증은 제공하지 않는다. 이미 적용된 DB/Flyway의
+caption 컬럼·값과 마이그레이션 이력은 내부 historical data로만 보존하며 새 DDL이나 호환
+계층은 추가하지 않는다.
 
 장소 목록의 REST·LOCATION lease·이벤트·snapshot·내부 일괄 편집/콕 연계는
 [장소 목록 계약](bundle-locations.md)을 따른다. `BundleSnapshot`에 `locations`와
@@ -84,12 +90,12 @@ STOMP `CONNECT` frame의 native `Authorization` header에만 같은 Bearer acces
 | --- | --- | --- | --- |
 | `Authorization` | `Bearer <access-jwt>` | 모든 REST 요청 | 활성 access 세션과 번치 소속을 확인한다. |
 | `Content-Type` | `application/json` | JSON body가 있는 요청 | DTO로 역직렬화한다. |
-| `X-Request-Id` | UUID | `title`, `visibility`, `date`, `comment`, 참여자 변경, `leave`, 사진 이동·캡션, 삭제 | 생략하면 서버가 UUID를 생성한다. 변경 이벤트의 `requestId`로 사용한다. |
+| `X-Request-Id` | UUID | `title`, `visibility`, `date`, `comment`, 참여자 변경, `leave`, 사진 이동·제거, 삭제 | 생략하면 서버가 UUID를 생성한다. 변경 이벤트의 `requestId`로 사용한다. |
 | `Idempotency-Key` | UUID | 생성·사진 구성 변경·발행 | 필수다. 같은 작업의 재시도와 중복 발행을 구분한다. |
 
 모든 요청의 `BundleActor`는 인증된 `memberId`와 `sessionId`로만 구성한다. STOMP lease에
 보관하는 `connectionId`는 서버가 연결에서 얻는 값이며 client body·header로 받지 않는다.
-REST에는 socket ID가 없으므로 초안 제목·날짜·캡션 저장에서 서버가 검증하는 값은
+REST에는 socket ID가 없으므로 초안 제목·날짜 저장에서 서버가 검증하는 값은
 경로의 target, 현재 회원·session, 현재 `leaseToken`, lease 만료 여부와
 `expectedVersion`이다. private token과 connectionId는 REST 응답·공개 상태에 포함하지 않는다.
 
@@ -119,13 +125,19 @@ client 식별자를 추가하지 않는다.
 | `visibilityVersion` | 공개 범위 |
 | `dateVersion` | 번들 날짜 |
 | `locationVersion` | 장소 목록 전체 |
-| `captionVersion` | 한 `BundlePhoto`의 캡션 |
+| `BundlePhotoPick.version` | 한 사진·회원 픽 row의 마지막 변경 당시 번들 revision. row가 없으면 해당 참여자의 고정 `pickInitialVersion`, 미참여 조회자는 0 |
 | `BundleCommentResponse.version` | 한 회원의 코멘트 |
 
 `expectedVersion` 또는 `expectedRevision`이 서버 값과 다르면 변경하지 않고 현재 값과
 현재 버전을 오류 `detail`로 반환한다. 같은 값을 다시 보내는 no-op 저장은 해당 필드
 버전과 `revision`을 증가시키지 않는다. 클라이언트는 응답에 없는 버전을 추측하지
 않는다.
+
+사진 픽은 예외적으로 원하는 상태를 보내는 멱등 요청이다. 현재 `picked`와 요청 값이
+같으면 `expectedVersion`이 오래되어도 현재 `BundlePhotoPicks`를 성공 응답으로 반환하며
+revision·`updatedAt`·활동을 바꾸지 않는다. 상태가 달라지고 expected version이 현재
+픽 row 버전(픽 row가 없으면 해당 참여자의 고정 `pickInitialVersion`)과 다르면 `BUNDLE_003`을
+반환하고 `error.detail`에 현재 `BundlePhotoPicks`를 담는다.
 
 코멘트에는 다음 참여자별 규칙이 적용된다.
 
@@ -164,7 +176,7 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/leave` | 없음 | 선택 `X-Request-Id` | `BundleSnapshot` 또는 `null` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/changes` | `BundlePhotoChangesRequest` | `Idempotency-Key` | `BundleSnapshot` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/move` | `MoveBundlePhotoRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
-| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{bundlePhotoId}/caption` | `BundleTextRequest` | 선택 `X-Request-Id` | `BundleSnapshot` |
+| `PUT` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/photos/{photoId}/pick` | `BundlePhotoPickRequest` | 없음 | `BundlePhotoPicks` |
 | `POST` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}/publish` | `PublishBundleRequest` | `Idempotency-Key` | `BundleSnapshot` |
 | `DELETE` | `/api/v1/bunches/{bunchId}/bundles/{bundleId}` | 없음 | 선택 `X-Request-Id` | `null` |
 
@@ -225,25 +237,24 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 
 ```json
 {
-  "value": "제목 또는 코멘트 또는 캡션",
+  "value": "제목 또는 코멘트",
   "expectedVersion": 7,
   "mode": "DRAFT",
   "leaseToken": "2e7f9b3c-2d0a-4f11-8b2b-6b56dc4f8a33"
 }
 ```
 
-`leaseToken`은 제목·날짜·캡션의 `DRAFT` 저장에만 필요하다. 코멘트에는 보내지 않으며,
+`leaseToken`은 제목·날짜의 `DRAFT` 저장에만 필요하다. 코멘트에는 보내지 않으며,
 `PUBLISHED`는 이 경로로 저장할 수 없다. `mode`는 모든 text
 요청에 포함하며 실제 bundle 상태와 일치해야 한다.
 
 - 제목은 NFC 정규화 후 trim하며 줄바꿈을 허용하지 않고 최대 40 grapheme이다.
 - 코멘트는 NFC 정규화하며 최대 400 grapheme이다. 발행 후에는 수정할 수 없다.
-- 캡션은 NFC 정규화하며 최대 200 grapheme이다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
 
 장소 목록 lease target은 `LOCATION`이며 전용 저장 요청은 [장소 계약](bundle-locations.md)을 따른다.
-제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`, 캡션 lease target은
-`PHOTO:{bundlePhotoId}`다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
+제목 lease target은 `TITLE`, 날짜 lease target은 `DATE`다. `PHOTO:{bundlePhotoId}` lease는
+사진 이동·제거를 보호한다. 초안 편집권은 STOMP에서 획득하며 REST 저장에서는 socket ID를
 받지 않고 현재 회원·session·target·`leaseToken`·미만료 상태·`expectedVersion`을 같은
 트랜잭션에서 검사한다. REST 저장이 성공한 뒤 서버가 DB commit 후 해당 내용 이벤트를
 STOMP로 한 번 발행한다. 클라이언트는 같은 내용을 STOMP 명령으로 다시 보내지 않는다.
@@ -284,11 +295,11 @@ visibilityVersion으로 범위를 저장할 수 있다. 상세 오류·공개 �
 null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 날짜가 지정되면
 `dateChips`는 빈 목록이다.
 
-초안의 text·date·visibility·caption 저장은 참여자만 할 수 있다. 발행본의 제목·날짜·
-공개 범위·사진·캡션 수정은 현재 메인 관리자 OWNER만 할 수 있다. 발행본 코멘트는
+초안의 text·date·visibility 저장은 참여자만 할 수 있다. 발행본의 제목·날짜·공개 범위·사진
+수정은 현재 메인 관리자 OWNER만 할 수 있다. 발행본 코멘트는
 발행 후 누구도 수정하지 않는다. 발행본 내용은 전체 일괄 저장 경로, 공개 범위는 전용 경로를 사용한다.
 일괄 저장 DTO에서는 visibility를 제거하며 구 JSON의 해당 미지 필드는 무시되어 범위를 바꾸지 않는다.
-사진 caption 호환성 전환과 픽 모델은 #123 소유이고 최초 발행 확장은 #107 소유다.
+기존 사진의 픽은 동결한다. 최초 발행은 #107 계약을 따른다.
 
 ### 참여자·나가기·삭제
 
@@ -311,7 +322,7 @@ null이면 Photo 촬영일에서 최대 세 개의 `dateChips`를 계산하고, 
 PUBLISHED에서 현재 OWNER만 호출한다. 번들·번들 사진·참여자·
 코멘트를 삭제하고 `data: null`을 반환한다. 사진함 원본 Photo는 삭제하지 않는다.
 
-### 사진 구성·순서·캡션
+### 사진 구성·순서·픽
 
 #### `BundlePhotoChangesRequest`
 
@@ -351,12 +362,70 @@ ID는 양수이고 중복될 수 없다. 추가 Photo는 같은 번치의 `READY
 동안에는 그 lease를 빼앗아 변경할 수 없다. 사진 구성·순서 변경도 REST 저장으로 처리하고,
 DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
 
-#### 캡션
+#### `BundlePhotoPickRequest`
 
-캡션 경로는 `BundleTextRequest`를 사용한다. 초안은 해당 `BundlePhoto`의
-`PHOTO:{bundlePhotoId}` 편집권이 필요하며, REST에서 현재 회원·session·target·
-`leaseToken`·만료·`expectedVersion`을 검증한다. 발행본은 현재 메인 관리자 OWNER만
-수정한다. 응답은 전체 `BundleSnapshot`이다.
+```json
+{
+  "picked": true,
+  "expectedVersion": 12
+}
+```
+
+`picked`와 `expectedVersion`은 모두 필수이며 null은 허용하지 않는다. `expectedVersion`은
+0 이상이어야 한다. 경로의 `photoId`는 사진함 Photo ID가 아니라 현재 번들의
+`BundlePhoto.id`다.
+
+`PUT /photos/{photoId}/pick`은 현재 번치 멤버가 번들 snapshot에서 읽은 사진별 픽을
+변경하는 DRAFT 전용 경로다. 초안 참여자만 호출할 수 있고, 참여하지 않은 현재 번치
+멤버는 `GET` 상세·목록 snapshot에서 픽을 읽을 수만 있다. PUBLISHED에서 호출하면
+`BUNDLE_002`, 다른 번들의 사진 ID·없는 사진이면 `RESOURCE_001`을 반환한다.
+
+성공 응답은 다음 `BundlePhotoPicks`다.
+
+```json
+{
+  "count": 2,
+  "pickedByMe": true,
+  "version": 13,
+  "members": [
+    {
+      "memberId": 201,
+      "joinedAt": "2026-10-25T01:02:03Z",
+      "nickname": "지민",
+      "imageUrl": "https://images.example/member-201.jpg",
+      "profileAvailable": true
+    }
+  ]
+}
+```
+
+`count`는 `picked=true`인 참여자 수, `pickedByMe`는 현재 요청자의 상태다. `members`는
+참여자의 `joinedAt ASC, id ASC` 순서를 따르며 픽하지 않은 참여자는 포함하지 않는다.
+활성 계정·번치 소속의 프로필만 표시하고, 그 외에는 `nickname: "작성자"`, `imageUrl: null`,
+`profileAvailable: false`를 사용한다. 같은 계정이 번치에 재참여하면 복구하지만
+WITHDRAWN 계정이나 새 계정은 복구하지 않는다.
+
+서버는 번치와 번들을 잠근 뒤 현재 픽 row를 다시 읽어 부모 트랜잭션의 stale entity를
+사용하지 않는다. 실제 변경이면 번들 revision·`updatedAt`·현재 소속의 활동을 한 번 갱신하고,
+픽 row의 `version`을 그 revision으로 저장한다. row가 없으면 해당 참여자의 고정
+`pickInitialVersion`을 사용한다. 생성 시 초기 참여자와 마이그레이션 전 참여자는 0이며,
+이후 참여자 추가 시 그 변경으로 증가할 `bundle.revision`을 초기값으로 저장한다.
+다른 사진·멤버의 픽이나 무관한 초안 편집은 이 초기값을 바꾸지 않는다. 참여자를 제거하면
+해당 픽 row가 지워지고, 다시 추가하면 새 초기 버전을 발급하여 이전 참여의 늦은 변경 요청을
+거부한다. 초기값은 부모 트랜잭션에 남은 참여자 엔티티 대신 DB의 scalar 조회로 읽는다.
+`picked=false` row도 ABA 방지를 위해 남긴다. 사진·참여자 FK는 같은 번들 범위로 묶고
+`ON DELETE CASCADE`를 적용한다. 참여자가 아닌 조회자는 초기 version 0을 받으며 쓰기는 거부된다.
+발행 후 내용·공개 범위 변경이나 원본 사진 삭제로 빈 픽의 version도 바뀌지 않는다.
+
+`V39__bundle_pick_initial_versions.sql`은 참여자에 non-null·0 이상인 초기 버전
+컬럼을 추가한다. 기존 픽 row·버전은 변경하지 않는다. 전환 전 row 없는 픽의 버전을
+캐시한 클라이언트는 한 번 상세를 새로 읽어 고정 초기값으로 전환한다.
+
+픽 변경은 STOMP 내용 이벤트나 알림을 만들지 않는다. 따라서 topic revision이 건너뛸 수
+있으며, 클라이언트는 픽 화면 재진입·재연결 또는 revision gap에서 상세 snapshot을 다시
+읽는다. 픽 응답의 `version`을 다음 요청에 사용하고, 사진·본인별 요청을 직렬화하며,
+빠른 입력은 마지막 희망 상태로 합친다. `409` 또는 응답 유실이면 snapshot을 다시 읽은
+뒤 최신 희망 상태만 재시도하고, 오프라인 요청을 무한 replay하지 않는다.
 
 ### 발행
 
@@ -394,7 +463,7 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
    `PUBLISH:{bundleId}` 요청의 fingerprint와 body fingerprint가 같아야 한다.
 4. fingerprint가 같으면 다른 key도 같은 발행 결과를 반환하고 해당 key를 기록한다.
    fingerprint가 다르면 `BUNDLE_002`다.
-5. 발행 뒤 제목·날짜·캡션을 수정해 `bundle.revision`이 변해도, 원래 발행 요청의
+5. 발행 뒤 제목·날짜를 수정해 `bundle.revision`이 변해도, 원래 발행 요청의
    fingerprint가 같으면 이 재시도는 허용된다. 재시도 판단에 `bundle.revision - 1`을
    사용하지 않는다.
 
@@ -459,16 +528,25 @@ error.message = error.idempotency_conflict
   "imageUrl": "https://images.example/7001.jpg",
   "position": 0,
   "addedBy": 201,
-  "addedAt": "2026-10-25T01:02:03Z",
-  "caption": "",
-  "captionVersion": 0,
-  "captionUpdatedBy": null,
-  "captionUpdatedAt": null
+  "addedAt": "2026-10-25T01:02:03Z"
 }
 ```
 
 `BundlePhotoResponse`의 `photoId`는 원본 Photo가 삭제된 발행본에서 null이 될 수 있다.
-이때도 `imageAssetId`, `imageUrl`, `position`, `caption`과 캡션 버전은 유지한다.
+이때도 `imageAssetId`, `imageUrl`, `position`, `picks`는 유지한다.
+
+```json
+{
+  "count": 2,
+  "pickedByMe": false,
+  "version": 13,
+  "members": []
+}
+```
+
+`BundlePhotoPicks`는 내부 `BundleSnapshot.photos[i].picks`와 외부 발행 번들 상세의
+`photos[i].picks`에 같은 shape으로 포함된다. 외부 상세에서 읽을 수 있는 픽은 변경할 수
+없으며, 기존 사진의 픽은 순서 변경·원본 Photo 삭제와 무관하게 유지된다.
 
 ```json
 {
@@ -552,8 +630,8 @@ nickname/imageUrl/profileAvailable을 제공한다. 비활성 작성자는 conte
 | 404 | `RESOURCE_001` | 없는 번들·번들 사진 또는 경로 번치와 다른 번들 | null |
 | 409 | `REQUEST_001` | 같은 idempotency key의 fingerprint 불일치 | null |
 | 409 | `BUNDLE_001` | 번치 인원 부족·초안 10개 초과 | null |
-| 409 | `BUNDLE_002` | `mode`와 실제 상태 불일치 또는 발행 retry fingerprint 불일치 | 보통 `{"status":"PUBLISHED"}` 또는 null |
-| 409 | `BUNDLE_003` | expected version/revision 불일치 | 현재 값과 `version` |
+| 409 | `BUNDLE_002` | `mode`와 실제 상태 불일치, 발행 retry fingerprint 불일치 또는 PUBLISHED 픽 변경 | 보통 `{"status":"PUBLISHED"}` 또는 null |
+| 409 | `BUNDLE_003` | expected version/revision 불일치 | 일반 저장은 현재 값과 `version`, 픽은 현재 `BundlePhotoPicks` |
 | 409 | `BUNDLE_004` | 편집권 없음·만료·소유자 불일치·member/session/connection/token 불일치 | 공개 `LeaseState` 또는 null |
 | 409 | `BUNDLE_005` | 발행 조건 미충족 | `{"reasons":[...]}` |
 | 409 | `BUNDLE_006` | 사진 최종 수·현재 anchor·사진 구성 충돌 | 현재 bundle 내용 또는 `{photos,dateChips}` |
@@ -567,13 +645,16 @@ nickname/imageUrl/profileAvailable을 제공한다. 비활성 작성자는 conte
 }
 ```
 
-캡션 오류에는 `bundlePhotoId`도 포함된다.
+픽 상태가 달라지는 stale 요청의 conflict detail은 다음과 같다.
 
 ```json
 {
-  "value": "현재 캡션",
-  "bundlePhotoId": 901,
-  "version": 2
+  "count": 1,
+  "pickedByMe": false,
+  "version": 14,
+  "members": [
+    {"memberId": 201, "joinedAt": "2026-10-25T01:02:03Z", "profileAvailable": true}
+  ]
 }
 ```
 
@@ -637,16 +718,18 @@ client `SEND` destination은 다음과 같다. 명령 body는 공통 응답 enve
 2. 번들 topic과 필요한 private queue를 `SUBSCRIBE`한 뒤, REST `GET`으로 현재
    `BundleSnapshot`과 revision·공개 lease 상태를 조회한다.
 3. 내용 변경은 REST endpoint로만 보낸다. 모든 요청에는 최신 `expectedVersion`을 넣는다.
-   `DRAFT` 제목·날짜·캡션 저장은 단독 사용자라도 저장 전에 해당 target lease를
-   acquire하고, 그 응답의 현재 `leaseToken`도 넣는다. visibility·comment처럼 lease가
-   필요하지 않은 저장은 해당 DTO의 버전·상태 검증만 적용한다.
+   `DRAFT` 제목·날짜 저장은 단독 사용자라도 저장 전에 해당 target lease를 acquire하고,
+   그 응답의 현재 `leaseToken`도 넣는다. 사진 이동·제거는 해당 `PHOTO:{bundlePhotoId}`
+   lease로 보호한다. visibility·comment처럼 lease가 필요하지 않은 저장은 해당 DTO의
+   버전·상태 검증만 적용한다.
 4. 서버가 권한·member/session·target과 필요한 lease·버전을 같은 저장 경계에서 확인하고 DB
    commit을 완료한 뒤, 저장된 실제 변경값을 담은 STOMP 내용 이벤트를 한 번 발행한다.
    클라이언트는 같은 내용을 STOMP `SEND`로 보내거나 서버 이벤트를 다시 반사하지 않는다.
 
 연결·구독과 REST 저장은 snapshot·이벤트 수신과 내용 변경을 위한 기본 절차다. `DRAFT`
-제목·날짜·캡션 저장에는 단독 사용자도 `TITLE`·`DATE`·`PHOTO:{bundlePhotoId}` 중 해당
-target의 lease 획득·heartbeat·release가 필요하며, 재연결 복구도 아래 절차를 따른다.
+제목·날짜 저장에는 단독 사용자도 `TITLE`·`DATE` target의 lease 획득·heartbeat·release가
+필요하다. 사진 이동·제거에는 `PHOTO:{bundlePhotoId}` lease를 사용하며, 재연결 복구도
+아래 절차를 따른다.
 
 ### 서버 공통 메시지
 
@@ -691,7 +774,6 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 | `DATE` | `{value, version, dateChips}` |
 | `LOCATION` | `{locations: BundleLocationResponse[], version: locationVersion}` |
 | `COMMENT` | `BundleCommentResponse` |
-| `CAPTION` | `BundlePhotoResponse` |
 | `PARTICIPANTS` | `{participants, comments, removedCommentMemberIds?}` |
 | `PHOTOS` | `{photos, dateChips}` |
 | `PUBLISHED` | `CREATED`와 같은 전체 내용. status=PUBLISHED |
@@ -715,10 +797,11 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 
 ### DRAFT 저장 편집권 절차: 획득·heartbeat·해제
 
-이 lease 절차는 `DRAFT` 제목·날짜·캡션 REST 저장에 필수인 전 단계다. 단독 사용자도
+이 lease 절차는 `DRAFT` 제목·날짜 REST 저장에 필수인 전 단계다. 단독 사용자도
 예외 없이 저장할 target을 먼저 acquire하고, 받은 현재 `leaseToken`을 저장 요청에 넣어야
 한다. 편집 중에는 5초마다 heartbeat를 보내고, 저장을 마치거나 화면을 이탈할 때 release한다.
-`visibility`·`comment` 저장은 lease 없이 DTO의 버전·상태만 검증한다.
+사진 이동·제거는 `PHOTO:{bundlePhotoId}` lease로 보호하며, `visibility`·`comment` 저장은
+lease 없이 DTO의 버전·상태만 검증한다.
 
 획득 명령 body에는 target만 포함한다.
 
@@ -728,7 +811,8 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 }
 ```
 
-`target`은 `TITLE`, `DATE`, `LOCATION`, `PHOTO:{bundlePhotoId}`다. 서버는 STOMP 연결의
+`target`은 `TITLE`, `DATE`, `LOCATION`, `PHOTO:{bundlePhotoId}`다. `PHOTO:{bundlePhotoId}`는
+사진 이동·제거 보호용이며, 서버는 STOMP 연결의
 `connectionId`와 인증 principal의 `memberId`·`sessionId`를 사용한다. lease가 없거나
 만료·release된 경우 획득할 수 있다. 활성 lease를 재획득할 수 있는 경우는 같은
 `memberId`·`sessionId`·`connectionId`일 때뿐이며, 이때도 매번 새 token과 새
@@ -861,6 +945,11 @@ GET /api/v1/bunches/{bunchId}/bundles/{bundleId}
 - 재연결한 connection은 이전 connection의 leaseToken을 재사용하지 않는다. snapshot을
   확인한 뒤 필요한 target을 새로 acquire하고, 새 token과 최신 expectedVersion으로만
   보류 REST 저장을 재시도한다.
+- 픽 요청은 사진·본인별로 하나씩 직렬화한다. 성공 응답의 `version`을 다음 요청에
+  사용하고, 빠른 탭은 마지막 desired state만 남긴다. `BUNDLE_003` 또는 timeout처럼
+  응답을 잃은 경우 snapshot을 재조회한 뒤 마지막 desired state만 한 번 재시도한다.
+- 픽 변경에는 전용 STOMP 이벤트·알림이 없으므로 revision gap을 오류로 단정하지 않는다.
+  픽 화면 재진입·재연결 시 snapshot을 읽어 `photos[i].picks`를 갱신한다.
 - `LEASES`, `LEASE_GRANTED`, `LEASE_HEARTBEAT`, `LEASE_RELEASED`, `ACTIVITY`, `COMMAND_REJECTED`에는 내용 중복 제거 규칙을 적용하지 않는다. 같은 revision에서도 새 편집권/활동 정보가 올 수 있다.
 - topic과 private queue 양쪽에서 받은 동일 활동은 회원별 활동 표시를 갱신한다.
 - 다른 회원의 이벤트나 snapshot을 적용할 때 본인의 미저장 입력을 유지한다.

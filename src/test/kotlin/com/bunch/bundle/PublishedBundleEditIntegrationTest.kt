@@ -188,8 +188,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val request = edit(before).copy(
             title = " 바뀐 제목 ", date = LocalDate.of(2024, 2, 1),
             photos = listOf(
-                PublishedBundlePhotoInput(bundlePhotoId = before.photos[1].id, caption = "새 캡션"),
-                PublishedBundlePhotoInput(photoId = added.id, caption = "추가")
+                PublishedBundlePhotoInput(bundlePhotoId = before.photos[1].id),
+                PublishedBundlePhotoInput(photoId = added.id)
             ),
             locations = listOf(place("a", 0), place("b", 1), place("c", 2))
         )
@@ -203,7 +203,6 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertThat(saved.dateVersion).isEqualTo(before.dateVersion + 1)
         assertThat(saved.locationVersion).isEqualTo(1)
         assertThat(saved.photos.map { it.position }).containsExactly(0, 1)
-        assertThat(saved.photos.map { it.caption }).containsExactly("새 캡션", "추가")
         assertThat(saved.photos.first().id).isEqualTo(before.photos[1].id)
         assertThat(saved.photos.first().addedAt).isEqualTo(before.photos[1].addedAt)
         assertThat(saved.photos.first().addedBy).isEqualTo(before.photos[1].addedBy)
@@ -229,16 +228,15 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `retained photo survives source deletion and can change caption without original Photo`() {
+    fun `retained photo survives source deletion without original Photo`() {
         val f = fixture()
         val before = snapshot(f)
         jdbc.update("UPDATE bundle_photos SET photo_id = NULL WHERE bundle_id = ?", f.id)
         jdbc.update("DELETE FROM photos WHERE id = ?", before.photos.single().photoId)
         val saved = save(f, edit(snapshot(f)).copy(photos = listOf(
-            PublishedBundlePhotoInput(bundlePhotoId = before.photos.single().id, caption = "보존된 사진"))))
+            PublishedBundlePhotoInput(bundlePhotoId = before.photos.single().id))))
         assertThat(saved.photos.single().photoId).isNull()
         assertThat(saved.photos.single().imageAssetId).isEqualTo(before.photos.single().imageAssetId)
-        assertThat(saved.photos.single().caption).isEqualTo("보존된 사진")
     }
 
     @Test
@@ -302,7 +300,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
         assertThatThrownBy {
             save(f, edit(initial).copy(title = "should roll back", photos = listOf(
-                PublishedBundlePhotoInput(photoId = addition.id, caption = "added")),
+                PublishedBundlePhotoInput(photoId = addition.id)),
                 locations = listOf(place("replacement", 0))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
         assertThat(snapshot(f)).isEqualTo(persisted)
@@ -335,7 +333,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val before = snapshot(f)
         assertError(ErrorCode.INVALID_INPUT) { save(f, edit(before).copy(photos = emptyList())) }
         val additions = (1..20).map { photo(f.bunchId) }
-        val entries = additions.map { PublishedBundlePhotoInput(photoId = it.id, caption = "") }
+        val entries = additions.map { PublishedBundlePhotoInput(photoId = it.id) }
         assertError(ErrorCode.INVALID_INPUT) {
             save(f, edit(before).copy(photos = edit(before).photos + entries))
         }
@@ -358,16 +356,13 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             edit(before).copy(title = "x".repeat(41)),
             edit(before).copy(title = "line\nbreak"),
             edit(before).copy(date = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1)),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(row.id, originalId, ""))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput())),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(row.id, originalId))),
             edit(before).copy(photos = edit(before).photos + edit(before).photos),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = foreign.id, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = foreign.photoId, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = notReady.id, caption = ""))),
-            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = originalId, caption = ""))),
-            edit(before).copy(photos = listOf(
-                PublishedBundlePhotoInput(bundlePhotoId = row.id, caption = "x".repeat(201)))
-            ),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(bundlePhotoId = foreign.id))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = foreign.photoId))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = notReady.id))),
+            edit(before).copy(photos = listOf(PublishedBundlePhotoInput(photoId = originalId))),
             edit(before).copy(locations = (0..3).map { place("p$it", it) }),
             edit(before).copy(locations = listOf(place("a", 0), place("a", 1))),
             edit(before).copy(locations = listOf(place("a", 2)))
@@ -511,10 +506,6 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val calls = listOf<() -> Any?>(
             { service.title(actor, f.bunchId, f.id, BundleTextRequest("x", 0, BundleStatus.PUBLISHED), "title") },
             { service.date(actor, f.bunchId, f.id, BundleDateRequest(null, 0, BundleStatus.PUBLISHED), "date") },
-            {
-                service.caption(actor, f.bunchId, f.id, row.id,
-                    BundleTextRequest("x", 0, BundleStatus.PUBLISHED), "caption")
-            },
             {
                 service.changePhotos(actor, f.bunchId, f.id, UUID.randomUUID(),
                     BundlePhotoChangesRequest(mode = BundleStatus.PUBLISHED))
@@ -746,7 +737,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         rejectWrite("published_test_reject_photo", "bundle_photos", "INSERT")
         assertThatThrownBy {
             save(f, edit(initial).copy(title = "failed edit", locations = emptyList(),
-                photos = listOf(PublishedBundlePhotoInput(photoId = addition.id, caption = ""))))
+                photos = listOf(PublishedBundlePhotoInput(photoId = addition.id))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
         assertThat(snapshot(f)).isEqualTo(persisted)
         val preserved = pinRows.findById(pin.id).orElseThrow()
@@ -1032,7 +1023,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
 
     private fun edit(value: BundleSnapshot) = EditPublishedBundleRequest(
         value.revision, value.title, value.date,
-        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) },
+        value.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id) },
         value.locations.map { BundleLocationInput(it.provider, it.externalId, it.name, it.address, it.position) }
     )
 

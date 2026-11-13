@@ -169,7 +169,7 @@ DB·공유 Redis key를 사용하지 않는다.
 
 ### 원자 정리·참조 보존
 
-- 프로필 asset, 사진함 Photo·uploader, draft/published bundle의 photo/caption/
+- 프로필 asset, 사진함 Photo·uploader, draft/published bundle의 photo/
   participant/comment/reminder/lease, 초대, 번치 소속, #51의 양방향 social FK가
   실제 모델 기준으로 모두 정리된다.
 - 발행 bundle이 공유하는 ImageAsset, 다른 회원/번치가 참조하는 ImageAsset,

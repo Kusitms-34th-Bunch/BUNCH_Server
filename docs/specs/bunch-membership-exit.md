@@ -30,7 +30,7 @@ notice/알림, Membership 종료는 같은 DB transaction에서 커밋한다.
 
 이탈 업무는 기존 `BundleService.memberDeparted`와 `PhotoService.removeAllUploaders`
 를 호출한다. 마지막 업로더 삭제는 기존 `PhotoFinalDeletionCallback`과
-`BundlePhotoDeletionCallback`을 재사용하므로 발행본의 image asset·caption·순서는
+`BundlePhotoDeletionCallback`을 재사용하므로 발행본의 image asset·순서는
 보존하고, 초안 참여·코멘트·편집권과 빈 초안은 정리한다. callback/정리 실패는
 회원·역할·초대·안내를 포함해 전체 rollback한다. 외부 파일 삭제와 socket/APNs는
 commit 뒤 경계에 남긴다.
