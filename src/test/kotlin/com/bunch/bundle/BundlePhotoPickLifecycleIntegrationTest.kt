@@ -21,7 +21,6 @@ import com.bunch.bundle.dto.EditPublishedBundleRequest
 import com.bunch.bundle.dto.MoveBundlePhotoRequest
 import com.bunch.bundle.dto.PublishedBundlePhotoInput
 import com.bunch.bundle.dto.PublishBundleRequest
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundlePhotoPickService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.ErrorCode
@@ -55,9 +54,6 @@ import java.util.UUID
 class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var bundleService: BundleService
-
-    @Autowired
-    private lateinit var bundleLeases: BundleLeaseService
 
     @Autowired
     private lateinit var pickService: BundlePhotoPickService
@@ -103,7 +99,6 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
     @AfterEach
     fun cleanBundleReferencesBeforeBunchSupport() {
         jdbc.update("DELETE FROM bundle_photo_picks")
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -668,18 +663,11 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
         bundleService.addParticipant(actor(owner), bunchId, draft.id, guest, "$label-add-participant")
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
             .comments.firstOrNull { it.memberId == guest }?.version ?: 0L
-        val titleToken = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            draft.id,
-            "TITLE",
-            "$label-title-connection"
-        ).token
         bundleService.title(
             actor(owner),
             bunchId,
             draft.id,
-            BundleTextRequest("$label title", 0, BundleStatus.DRAFT, titleToken),
+            BundleTextRequest("$label title", 0, BundleStatus.DRAFT),
             "$label-title"
         )
         bundleService.visibility(

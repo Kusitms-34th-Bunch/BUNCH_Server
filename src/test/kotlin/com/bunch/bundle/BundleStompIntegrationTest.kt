@@ -86,7 +86,6 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     fun closeRealtimeFixtures() {
         connections.forEach { it.close() }
         credentials.forEach { sessions.delete(it.sid, it.memberId) }
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -98,58 +97,62 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `two connections keep lease tokens private and deliver committed values with reconnect recovery`() {
+    fun `command rejection uses activity queue only on the requesting connection and presence still works`() {
+        val fixture = fixture()
+        val requester = connect(fixture.owner)
+        val otherConnection = connect(fixture.owner)
+        for (client in listOf(requester, otherConnection)) {
+            client.subscribe(topic(fixture), "topic")
+            client.subscribe("/user/queue/bundle-activity", "activity")
+            client.send(command(fixture, "presence"), mapOf("action" to "VIEW"))
+            client.presenceAck()
+        }
+        requester.clear()
+        otherConnection.clear()
+
+        requester.send(command(fixture, "presence"), mapOf("action" to "UNKNOWN"))
+        val rejected = requester.frame {
+            it.command == "MESSAGE" && mapper.readTree(it.body).path("type").asText() == "COMMAND_REJECTED"
+        }
+        assertThat(rejected.headers["subscription"]).isEqualTo("activity")
+        val rejection = mapper.readTree(rejected.body)
+        assertThat(rejection.path("bunchId").asLong()).isEqualTo(fixture.bunchId)
+        assertThat(rejection.path("bundleId").asLong()).isEqualTo(fixture.bundleId)
+        assertThat(rejection.path("data").path("code").asText()).isEqualTo(ErrorCode.INVALID_INPUT.code)
+        otherConnection.assertNoEvent("COMMAND_REJECTED")
+
+        requester.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        assertThat(editingTargets(requester.presenceAck().path("data")))
+            .containsExactly(fixture.owner.memberId to "DATE")
+    }
+
+    @Test
+    fun `two connections deliver committed values and recover the latest snapshot after reconnect`() {
         val fixture = fixture()
         val owner = connect(fixture.owner)
         val guest = connect(fixture.guest)
         subscribe(owner, fixture)
         subscribe(guest, fixture)
-        owner.clear()
-        guest.clear()
-
-        owner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
-        val grant = owner.json { it.path("type").asText() == "LEASE_GRANTED" }
-        assertThat(grant.path("revision").asLong()).isEqualTo(fixture.revision)
-        val publicLease = guest.json { it.path("type").asText() == "LEASES" }
-        assertThat(publicLease.toString()).doesNotContain("token", "sessionId", "connectionId")
-        assertThat(publicLease.path("data").path("states").single().path("memberId").asLong()).isEqualTo(fixture.owner.memberId)
-        assertThat(guest.frames.poll(200, TimeUnit.MILLISECONDS)?.body.orEmpty()).doesNotContain("token")
-
-        val token = grant.path("data").path("token").asText()
-        guest.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
-        val rejection = guest.json { it.path("type").asText() == "COMMAND_REJECTED" }
-        assertThat(rejection.path("data").path("code").asText()).isEqualTo("BUNDLE_004")
-        assertThat(rejection.toString()).doesNotContain(token, "sessionId")
         val requestId = UUID.randomUUID().toString()
-        val saved = putTitle(fixture, token, "실제 저장된 제목 👨‍👩‍👧‍👦", requestId)
+        val saved = putTitle(fixture, "실제 저장된 제목 👨‍👩‍👧‍👦", requestId)
         val event = guest.json { it.path("type").asText() == "TITLE" }
         assertThat(event.path("data").path("value").asText()).isEqualTo("실제 저장된 제목 👨‍👩‍👧‍👦")
         assertThat(event.path("data").path("version").asLong()).isEqualTo(1)
         assertThat(event.path("requestId").asText()).isEqualTo(requestId)
         assertThat(event.path("revision").asLong()).isEqualTo(saved.path("revision").asLong())
         assertThat(event.path("revision").asLong()).isEqualTo(fixture.revision + 1)
-
-        owner.send(command(fixture, "lease/heartbeat"), mapOf(
-            "target" to "TITLE", "token" to token
-        ))
-        val heartbeat = owner.json { it.path("type").asText() == "LEASE_HEARTBEAT" }
-        assertThat(heartbeat.path("revision").asLong()).isEqualTo(saved.path("revision").asLong())
-        assertThat(heartbeat.path("data").path("expiresAt").asText()).isNotBlank()
+        assertThat(event.toString()).doesNotContain("token", "sessionId", "connectionId")
 
         guest.close()
         // Simulate a missed event while the view is disconnected. No replay log is used.
-        val later = putTitle(fixture, token, "연결이 끊긴 동안 저장", UUID.randomUUID().toString(), 1)
+        val later = putTitle(fixture, "연결이 끊긴 동안 저장", UUID.randomUUID().toString(), 1)
         val reconnected = connect(fixture.guest)
         subscribe(reconnected, fixture)
         reconnected.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
-        val recoveredHeartbeat = reconnected.json { it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW" }
-        assertThat(recoveredHeartbeat.path("revision").asLong()).isEqualTo(later.path("revision").asLong())
-        owner.send(command(fixture, "lease/release"), mapOf(
-            "target" to "TITLE", "token" to token
-        ))
-        val release = owner.json { it.path("type").asText() == "LEASE_RELEASED" }
-        assertThat(release.path("data").path("target").asText()).isEqualTo("TITLE")
-        assertThat(release.path("revision").asLong()).isEqualTo(later.path("revision").asLong())
+        val recovered = reconnected.json {
+            it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW"
+        }
+        assertThat(recovered.path("revision").asLong()).isEqualTo(later.path("revision").asLong())
         val snapshot = getSnapshot(fixture, fixture.guest)
         assertThat(snapshot.path("title").asText()).isEqualTo("연결이 끊긴 동안 저장")
         assertThat(snapshot.path("revision").asLong()).isEqualTo(later.path("revision").asLong())
@@ -157,67 +160,6 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         reconnected.clear()
         bundles.delete(actor(fixture.owner), fixture.bunchId, fixture.bundleId, UUID.randomUUID().toString())
         assertThat(reconnected.json { it.path("type").asText() == "DELETED" }.path("data").isNull).isTrue()
-    }
-
-    @Test
-    fun `same member second connection never receives another connection lease grant`() {
-        val fixture = fixture()
-        val first = connect(fixture.owner)
-        val second = connect(fixture.owner)
-        subscribe(first, fixture)
-        subscribe(second, fixture)
-        first.clear()
-        second.clear()
-        first.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE"))
-        assertThat(first.json { it.path("type").asText() == "LEASE_GRANTED" }.path("data").path("target").asText()).isEqualTo("DATE")
-        val publicState = second.json { it.path("type").asText() == "LEASES" }
-        assertThat(publicState.toString()).doesNotContain("token")
-        second.assertNoEvent("LEASE_GRANTED")
-        first.close()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
-        while (bundles.get(fixture.owner.memberId, fixture.bunchId, fixture.bundleId).leases.isNotEmpty()) {
-            check(System.nanoTime() < deadline) { "Disconnected connection lease was not released" }
-            Thread.sleep(20)
-        }
-        second.send(command(fixture, "lease/acquire"), mapOf("target" to "DATE"))
-        val reacquired = second.json { it.path("type").asText() == "LEASE_GRANTED" }
-        assertThat(reacquired.path("data").path("leaseVersion").asLong()).isGreaterThan(1)
-    }
-
-    @Test
-    fun `same session different connection cannot acquire heartbeat or release another socket lease`() {
-        val fixture = fixture()
-        val first = connect(fixture.owner)
-        val second = connect(fixture.owner)
-        subscribe(first, fixture)
-        subscribe(second, fixture)
-        val photoId = getSnapshot(fixture, fixture.owner).path("photos").first().path("id").asLong()
-
-        listOf("TITLE", "DATE", "PHOTO:$photoId").forEach { target ->
-            first.clear()
-            second.clear()
-            first.send(command(fixture, "lease/acquire"), mapOf("target" to target))
-            val grant = first.json { it.path("type").asText() == "LEASE_GRANTED" }
-            second.json { it.path("type").asText() == "LEASES" }
-            first.clear()
-            second.clear()
-            val token = grant.path("data").path("token").asText()
-
-            second.send(command(fixture, "lease/acquire"), mapOf("target" to target))
-            assertThat(second.json { it.path("type").asText() == "COMMAND_REJECTED" }
-                .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
-            listOf("heartbeat", "release").forEach { action ->
-                second.send(command(fixture, "lease/$action"), mapOf("target" to target, "token" to token))
-                assertThat(second.json { it.path("type").asText() == "COMMAND_REJECTED" }
-                    .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
-            }
-            first.send(command(fixture, "lease/heartbeat"), mapOf("target" to target, "token" to token))
-            assertThat(first.json { it.path("type").asText() == "LEASE_HEARTBEAT" }
-                .path("data").path("token").asText()).isEqualTo(token)
-            first.send(command(fixture, "lease/release"), mapOf("target" to target, "token" to token))
-            first.json { it.path("type").asText() == "LEASE_RELEASED" }
-            second.json { it.path("type").asText() == "LEASES" && it.path("data").path("states").isEmpty }
-        }
     }
 
     @Test
@@ -237,15 +179,11 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         assertThat(getSnapshot(fixture, fixture.guest).path("permissions").path("administrator").asBoolean()).isTrue()
         assertThat(getSnapshot(fixture, fixture.guest).path("permissions").path("canEdit").asBoolean()).isTrue()
 
-        coOwner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
-        val grant = coOwner.json { it.path("type").asText() == "LEASE_GRANTED" }
-        owner.json { it.path("type").asText() == "LEASES" }
         bundles.title(
             actor(fixture.guest),
             fixture.bunchId,
             fixture.bundleId,
-            BundleTextRequest("공동 관리자 제목", 0, BundleStatus.DRAFT,
-                UUID.fromString(grant.path("data").path("token").asText())),
+            BundleTextRequest("공동 관리자 제목", 0, BundleStatus.DRAFT),
             "co-owner-title"
         )
         bundles.visibility(
@@ -293,8 +231,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         coOwner.assertNoEvent("ACTIVITY")
         owner.assertNoEvent("ACTIVITY")
         coOwner.clear()
-        coOwner.send(command(fixture, "lease/acquire"), mapOf("target" to "TITLE"))
-        coOwner.assertNoEvent("LEASE_GRANTED")
+        coOwner.send(command(fixture, "presence"), mapOf("action" to "BEGIN", "target" to "DATE"))
+        coOwner.assertNoEvent("PRESENCE")
         assertThat(bundles.get(fixture.guest.memberId, fixture.bunchId, fixture.bundleId).revision)
             .isEqualTo(published.revision)
         assertThat(jdbc.queryForObject(
@@ -373,15 +311,13 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val viewerCredential = credential(member())
         join(viewerCredential.memberId, issue(fixture.owner.memberId, fixture.bunchId))
         val viewer = connect(viewerCredential)
-        viewer.subscribe("/user/queue/bundle-leases", "leases")
         viewer.subscribe("/user/queue/bundle-activity", "activity")
         viewer.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
         viewer.json { it.path("type").asText() == "ACTIVITY" }
 
         val rejectedCommands = listOf(
-            "lease/acquire" to mapOf("target" to "TITLE"),
-            "lease/heartbeat" to mapOf("target" to "TITLE", "token" to UUID.randomUUID()),
-            "lease/release" to mapOf("target" to "TITLE", "token" to UUID.randomUUID()),
+            "presence" to mapOf("action" to "TYPE", "target" to "TITLE", "text" to "forbidden"),
+            "presence" to mapOf("action" to "BEGIN", "target" to "DATE"),
             "activity" to mapOf("type" to " comment ")
         )
         rejectedCommands.forEach { (suffix, body) ->
@@ -429,21 +365,12 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `LOCATION lease delivers committed ordered locations and reconnect snapshot with stable IDs`() {
+    fun `location saves deliver committed ordered locations and reconnect snapshot with stable IDs`() {
         val fixture = fixture()
         val owner = connect(fixture.owner)
         val guest = connect(fixture.guest)
         subscribe(owner, fixture)
         subscribe(guest, fixture)
-        owner.send(command(fixture, "lease/acquire"), mapOf("target" to "LOCATION"))
-        val grant = owner.json { it.path("type").asText() == "LEASE_GRANTED" }
-        val token = grant.path("data").path("token").asText()
-        val publicLease = guest.json { it.path("type").asText() == "LEASES" }
-        assertThat(publicLease.toString()).doesNotContain("token", "sessionId", "connectionId")
-        assertThat(publicLease.path("data").path("states").single().path("target").asText()).isEqualTo("LOCATION")
-        guest.send(command(fixture, "lease/acquire"), mapOf("target" to "LOCATION"))
-        assertThat(guest.json { it.path("type").asText() == "COMMAND_REJECTED" }
-            .path("data").path("code").asText()).isEqualTo("BUNDLE_004")
         val requestId = UUID.randomUUID().toString()
         val transaction = TransactionTemplate(transactionManager)
         val saved = transaction.execute {
@@ -451,7 +378,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
                 BundleLocationsRequest(listOf(
                     BundleLocationInput("kakao", "a", "애월", "제주", 0),
                     BundleLocationInput("kakao", "b", "한담", "제주", 1)
-                ), 0, UUID.fromString(token)), requestId)
+                ), 0), requestId)
             guest.assertNoEvent("LOCATION")
             value
         }!!
@@ -463,7 +390,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
             .containsExactly("a", "b")
         transaction.executeWithoutResult { tx ->
             locations.saveDraft(actor(fixture.owner), fixture.bunchId, fixture.bundleId,
-                BundleLocationsRequest(emptyList(), 1, UUID.fromString(token)), "rollback-location")
+                BundleLocationsRequest(emptyList(), 1), "rollback-location")
             tx.setRollbackOnly()
         }
         guest.assertNoEvent("LOCATION")
@@ -999,16 +926,15 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
 
     private fun subscribe(client: WireClient, fixture: Fixture) {
         client.subscribe(topic(fixture), "topic")
-        client.subscribe("/user/queue/bundle-leases", "leases")
         client.subscribe("/user/queue/bundle-activity", "activity")
         client.send(command(fixture, "activity"), mapOf("type" to "VIEW"))
         client.json { it.path("type").asText() == "ACTIVITY" && it.path("data").path("activity").asText() == "VIEW" }
         client.clear()
     }
 
-    private fun putTitle(fixture: Fixture, token: String, value: String, requestId: String, version: Long = 0): JsonNode {
+    private fun putTitle(fixture: Fixture, value: String, requestId: String, version: Long = 0): JsonNode {
         val body = mapper.writeValueAsString(mapOf(
-            "value" to value, "expectedVersion" to version, "mode" to "DRAFT", "leaseToken" to token
+            "value" to value, "expectedVersion" to version, "mode" to "DRAFT"
         ))
         val response = http.send(HttpRequest.newBuilder(URI(
             "http://localhost:$port/api/v1/bunches/${fixture.bunchId}/bundles/${fixture.bundleId}/title"

@@ -4,7 +4,7 @@
 개별 저장·코멘트 편집 계약보다 우선한다. 이슈 #124는 2026-11-10 재전달된
 [피드 시트](https://docs.google.com/spreadsheets/d/1ScziF7WoYLHRiC_UYJBkKsi0jL6KKQJD2TNDzW1QGfU/edit?gid=294136194#gid=294136194)의
 E19:K20(6.2.11·6.2.12), E23:K23(6.2.15)에 따라 내용 저장과 공개 범위 설정을 분리한다.
-초안의 lease·최초 발행 조건은 이 변경의 대상이 아니며 최초 발행 확장은 #107 소유다.
+초안 공동 편집·최초 발행 조건은 [번들 계약](bundle.md)을 따른다.
 
 ## 전체 저장
 
@@ -66,7 +66,7 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 
 기존 제목·날짜·사진 추가/삭제/이동 경로는 PUBLISHED에서 OWNER도
 409 `BUNDLE_002`로 거부한다. 참여자 추가/삭제·leave·comments/me도 발행 후 거부한다.
-이 경로들의 DRAFT lease·version·참여 권한은 유지한다.
+이 경로들의 DRAFT version·참여 권한은 유지한다. 구형 편집권 계약은 2026-11-14 결정으로 제거한다.
 
 ## 공개 범위 단독 저장 (#124)
 
@@ -77,7 +77,7 @@ clear하지 않고 보류 변경을 flush한 다음 대상만 refresh하여 다�
 ```
 
 `value`는 PUBLIC 또는 PRIVATE, `expectedVersion`은 최신 `visibilityVersion`이다.
-제목·사진·위치·날짜·참여자·코멘트·픽을 재전송하지 않는다. lease는 필요 없다.
+제목·사진·위치·날짜·참여자·코멘트·픽을 재전송하지 않는다. 현재 상태·권한·버전을 검증한다.
 `mode: DRAFT`의 기존 초안 참여자 권한은 유지하고, `PUBLISHED`는 현재 ACTIVE OWNER만 허용한다.
 발행 참여자였는지는 요구하지 않는다. 가입 완료·소속·경로·공통 피드 접근을 기존
 `BundleAccessService.lock`으로 재검사하고 번치→번들 잠금 획득 후 최신 상태·역할·버전을 확인한다.

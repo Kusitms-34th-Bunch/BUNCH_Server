@@ -2,7 +2,7 @@
 
 이슈 #27, DRAFT-17·BUNDLE-04·FEED-10. 2026-11-07 승인한 피드 원문
 6.2.3·6.2.12·6.3.1과 보완 결정을 따른다. 기존 장소 1개·검색 공급자 선행 계약을 대체한다.
-#107은 장소 ID 의도 처리와 사용자 lease 없는 저장을 추가한다. 아래 계약이 이전 lease 설명보다 우선한다.
+#107은 장소 ID 의도 처리와 비독점 공동 편집을 적용한다. 현재 구형 편집권 제거 계약은 [번들 API](bundle-api.md)를 따른다.
 2026-11-12 승인한 4.3.10 동시 편집 보완에 따라 의도 요청의 행 ID 보존·중복/정원 거부를 적용한다.
 사진·위치가 움직이는 과정의 실시간 공유는 후속이다. 이번에는 놓은 뒤 최종 위치 순서만 저장·전파한다.
 공개 접근은 [피드 공통 계약](feed-api.md), 초안 프로토콜은 [번들 API](bundle-api.md)를 재사용한다.
@@ -41,8 +41,7 @@
   읽기 트랜잭션은 REPEATABLE_READ로 버전과 장소 목록을 같은 스냅샷에서 읽는다.
   두 조회 사이에 일괄 편집이 커밋되어도 이전 버전과 새 장소를 섞어 반환하지 않는다.
 - `PUT`: **DRAFT 참여자만** 전체 목록을 교체한다. 삭제할 장소를 제외하고 전송하며 전체 삭제는 빈 목록이다.
-  `expectedVersion`으로 전체 목록의 덮어쓰기를 방지하며 사용자 lease는 요구하지 않는다.
-  기존 `leaseToken`은 선택 호환 필드로만 받고 검증하지 않는다. `X-Request-Id`는 선택 UUID다.
+  `expectedVersion`으로 전체 목록의 덮어쓰기를 방지한다. `X-Request-Id`는 선택 UUID다.
   PUBLISHED는 OWNER라도 이 경로로 저장할 수 없고 `BUNDLE_002`로 거부한다.
 
 ```json
@@ -50,8 +49,7 @@
   "locations": [
     {"provider": "kakao", "externalId": "123", "name": "애월 한담해변", "address": "제주시 애월읍", "position": 0}
   ],
-  "expectedVersion": 0,
-  "leaseToken": "17c66e40-4aae-4b1a-baa9-f2f75519d55a"
+  "expectedVersion": 0
 }
 ```
 
@@ -88,7 +86,7 @@
 
 `POST /api/v1/bunches/{bunchId}/bundles/{bundleId}/locations/intents`는 ACTIVE 초안 참여자만 호출한다.
 `BundleLocationIntent`는 `com.bunch.bundle.domain`의 독립 enum이다.
-`expectedVersion`·`leaseToken` 없이 서버가 번치→번들을 잠근 뒤 최신 목록에 적용한다.
+`expectedVersion` 없이 서버가 번치→번들을 잠근 뒤 최신 목록에 적용한다.
 `X-Request-Id`는 추적용 UUID이며 중복 실행 방지 키가 아니다.
 
 | intent | 입력 | 최신 목록 적용 |
@@ -164,8 +162,8 @@ LOCATION 이벤트를 발행하지 않는다. 동시 요청의 승자가 저장�
 
 ## 잠금·이벤트·발행본 연결
 
-초안 저장은 기존 번치→번들 DB 잠금 순서를 따른다. 사용자 lease의 보유·만료·토큰은
-위치 저장의 전제가 아니며 다른 참여자의 편집을 차단하지 않는다. 내부 DB 잠금으로 정원과 원자성을 보장한다.
+초안 저장은 기존 번치→번들 DB 잠금 순서를 따른다.
+비독점 presence는 다른 참여자의 편집을 차단하지 않으며 내부 DB 잠금으로 정원과 원자성을 보장한다.
 
 실제 장소·메타데이터·순서 변경은 locationVersion과 revision을 각각 한 번 증가시키며
 updatedAt과 편집자의 번치 활동을 갱신한다. 정규화 후 같은 요청은 버전·시간·이벤트를 변경하지 않는다.
@@ -208,13 +206,14 @@ G는 쓰기 잠금·`FeedAccessService.requireInteraction` 후 대상 장소 ID�
 
 ## V27·검증 범위
 
-V27은 bundles.location_version과 bundle_locations를 추가하고 lease target CHECK를 확장한다.
+적용된 V27은 bundles.location_version과 bundle_locations를 추가하고 당시 편집권 target CHECK를 확장했다.
+V7/V8/V27은 과거 스키마 이력으로 보존하며 현재 편집권 API나 런타임 정리 요구를 뜻하지 않는다.
 location의 bundle FK는 ON DELETE CASCADE다. position 0~2 CHECK와 `(bundle_id, position)` UNIQUE로
 최대 3개를 보장한다. 순서 swap 시 행 ID 보존을 위해 이 UNIQUE만 DEFERRABLE INITIALLY DEFERRED다.
 `(bundle_id, provider, external_id)` UNIQUE는 즉시 검사한다. 이름·주소는 grapheme 경계 보존을 위해
 TEXT로 저장하고 애플리케이션에서 상한을 검사한다. 적용된 마이그레이션은 수정하지 않는다.
 
-자동 검증 범위는 입력 경계·HTTP 오류 reason·권한·동시 저장·legacy version/lease 비의존·정원/중복 전체 거부·
+자동 검증 범위는 입력 경계·HTTP 오류 reason·권한·동시 저장·의도 요청의 legacy version 비의존·정원/중복 전체 거부·
 동일 행 연속/동시 교체·교체/삭제 양쪽 도착 순서·삭제 ID 출처·동시 삭제/이동·교체 후 이동·
 행 ID 보존·교체된 행의 삭제 이력 미생성·실제 핀 정리와 동기 listener 실패 롤백·
 실제 STOMP 커밋/롤백/재연결·기존 발행 조건·PostgreSQL migration·JPA validate다.

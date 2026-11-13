@@ -89,8 +89,6 @@ class BundleRealtimeAuthorizationInterceptor(
             if (activityType(message, "action") in setOf("TYPE", "BEGIN")) {
                 access.requireParticipant(memberId, bundle)
             }
-        } else if (parsed.command != BundleRealtimeCommand.ACTIVITY) {
-            access.requireParticipant(memberId, bundle)
         } else if (activityType(message) == BundleActivityType.COMMENT.name) {
             access.requireParticipant(memberId, bundle)
         }

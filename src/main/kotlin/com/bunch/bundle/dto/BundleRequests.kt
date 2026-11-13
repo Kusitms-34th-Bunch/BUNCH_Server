@@ -9,7 +9,6 @@ import com.fasterxml.jackson.annotation.JsonSetter
 import com.fasterxml.jackson.annotation.Nulls
 import java.time.LocalDate
 import jakarta.validation.constraints.Size
-import java.util.UUID
 
 data class CreateBundleRequest(
     @param:JsonSetter(nulls = Nulls.FAIL, contentNulls = Nulls.FAIL)
@@ -24,8 +23,7 @@ data class CreateBundleRequest(
 data class BundleTextRequest(
     val value: String,
     val expectedVersion: Long,
-    val mode: BundleStatus,
-    val leaseToken: UUID? = null
+    val mode: BundleStatus
 )
 
 data class BundleVisibilityRequest(
@@ -40,8 +38,7 @@ data class BundleVisibilityRequest(
 data class BundleDateRequest(
     val value: LocalDate?,
     val expectedVersion: Long,
-    val mode: BundleStatus,
-    val leaseToken: UUID? = null
+    val mode: BundleStatus
 )
 
 data class BundleLocationInput(
@@ -62,8 +59,7 @@ data class BundleLocationsRequest(
 
     @param:JsonProperty(value = "expectedVersion", required = true)
     @param:JsonSetter(nulls = Nulls.FAIL)
-    val expectedVersion: Long,
-    val leaseToken: UUID? = null
+    val expectedVersion: Long
 )
 
 data class BundleParticipantRequest(val memberId: Long)

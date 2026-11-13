@@ -14,10 +14,6 @@ enum class BundleEventType {
     PUBLISHED,
     EDITED,
     DELETED,
-    LEASES,
-    LEASE_GRANTED,
-    LEASE_HEARTBEAT,
-    LEASE_RELEASED,
     ACTIVITY,
     PRESENCE,
     COMMAND_REJECTED

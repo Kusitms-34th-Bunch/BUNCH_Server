@@ -193,7 +193,10 @@ STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
 TYPE로 제목·본인 코멘트의 실제 입력을 알리는 비독점 신호다.
 편집 상태는 내용 저장 권한·잠금이 아니며 내용 revision과 활동을 바꾸지 않는다.
 원격 내용을 받아도 편집할 수 있으며, 연결이 끊기면 읽기 전용으로 전환하고 재연결 때
-서버 snapshot을 다시 읽어 미전송 입력을 버린다. legacy lease는 전환 전 연결 정리용이며 현재 내용 저장에는 필요하지 않다.
+서버 snapshot을 다시 읽어 미전송 입력을 버린다.
+2026-11-14 결정으로 구형 편집권 API·토큰·전용 큐·snapshot의 leases를 제거했다.
+클라이언트는 편집권 획득 없이 현재 내용 저장 API와 비독점 presence를 사용한다.
+활동·presence 응답·명령 거절은 `/user/queue/bundle-activity`에서 받는다.
 최초 발행은 선택한 공개 범위와 최신 저장 내용을 한 트랜잭션으로 확정하며 실제 발행자를 기록한다.
 발행본 내용과 공개 범위는 별도 경로로 저장하고, 픽은 발행 후 고정한다.
 기존 적용 Flyway 이력은 보존하며, 새 번들·콕 마이그레이션은 선행 PR 순서대로 적용한다.
@@ -222,9 +225,8 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
 - V4→V5의 실제 PostgreSQL 백필·불일치 롤백·재실행, JPA validate, Photo·공동 업로더
   제약·소속 검증·공유 파일 보호·커밋 후 삭제를 검증한다. 사진함 fixture와 실제 API 연동은 구분한다.
-- 번들 REST의 상태·버전·멱등성·편집권 충돌과 STOMP의 두 연결 인증·구독·동일 member/session의
-  다른 connection 충돌·token 재발급·5초 heartbeat·15초 만료·실제 변경 이벤트·재연결
-  snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
+- 번들 REST의 상태·버전·멱등성과 STOMP의 두 연결 인증·구독·여러 연결의 비독점 작업,
+  presence 갱신·만료·실제 변경 이벤트·재연결 snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
   준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
 - 사진 픽은 실제 PostgreSQL에서 HTTP 정상·동일 상태 stale no-op·상태 변경 stale `BUNDLE_003`,
   동시 요청 직렬화, 응답 요약, false row의 ABA 방지, 사진·참여자 FK cascade, 발행 동결과
@@ -274,7 +276,7 @@ python3 deploy/monitoring/smoke_test.py
 | [피드 6장 색인](docs/specs/feed.md) | 승인 원문 24항목·구현 Spec 연결·앱 확인 범위 |
 | [피드 API](docs/specs/feed-api.md) | 두 구간 keyset·문맥 변경 409·카드 배치·공통 접근·운영 숨김 |
 | [좋아요](docs/specs/feed-likes.md) / [댓글](docs/specs/feed-comments.md) / [신고](docs/specs/feed-reports.md) | 번치 좋아요·개인 댓글/답글·삭제 자리·신고 한도·알림 |
-| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·lease·번치 공동 핀·출처 수명 |
+| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·동시 편집·번치 공동 핀·출처 수명 |
 | [광고](docs/specs/feed-ads.md) / [멤버 프로필](docs/specs/member-social-profile.md) | 요청별 랜덤·개인 숨김·참여 번치 프로필 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |

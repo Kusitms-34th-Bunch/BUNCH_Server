@@ -92,7 +92,6 @@ data class BundleSnapshot(
     val dateChips: List<LocalDate>,
     val publishBlockers: List<String>,
     val permissions: BundlePermissions,
-    val leases: List<LeaseState>,
     val createdAt: Instant,
     val updatedAt: Instant,
     val publishedAt: Instant?,

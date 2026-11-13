@@ -9,8 +9,8 @@ PHOTO:{bundlePhotoId}·LOCATION:{bundleLocationId}의 비독점 editing을 BEGIN
 editing과 typing은 내용 저장이나 잠금이 아니다.
 기존 [번들 API](bundle-api.md)의 인증 CONNECT·topic·사용자 queue·envelope를 재사용한다.
 단일 서버의 메모리 상태이며 DB 저장·이벤트 재생·Redis Pub/Sub는 없다.
-제목/날짜/장소/사진의 내용 저장은 presence나 legacy lease 획득 여부로 차단하지 않는다.
-기존 lease 명령은 이전 클라이언트 호환용으로 유지한다.
+내용 저장은 presence 상태로 차단하지 않으며 현재 인증·참여 권한과 DB 행 잠금으로 검증한다.
+2026-11-14 결정으로 구형 편집권 명령·토큰·전용 큐는 제거한다. 호환 경로는 제공하지 않는다.
 
 ## 인증과 명령
 
@@ -75,8 +75,8 @@ TYPE도 editing heartbeat를 대신하지 않으며, BEGIN은 typing의 3초 기
 기존 `/topic/bunches/{bunchId}/bundles/{bundleId}`에 전체 상태를 broadcast하고,
 명령을 보낸 연결은 기존 `/user/queue/bundle-activity`에서 같은 상태를 받는다.
 기존 `type / bunchId / bundleId / revision / requestId / data` envelope를 유지하며
-`type=PRESENCE`, `revision=null`, `requestId=null`이다. 명령 거절은 기존
-`/user/queue/bundle-leases`의 COMMAND_REJECTED 경로를 유지한다.
+`type=PRESENCE`, `revision=null`, `requestId=null`이다. 명령 거절도
+`/user/queue/bundle-activity`에서 `COMMAND_REJECTED`로 받는다.
 
 인증 REST `GET /api/v1/bunches/{bunchId}/bundles/{bundleId}/presence`는 같은 data를
 `success/data/error`로 반환한다. 조회는 화면 입장으로 기록되지 않는다.

@@ -44,7 +44,6 @@ enum class ErrorCode(
     BUNDLE_LIMIT_EXCEEDED("BUNDLE_001", "error.bundle_limit_exceeded", 409),
     BUNDLE_STATE_CONFLICT("BUNDLE_002", "error.bundle_state_conflict", 409),
     BUNDLE_VERSION_CONFLICT("BUNDLE_003", "error.bundle_version_conflict", 409),
-    BUNDLE_LEASE_CONFLICT("BUNDLE_004", "error.bundle_lease_conflict", 409),
     BUNDLE_PUBLISH_BLOCKED("BUNDLE_005", "error.bundle_publish_blocked", 409),
     BUNDLE_PHOTO_CONFLICT("BUNDLE_006", "error.bundle_photo_conflict", 409),
     PHOTO_BUNCH_LIMIT_EXCEEDED("PHOTO_001", "error.photo_bunch_limit_exceeded", 409),

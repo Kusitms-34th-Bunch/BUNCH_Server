@@ -24,7 +24,7 @@ Maven JAR에는 macOS arm64/x64와 Linux GNU arm64/x64 바이너리가 포함된
 {"state": "<Automerge.save 결과의 base64>"}
 ```
 
-가입 완료·활성 번치 소속·DRAFT 참여자만 가능하다. mode/lease/version을 보내지 않는다.
+가입 완료·활성 번치 소속·DRAFT 참여자만 가능하다. mode/version을 보내지 않는다.
 현재 상태와 incoming 전체 저장 문서를 Automerge로 병합하고, 제목·바이너리·버전·revision을
 한 트랜잭션에 저장한다. `X-Request-Id`는 선택 UUID이며 기존 envelope로 응답한다.
 
@@ -45,7 +45,7 @@ TITLE 이벤트는 value/version 및 title/titleVersion/titleCrdtState/titleTooL
 
 raw CRDT의 문자 위치를 유지한다. 표시 제목만 NFC·trim하며 40자 초과 병합을 자르지 않는다.
 발행 blocker TITLE_TOO_LONG으로 업로드를 막고 40자 이하로 수정하면 해제한다.
-기존 `PUT /title`은 전환용이며 최대40자·expectedVersion을 검사하고 lease는 검사하지 않는다.
+기존 `PUT /title`은 전환용이며 최대40자·expectedVersion을 검사한다.
 저장 시 같은 TEXT를 splice하여 기존 바이너리도 갱신한다.
 
 ## 클라이언트 전환

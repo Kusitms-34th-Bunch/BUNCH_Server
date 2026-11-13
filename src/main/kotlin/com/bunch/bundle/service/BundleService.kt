@@ -50,7 +50,6 @@ class BundleService(
     private val memberships: BunchMembershipRepository,
     private val photoService: PhotoService,
     private val originalPhotos: PhotoRepository,
-    private val leases: BundleLeaseService,
     private val locations: BundleLocationService,
     private val images: ImageAssetService,
     private val events: ApplicationEventPublisher,
@@ -410,7 +409,6 @@ class BundleService(
         photos.deleteAll(removed)
         photos.flush()
         removed.forEach {
-            leases.clearPhoto(id, it.id)
             images.releaseAfterCommit(it.imageAsset.id)
         }
         val reselected = kept.filter { it.photoId in reselectedIds }
@@ -495,7 +493,6 @@ class BundleService(
         bundle.publishedAt = clock.instant()
         bundle.publishedBy = actor.memberId
         pushJobs.cancelCommentRemindersForBundle(id)
-        leases.clear(id)
         changed(bundle, key.toString(), BundleEventType.PUBLISHED, content(bundle))
         remember(actor.memberId, bundle, operation, key, fingerprint)
         bundles.flush()
@@ -602,7 +599,6 @@ class BundleService(
                 // Source metadata is part of snapshots; retained image and order remain unchanged.
                 changed(bundle, UUID.randomUUID().toString(), BundleEventType.PHOTOS, photoChanges(bundle))
             } else {
-                rows.forEach { leases.clearPhoto(bundleId, it.id) }
                 photoOrder.beforeRemoveLocked(bundle, rows)
                 photos.deleteAll(rows)
                 photos.flush()
@@ -639,7 +635,6 @@ class BundleService(
         comments.findByBundleIdAndMemberId(bundle.id, memberId)?.let(comments::delete)
         participants.flush()
         comments.flush()
-        leases.clear(bundle.id, memberId)
         changed(
             bundle,
             requestId,
@@ -656,7 +651,6 @@ class BundleService(
     private fun deleteInternal(bundle: Bundle, requestId: String) {
         pushJobs.cancelCommentRemindersForBundle(bundle.id)
         val assets = photoRows(bundle.id).map { it.imageAsset.id }.distinct()
-        leases.clear(bundle.id)
         bundle.revision++
         events.publishEvent(BundleChangedEvent(
             bunchId = bundle.bunchId,
@@ -793,7 +787,7 @@ class BundleService(
             people.comments,
             dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
             access.permissions(userId, bundle),
-            leases.publicStates(bundle.id), bundle.createdAt, bundle.updatedAt, bundle.publishedAt,
+            bundle.createdAt, bundle.updatedAt, bundle.publishedAt,
             bundle.locationVersion, locations.listForBundles(listOf(bundle.id)).getValue(bundle.id),
             social.likeCount, social.likedByCurrentBunch, count,
             bundle.publishedBy, publisherNickname(bundle),

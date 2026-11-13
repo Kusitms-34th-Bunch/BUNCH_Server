@@ -54,8 +54,7 @@ class BundleLocationService(
     ): BundleLocationState {
         val bundle = access.lock(actor.memberId, bunchId, bundleId)
         access.requireParticipant(actor.memberId, bundle)
-        // The legacy whole-list request keeps leaseToken for wire compatibility, but this
-        // fallback is protected by the locked bundle and expectedVersion instead of a lease.
+        // Whole-list saves validate the field version under the bundle row lock.
         if (request.expectedVersion != bundle.locationVersion) {
             fail(ErrorCode.BUNDLE_VERSION_CONFLICT, mapOf(
                 "locations" to listForBundles(listOf(bundle.id)).getValue(bundle.id),
