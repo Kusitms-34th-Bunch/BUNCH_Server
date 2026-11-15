@@ -1,11 +1,14 @@
 package com.bunch.photo
 
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.photo.service.PhotoChangedEvent
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -174,14 +177,16 @@ class PhotoDateChangeIntegrationTest : PhotoHttpTestSupport() {
         assertThat(row(together).date).isEqualTo("2026-10-03")
     }
 
-    @Test
-    fun `the administrator changes photos of other members and mixed selections`() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MembershipRole::class, names = ["OWNER", "CO_OWNER"])
+    fun `an administrator changes photos of other members and mixed selections`(role: MembershipRole) {
         val fixture = fixture()
+        val administrator = administrator(fixture.owner, fixture.bunchId, role)
         val theirs = photo(fixture.bunchId, "2026-09-28", uploaders = listOf(fixture.guest))
         val together = photo(fixture.bunchId, "2026-09-29", uploaders = listOf(fixture.guest, fixture.third))
-        val own = photo(fixture.bunchId, "2026-09-30", uploaders = listOf(fixture.owner))
+        val own = photo(fixture.bunchId, "2026-09-30", uploaders = listOf(administrator))
 
-        setDate(fixture.owner, fixture.bunchId, listOf(theirs, together, own), "2026-10-03")
+        setDate(administrator, fixture.bunchId, listOf(theirs, together, own), "2026-10-03")
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.updatedCount").value(3))
 

@@ -1,6 +1,7 @@
 package com.bunch.photo
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -79,6 +80,18 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
     protected fun joined(ownerId: Long, bunchId: Long): Long {
         val memberId = member()
         join(memberId, issue(ownerId, bunchId))
+        return memberId
+    }
+
+    /** The main administrator for [MembershipRole.OWNER], or a new member made the bunch's co-administrator. */
+    protected fun administrator(ownerId: Long, bunchId: Long, role: MembershipRole): Long {
+        if (role == MembershipRole.OWNER) return ownerId
+        val memberId = joined(ownerId, bunchId)
+        jdbc.update(
+            "UPDATE bunch_memberships SET role = 'CO_OWNER' WHERE bunch_id = ? AND member_id = ?",
+            bunchId,
+            memberId
+        )
         return memberId
     }
 
