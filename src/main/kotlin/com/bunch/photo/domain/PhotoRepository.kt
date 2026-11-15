@@ -100,6 +100,14 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     )
     fun findUploaderProfiles(@Param("photoId") photoId: Long): List<PhotoUploaderProfile>
 
+    // Which of the photos a draft bundle uses, for the delete confirmation (3.3.5, 3.5.2). Only a draft counts: a
+    // published bundle keeps its own copy of the photo, so deleting from the photo box does not change it.
+    @Query(
+        "select distinct bp.photoId from BundlePhoto bp, Bundle b where bp.photoId in :photoIds " +
+            "and b.id = bp.bundleId and b.status = com.bunch.bundle.domain.BundleStatus.DRAFT"
+    )
+    fun findDraftBundlePhotoIds(@Param("photoIds") photoIds: Collection<Long>): List<Long>
+
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 

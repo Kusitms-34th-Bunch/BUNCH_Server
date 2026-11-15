@@ -260,7 +260,9 @@ class PhotoService(
             photos.findListPageByUploader(bunchId, uploaderId, position, limit)
         }
         val page = rows.take(size)
-        val uploaderIds = uploaderIdsOf(page.map { it.id })
+        val pageIds = page.map { it.id }
+        val uploaderIds = uploaderIdsOf(pageIds)
+        val inDraft = draftBundlePhotoIdsOf(pageIds)
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) {
             PhotoListCursor(last.capturedDate, last.capturedTime, last.id).encode()
@@ -276,7 +278,8 @@ class PhotoService(
                     thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
                     capturedDate = it.capturedDate,
                     capturedTime = it.capturedTime,
-                    uploaderIds = uploaderIds[it.id].orEmpty()
+                    uploaderIds = uploaderIds[it.id].orEmpty(),
+                    usedInDraftBundle = it.id in inDraft
                 )
             },
             nextCursor = nextCursor
@@ -299,7 +302,9 @@ class PhotoService(
             photos.findUndatedPageByUploader(bunchId, uploaderId, position, limit)
         }
         val page = rows.take(size)
-        val uploaderIds = uploaderIdsOf(page.map { it.id })
+        val pageIds = page.map { it.id }
+        val uploaderIds = uploaderIdsOf(pageIds)
+        val inDraft = draftBundlePhotoIdsOf(pageIds)
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) PhotoUndatedCursor(last.id).encode() else null
         // The "N" of the area follows the member filter (3.1.2) and not the page.
@@ -314,7 +319,8 @@ class PhotoService(
                 PhotoUndatedItem(
                     photoId = it.id,
                     thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
-                    uploaderIds = uploaderIds[it.id].orEmpty()
+                    uploaderIds = uploaderIds[it.id].orEmpty(),
+                    usedInDraftBundle = it.id in inDraft
                 )
             },
             nextCursor = nextCursor
@@ -331,7 +337,8 @@ class PhotoService(
             imageUrl = photo.imageUrl,
             capturedDate = photo.capturedDate,
             uploaders = photos.findUploaderProfiles(photoId)
-                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) }
+                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) },
+            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty()
         )
     }
 
@@ -350,6 +357,11 @@ class PhotoService(
         } else {
             photos.findUploaderIdsByPhotoIds(photoIds).groupBy({ it.photoId }, { it.memberId })
         }
+
+    // The photos among these that a draft bundle uses, from one query for the whole page. The app picks the delete
+    // confirmation text from it (3.3.5): deleting such a photo also takes it out of the draft.
+    private fun draftBundlePhotoIdsOf(photoIds: List<Long>): Set<Long> =
+        if (photoIds.isEmpty()) emptySet() else photos.findDraftBundlePhotoIds(photoIds).toSet()
 
     private fun requireMember(userId: Long, bunchId: Long) {
         members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
