@@ -30,12 +30,19 @@ class JwtAuthenticationFilter(
             ?.substring(7)
         if (token != null) {
             val authentication = try {
-                if (
-                    tokenProvider.validateToken(token) &&
-                        tokenProvider.isAccessToken(token)
-                ) {
-                    tokenProvider.getAuthentication(token)
-                } else null
+                when {
+                    tokenProvider.validateToken(token) && tokenProvider.isAccessToken(token) ->
+                        tokenProvider.getAuthentication(token)
+                    tokenProvider.isWsToken(token) -> {
+                        SecurityContextHolder.clearContext()
+                        val error = ErrorCode.UNAUTHORIZED
+                        response.status = error.status
+                        response.contentType = "application/json;charset=UTF-8"
+                        objectMapper.writeValue(response.writer, ApiResponse.fail(error.code, error.messageKey))
+                        return
+                    }
+                    else -> null
+                }
             } catch (_: RuntimeException) {
                 null
             }

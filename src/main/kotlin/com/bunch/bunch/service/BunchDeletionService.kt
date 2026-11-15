@@ -13,7 +13,6 @@ import com.bunch.bunch.dto.BunchDeletionRequest
 import com.bunch.bunch.dto.BunchDepartureResponse
 import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleRepository
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleRealtimeSessionRegistry
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -43,7 +42,6 @@ class BunchDeletionService(
     private val accessNotices: BunchAccessNoticeService,
     private val bundles: BundleRepository,
     private val bundlePhotos: BundlePhotoRepository,
-    private val leases: BundleLeaseService,
     private val photoService: PhotoService,
     private val imageAssets: ImageAssetService,
     private val pushJobs: PushJobWriter,
@@ -104,7 +102,7 @@ class BunchDeletionService(
             accessNotices.recordDeletion(bunch, recipient.membership, now)
         }
 
-        clearBundleLeases(bundleIds)
+        bundleIds.forEach { bundles.findLocked(it) }
         bundleIds.forEach(pushJobs::cancelCommentRemindersForBundle)
         photoUploaderMemberIds.forEach { memberId ->
             photoService.removeAllUploaders(bunchId, memberId)
@@ -221,12 +219,6 @@ class BunchDeletionService(
     )
         .setParameter("bunchId", bunchId)
         .resultList
-
-    private fun clearBundleLeases(bundleIds: List<Long>) {
-        bundleIds.forEach { bundleId ->
-            if (bundles.findLocked(bundleId) != null) leases.clear(bundleId)
-        }
-    }
 
     private fun requireNoPhotosRemain(bunchId: Long) {
         val remaining = entityManager.createQuery(

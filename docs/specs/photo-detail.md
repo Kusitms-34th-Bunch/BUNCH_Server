@@ -45,7 +45,8 @@ GET /api/v1/bunches/{bunchId}/photos/undated
       {
         "photoId": 5021,
         "thumbnailUrl": "https://res.cloudinary.com/demo/image/upload/c_fill,w_300,h_300/photos/a.jpg",
-        "uploaderIds": [12, 15]
+        "uploaderIds": [12, 15],
+        "usedInDraftBundle": false
       }
     ],
     "nextCursor": "dXw1MDIx"
@@ -60,6 +61,7 @@ GET /api/v1/bunches/{bunchId}/photos/undated
 | `photos[].photoId` | 사진 ID |
 | `photos[].thumbnailUrl` | 정사각형 썸네일 URL(300px). 별도 배지는 붙이지 않는다(3.1.4) |
 | `photos[].uploaderIds` | 올린 멤버 ID 목록. 함께 올린 사진은 여러 명이며 올린 순서다. 닉네임·프로필은 `GET /api/v1/bunches/{bunchId}/members`(#43)를 쓴다 |
+| `photos[].usedInDraftBundle` | 작성 중인(초안) 번들에 들어 있는 사진이면 `true`. 발행된 번들에만 쓰였거나 안 쓰였으면 `false`. 선택 모드에서 삭제할 때 확인 창의 문구를 고르는 데 쓴다(3.1.5 상세 4, 3.3.5) |
 | `nextCursor` | 다음 페이지 시작 위치. 마지막 페이지면 `null` |
 
 날짜가 없는 사진만 나오므로 사진함 목록과 달리 `capturedDate`·`capturedTime`이 없다.
@@ -120,7 +122,8 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
         "nickname": "멤버 B",
         "imageUrl": null
       }
-    ]
+    ],
+    "usedInDraftBundle": true
   },
   "error": null
 }
@@ -135,6 +138,7 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
 | `uploaders[].memberId` | 멤버 ID |
 | `uploaders[].nickname` | 멤버의 **현재** 닉네임. 프로필 배지는 현재 프로필을 따른다(3.5.1 로직 2) |
 | `uploaders[].imageUrl` | 멤버의 **현재** 프로필 이미지 또는 `null`. `null`이면 앱이 기본 프로필 이미지를 쓴다(3.5.1 상세 3) |
+| `usedInDraftBundle` | 작성 중인(초안) 번들에 들어 있는 사진이면 `true`. 발행된 번들에만 쓰였거나 안 쓰였으면 `false`. 앱이 「삭제」 확인 창의 문구를 고르는 데 쓴다(3.5.2, 3.3.5). 사진이 사라지면 서버가 초안에서도 빼므로 삭제 전에 따로 확인하는 API는 없다 |
 
 ### 규칙
 
@@ -193,7 +197,8 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
 - 멤버 필터: 함께 올린 사진이 올린 멤버 모두에게 보이고, `uploaderIds`는 필터와 무관하게 모든 올린 멤버를 담는다.
   번치 멤버가 아닌 `memberId`는 400이다.
 - `totalCount`: 필터를 적용한 미확인 수이고 `size`와 무관하다. `uploaderIds` 순서, 썸네일 주소, 빈 목록도 확인한다.
-- 상세 응답: `photoId`, `imageUrl`, `capturedDate`, `uploaders[]`만 있고 장소·촬영 시각·업로드 날짜·위치는 없다.
+- 상세 응답: `photoId`, `imageUrl`, `capturedDate`, `uploaders[]`, `usedInDraftBundle`만 있고 장소·촬영 시각·업로드 날짜·위치는 없다.
+  `usedInDraftBundle`은 초안에 든 사진만 `true`이고 발행된 번들에만 쓰인 사진은 `false`다. 미확인 목록 항목도 같다.
   날짜가 없으면 `capturedDate`가 `null`이다.
 - 상세 올린 멤버: 올린 순서, 현재 닉네임, 프로필 이미지가 없으면 `null`, 프로필 이미지를 바꾸면 바뀐 값이 나온다.
 - 상세 404: 없는 사진, 다른 번치의 사진, `READY`가 아닌 사진.

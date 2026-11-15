@@ -9,5 +9,6 @@ data class PhotoUndatedResponse(
 data class PhotoUndatedItem(
     val photoId: Long,
     val thumbnailUrl: String,
-    val uploaderIds: List<Long>
+    val uploaderIds: List<Long>,
+    val usedInDraftBundle: Boolean
 )
