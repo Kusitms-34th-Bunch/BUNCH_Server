@@ -16,7 +16,6 @@ import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.dto.PublishBundleRequest
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.image.domain.ImageAsset
@@ -52,9 +51,6 @@ import java.util.UUID
 class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var bundleService: BundleService
-
-    @Autowired
-    private lateinit var bundleLeases: BundleLeaseService
 
     @Autowired
     private lateinit var bunchRepository: BunchRepository
@@ -96,7 +92,6 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     @AfterEach
     fun cleanBundleReferencesBeforeBunchSupport() {
         allowNotificationWrites()
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -110,25 +105,28 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `creation notifies photo upload participants and create replay adds no notification`() {
+    fun `creation notifies selected non uploaders excluding unselected uploaders and replay adds no notification`() {
         val owner = member()
         val firstUploader = member()
         val secondUploader = member()
         val outsider = member()
-        val bunchId = bunchWithMembers(owner, firstUploader, secondUploader)
+        val selected = member()
+        val bunchId = bunchWithMembers(owner, firstUploader, secondUploader, selected)
         val firstPhoto = photo(bunchId, listOf(firstUploader))
         val secondPhoto = photo(bunchId, listOf(secondUploader, outsider))
         val key = UUID.randomUUID()
-        val request = CreateBundleRequest(listOf(firstPhoto.id, secondPhoto.id))
+        val request = CreateBundleRequest(
+            listOf(firstPhoto.id, secondPhoto.id), participantMemberIds = listOf(firstUploader, selected)
+        )
 
         val created = bundleService.create(actor(owner), bunchId, key, request)
 
         assertThat(created.participants.map { it.memberId })
-            .containsExactlyInAnyOrder(owner, firstUploader, secondUploader)
+            .containsExactlyInAnyOrder(owner, firstUploader, selected)
         val firstNotifications = ofType(bunchId, NotificationType.DRAFT_PARTICIPANT_ADDED)
         assertThat(firstNotifications.map { it.recipientMemberId })
-            .containsExactlyInAnyOrder(firstUploader, secondUploader)
-        assertThat(firstNotifications.map { it.recipientMemberId }).doesNotContain(owner, outsider)
+            .containsExactlyInAnyOrder(firstUploader, selected)
+        assertThat(firstNotifications.map { it.recipientMemberId }).doesNotContain(owner, outsider, secondUploader)
 
         val replay = bundleService.create(actor(owner), bunchId, key, request)
 
@@ -285,9 +283,9 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         val edited = bundleService.editPublished(
             actor(owner), bunchId, published.id,
             EditPublishedBundleRequest(
-                published.revision, "published edit", Visibility.PUBLIC, published.date,
-                published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id, caption = it.caption) } +
-                    PublishedBundlePhotoInput(photoId = publishedAddition.id, caption = ""),
+                published.revision, "published edit", published.date,
+                published.photos.map { PublishedBundlePhotoInput(bundlePhotoId = it.id) } +
+                    PublishedBundlePhotoInput(photoId = publishedAddition.id),
                 emptyList()
             ), "published-save"
         )
@@ -418,7 +416,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, listOf(guest))
         val createKey = UUID.randomUUID()
-        val createRequest = CreateBundleRequest(listOf(source.id))
+        val createRequest = CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(guest))
 
         rejectNotificationWrites()
         assertThatThrownBy {
@@ -476,7 +474,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         writeComment(owner, bunchId, draft.id, "owner comment", "rollback-owner-comment")
 
         val guestCommentVersion = bundleService.get(owner, bunchId, draft.id)
-            .comments.first { it.memberId == guest }.version
+            .comments.firstOrNull { it.memberId == guest }?.version ?: 0
         val guestCommentRequest = BundleTextRequest(
             "guest comment",
             guestCommentVersion,
@@ -493,8 +491,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
                 "rollback-guest-comment"
             )
         }.isNotNull
-        assertThat(bundleService.get(owner, bunchId, draft.id).comments.first { it.memberId == guest }.content)
-            .isEmpty()
+        assertThat(bundleService.get(owner, bunchId, draft.id).comments.none { it.memberId == guest }).isTrue()
         assertThat(notificationFingerprint(notificationsFor(bunchId)))
             .containsExactlyElementsOf(beforeCommentFailure)
 
@@ -539,13 +536,16 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
             .containsExactly(guest)
     }
 
-    private fun createDraft(owner: Long, bunchId: Long, source: Photo): BundleSnapshot =
-        bundleService.create(
-            actor(owner),
-            bunchId,
-            UUID.randomUUID(),
-            CreateBundleRequest(listOf(source.id))
+    private fun createDraft(owner: Long, bunchId: Long, source: Photo): BundleSnapshot {
+        val selected = jdbc.queryForList(
+            "SELECT member_id FROM bunch_memberships WHERE bunch_id = ? AND status = 'ACTIVE' ORDER BY id",
+            Long::class.java, bunchId
+        ).first { it != owner }
+        return bundleService.create(
+            actor(owner), bunchId, UUID.randomUUID(),
+            CreateBundleRequest(listOf(source.id), participantMemberIds = listOf(selected))
         )
+    }
 
     private fun makeReady(
         owner: Long,
@@ -591,18 +591,11 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
 
     private fun writeTitle(owner: Long, bunchId: Long, bundleId: Long, value: String, label: String) {
         val current = bundleService.get(owner, bunchId, bundleId)
-        val lease = bundleLeases.acquire(
-            actor(owner),
-            bunchId,
-            bundleId,
-            "TITLE",
-            "$label-${UUID.randomUUID()}"
-        )
         bundleService.title(
             actor(owner),
             bunchId,
             bundleId,
-            BundleTextRequest(value, current.titleVersion, BundleStatus.DRAFT, lease.token),
+            BundleTextRequest(value, current.titleVersion, BundleStatus.DRAFT),
             label
         )
     }

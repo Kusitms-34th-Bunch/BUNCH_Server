@@ -9,8 +9,8 @@ import com.bunch.feed.dto.AdvertisementResponse
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.MemberRepository
-import com.bunch.place.dto.PinnedPlaceResponse
-import com.bunch.place.service.PinnedPlaceService
+import com.bunch.kok.dto.KokResponse
+import com.bunch.kok.service.KokService
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -23,7 +23,7 @@ class AdvertisementService(
     private val bunches: BunchRepository,
     private val entityManager: EntityManager,
     private val selector: AdvertisementSelector,
-    private val pins: PinnedPlaceService
+    private val pins: KokService
 ) {
     @Transactional(readOnly = true)
     fun selectForFeed(
@@ -59,7 +59,7 @@ class AdvertisementService(
     }
 
     @Transactional
-    fun pin(userId: Long, advertisementId: Long): PinnedPlaceResponse {
+    fun pin(userId: Long, advertisementId: Long): KokResponse {
         positive(advertisementId)
         // Lock in member -> current bunch -> advertisement order; G reenters the first two locks.
         lockMember(userId)

@@ -138,7 +138,7 @@ class FeedService(
         return bundles.associate { bundle ->
             val profile = bunches.getValue(bundle.bunchId)
             val images = photos[bundle.id].orEmpty().map {
-                FeedPhoto(it.id, it.imageAsset.url, it.position, it.caption)
+                FeedPhoto(it.id, it.imageAsset.url, it.position)
             }
             val reactions = likeCounts.getValue(bundle.id)
             bundle.id to FeedBundleCard(

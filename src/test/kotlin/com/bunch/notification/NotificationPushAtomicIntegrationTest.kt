@@ -64,7 +64,6 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM push_jobs")
         jdbc.update("DELETE FROM push_devices")
         jdbc.update("DELETE FROM push_preferences")
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -212,7 +211,7 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
             BundleActor(owner, "atomic-owner"),
             bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(photo(bunchId, guest)))
+            CreateBundleRequest(listOf(photo(bunchId, guest)), participantMemberIds = listOf(guest))
         )
         val firstKey = UUID.randomUUID()
         val firstChange = BundlePhotoChangesRequest(

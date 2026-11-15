@@ -84,7 +84,6 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanPhotoDeleteData() {
         // BunchIntegrationSupport removes bunches and members afterwards, so clear what references them first.
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -212,14 +211,14 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
             BundleActor(fixture.owner, "session-${fixture.owner}"),
             fixture.bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(kept.id, removed.id))
+            CreateBundleRequest(listOf(kept.id, removed.id), participantMemberIds = listOf(fixture.guest))
         )
         val onePhotoSource = photo(fixture.bunchId, listOf(fixture.owner))
         val onePhotoDraft = bundleService.create(
             BundleActor(fixture.owner, "session-${fixture.owner}"),
             fixture.bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(listOf(onePhotoSource.id))
+            CreateBundleRequest(listOf(onePhotoSource.id), participantMemberIds = listOf(fixture.guest))
         )
 
         delete(fixture.owner, fixture.bunchId, listOf(removed.id, onePhotoSource.id))

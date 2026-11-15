@@ -3,13 +3,12 @@ package com.bunch.bundle.service
 object BundleRealtimeDestinations {
     const val TOPIC_PREFIX = "/topic"
     const val USER_PREFIX = "/user"
-    const val LEASE_QUEUE = "/user/queue/bundle-leases"
     const val ACTIVITY_QUEUE = "/user/queue/bundle-activity"
 
     private val topicPattern = Regex("^/topic/bunches/([1-9][0-9]*)/bundles/([1-9][0-9]*)$")
     private val commandPattern = Regex(
         "^/app/bunches/([1-9][0-9]*)/bundles/([1-9][0-9]*)/" +
-            "(lease/acquire|lease/heartbeat|lease/release|activity)$"
+            "(activity|presence)$"
     )
 
     fun topic(bunchId: Long, bundleId: Long): String =
@@ -30,10 +29,8 @@ object BundleRealtimeDestinations {
         if (destination == null) return null
         val match = commandPattern.matchEntire(destination) ?: return null
         val command = when (match.groupValues[3]) {
-            "lease/acquire" -> BundleRealtimeCommand.ACQUIRE
-            "lease/heartbeat" -> BundleRealtimeCommand.HEARTBEAT
-            "lease/release" -> BundleRealtimeCommand.RELEASE
             "activity" -> BundleRealtimeCommand.ACTIVITY
+            "presence" -> BundleRealtimeCommand.PRESENCE
             else -> return null
         }
         return BundleRealtimeCommandDestination(
@@ -44,7 +41,7 @@ object BundleRealtimeDestinations {
     }
 
     fun isPrivateSubscription(destination: String?): Boolean =
-        destination == LEASE_QUEUE || destination == ACTIVITY_QUEUE
+        destination == ACTIVITY_QUEUE
 
     fun isPrivateDelivery(destination: String?, rawDestination: String): Boolean {
         if (destination == null) return false

@@ -4,12 +4,10 @@ import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.BundleStatus
-import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleDateRequest
 import com.bunch.bundle.dto.BundleParticipantRequest
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.PublishBundleRequest
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -38,6 +36,7 @@ import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.LocalDate
@@ -61,9 +60,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     private lateinit var sessions: RefreshTokenRepository
 
     @Autowired
-    private lateinit var leaseService: BundleLeaseService
-
-    @Autowired
     private lateinit var bunchRepository: BunchRepository
 
     @Autowired
@@ -85,7 +81,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         jdbc.execute("DROP TRIGGER IF EXISTS bundle_test_reject_participant ON bundle_participants")
         jdbc.execute("DROP TRIGGER IF EXISTS bundle_test_reject_photo ON bundle_photos")
         jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -101,9 +96,52 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `bundle snapshots omit legacy edit leases`() {
+        val fixture = fixture(photoCount = 1)
+        val created = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
+        val saved = detail(fixture.owner, fixture.bunchId, created.path("id").asLong())
+
+        assertThat(created.has("leases")).isFalse()
+        assertThat(saved.has("leases")).isFalse()
+    }
+
+    @Test
+    fun `title CRDT accepts authenticated base64 state and rejects malformed binary`() {
+        val f = fixture(photoCount = 1)
+        val draft = createDraft(f.owner, f.bunchId, f.photoIds.single())
+        val id = draft.path("id").asLong()
+        val state = java.util.Base64.getDecoder().decode(draft.path("titleCrdtState").asText())
+        val document = org.automerge.Document.load(state)
+        val changed = try {
+            val text = (document.get(org.automerge.ObjectId.ROOT, "title").get() as org.automerge.AmValue.Text).id
+            document.startTransaction().use {
+                it.spliceText(text, 0, 0, "공동 제목")
+                it.commit()
+            }
+            document.save()
+        } finally {
+            document.free()
+        }
+        val path = "/api/v1/bunches/${f.bunchId}/bundles/$id/title/crdt"
+        mvc.perform(patch(path)
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(mapOf("state" to changed))))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.title").value("공동 제목"))
+            .andExpect(jsonPath("$.data.titleTooLong").value(false))
+            .andExpect(jsonPath("$.data.titleCrdtState").isString)
+        mvc.perform(patch(path)
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"state\":\"AA==\"}"))
+            .expectError(ErrorCode.INVALID_INPUT)
+    }
+
+    @Test
     fun `create validates headers malformed JSON and idempotency fingerprints`() {
         val fixture = fixture(photoCount = 2)
-        val body = createBody(listOf(fixture.photoIds.first()))
+        val body = createBody(listOf(fixture.photoIds.first()), listOf(fixture.participant.memberId))
 
         createRequest(fixture.owner, fixture.bunchId, body, idempotencyKey = null)
             .expectError(ErrorCode.INVALID_INPUT)
@@ -122,7 +160,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         createRequest(
             fixture.owner,
             fixture.bunchId,
-            createBody(listOf(fixture.photoIds[1])),
+            createBody(listOf(fixture.photoIds[1]), listOf(fixture.participant.memberId)),
             idempotencyKey = key
         ).expectError(ErrorCode.IDEMPOTENCY_CONFLICT)
 
@@ -140,6 +178,99 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
                 fixture.bunchId
             )
         ).isEqualTo(1L)
+    }
+
+    @Test
+    fun `photo picker accepts explicit reselection order and preserves existing row IDs over HTTP`() {
+        val f = fixture(photoCount = 3)
+        val created = createRequest(
+            f.owner, f.bunchId, createBody(f.photoIds, listOf(f.participant.memberId)), UUID.randomUUID().toString()
+        ).andExpect(status().isOk).andReturn().data()
+        val id = created.path("id").asLong()
+        val originalRow = created.path("photos")[0].path("id").asLong()
+
+        mvc.perform(put("${bundlePath(f.bunchId, id)}/photos/$originalRow/pick")
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"picked":true,"expectedVersion":0}"""))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.count").value(1))
+
+        mvc.perform(post("${bundlePath(f.bunchId, id)}/photos/changes")
+            .header(HttpHeaders.AUTHORIZATION, bearer(f.owner))
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsBytes(mapOf(
+                "addPhotoIds" to listOf(f.photoIds[0]),
+                "reselectedPhotoIds" to listOf(f.photoIds[0]),
+                "mode" to "DRAFT"
+            ))))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.photos[0].photoId").value(f.photoIds[1]))
+            .andExpect(jsonPath("$.data.photos[1].photoId").value(f.photoIds[2]))
+            .andExpect(jsonPath("$.data.photos[2].photoId").value(f.photoIds[0]))
+            .andExpect(jsonPath("$.data.photos[2].id").value(originalRow))
+            .andExpect(jsonPath("$.data.photos[2].picks.count").value(1))
+            .andExpect(jsonPath("$.data.photos[2].picks.pickedByMe").value(true))
+    }
+
+    @Test
+    fun `creation selects a non uploader and validates explicit participant input`() {
+        val fixture = fixture(photoCount = 1)
+        val selected = account()
+        join(selected.memberId, issue(fixture.owner.memberId, fixture.bunchId))
+        val photoIds = fixture.photoIds
+        val key = UUID.randomUUID().toString()
+        val body = createBody(photoIds, listOf(selected.memberId))
+        createRequest(fixture.owner, fixture.bunchId, body, key)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.participants.length()").value(2))
+            .andExpect(jsonPath("$.data.participants[0].memberId").value(fixture.owner.memberId))
+            .andExpect(jsonPath("$.data.participants[1].memberId").value(selected.memberId))
+        createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, listOf(fixture.participant.memberId)), key)
+            .expectError(ErrorCode.IDEMPOTENCY_CONFLICT)
+
+        val omitted = mapper.writeValueAsString(mapOf("photoIds" to photoIds))
+        createRequest(fixture.owner, fixture.bunchId, omitted, UUID.randomUUID().toString())
+            .expectError(ErrorCode.INVALID_INPUT)
+        val invalidSelections = listOf(
+            emptyList(), listOf(fixture.owner.memberId), listOf(selected.memberId, selected.memberId)
+        )
+        for (selection in invalidSelections) {
+            createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, selection), UUID.randomUUID().toString())
+                .expectError(ErrorCode.INVALID_INPUT)
+        }
+        val foreign = account()
+        createRequest(fixture.owner, fixture.bunchId, createBody(photoIds, listOf(foreign.memberId)),
+            UUID.randomUUID().toString()).expectError(ErrorCode.FORBIDDEN)
+        for (malformed in listOf(
+            mapOf("photoIds" to photoIds, "participantMemberIds" to listOf<Long?>(null)),
+            mapOf("photoIds" to listOf<Long?>(null), "participantMemberIds" to listOf(selected.memberId)),
+            mapOf("photoIds" to photoIds, "participantMemberIds" to null)
+        )) {
+            createRequest(fixture.owner, fixture.bunchId, mapper.writeValueAsString(malformed),
+                UUID.randomUUID().toString()).expectError(ErrorCode.INVALID_JSON)
+        }
+    }
+
+    @Test
+    fun `creation reports deleted photo ids atomically for frontend reselection`() {
+        val fixture = fixture(photoCount = 2)
+        val missingId = fixture.photoIds.last()
+        jdbc.update("DELETE FROM photo_uploaders WHERE photo_id = ?", missingId)
+        jdbc.update("DELETE FROM photos WHERE id = ?", missingId)
+        val key = UUID.randomUUID().toString()
+        createRequest(fixture.owner, fixture.bunchId,
+            createBody(fixture.photoIds, listOf(fixture.participant.memberId)), key)
+            .expectError(ErrorCode.PHOTO_SELECTION_CHANGED)
+            .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(missingId))
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bundles WHERE bunch_id = ?", Long::class.java, fixture.bunchId
+        )).isZero()
+        createRequest(fixture.owner, fixture.bunchId,
+            createBody(listOf(fixture.photoIds.first()), listOf(fixture.participant.memberId)), key)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.photos.length()").value(1))
     }
 
     @Test
@@ -184,36 +315,27 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `draft title requires the lease actor session and token`() {
+    fun `title saves across authenticated sessions keep optimistic field version`() {
         val fixture = fixture(photoCount = 1)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
-        val grant = leaseService.acquire(
-            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            bunchId = fixture.bunchId,
-            bundleId = bundleId,
-            target = "TITLE",
-            connectionId = "http-$bundleId"
-        )
 
         val wrongSession = sessionFor(fixture.owner.memberId)
         titleRequest(
             wrongSession,
             fixture.bunchId,
             bundleId,
-            value = "wrong sid",
+            value = "",
             expectedVersion = 0,
-            leaseToken = grant.token
-        ).expectError(ErrorCode.BUNDLE_LEASE_CONFLICT)
+        ).andExpect(status().isOk)
 
         titleRequest(
             fixture.owner,
             fixture.bunchId,
             bundleId,
-            value = "wrong token",
+            value = "",
             expectedVersion = 0,
-            leaseToken = UUID.randomUUID()
-        ).expectError(ErrorCode.BUNDLE_LEASE_CONFLICT)
+        ).andExpect(status().isOk)
 
         titleRequest(
             fixture.owner,
@@ -221,7 +343,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "첫 번째 제목",
             expectedVersion = 0,
-            leaseToken = grant.token
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.title").value("첫 번째 제목"))
@@ -233,7 +354,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "오래된 제목",
             expectedVersion = 0,
-            leaseToken = grant.token
         )
             .expectError(ErrorCode.BUNDLE_VERSION_CONFLICT)
             // BundleService exposes the latest field version directly in error.detail.
@@ -246,38 +366,14 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "잘못된\n제목",
             expectedVersion = 1,
-            leaseToken = grant.token
         ).expectError(ErrorCode.INVALID_INPUT)
     }
 
     @Test
-    fun `draft title date and photo caption save without the REST screen header`() {
+    fun `draft title and date save without the REST screen header`() {
         val fixture = fixture(photoCount = 1)
         val bundle = createDraft(fixture.owner, fixture.bunchId, fixture.photoIds.single())
         val bundleId = bundle.path("id").asLong()
-        val titleGrant = leaseService.acquire(
-            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            fixture.bunchId,
-            bundleId,
-            "TITLE",
-            "stomp-title-connection"
-        )
-        val dateGrant = leaseService.acquire(
-            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            fixture.bunchId,
-            bundleId,
-            "DATE",
-            "stomp-date-connection"
-        )
-        val photoId = detail(fixture.owner, fixture.bunchId, bundleId)
-            .path("photos").single().path("id").asLong()
-        val captionGrant = leaseService.acquire(
-            BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            fixture.bunchId,
-            bundleId,
-            "PHOTO:$photoId",
-            "stomp-caption-connection"
-        )
 
         titleRequest(
             fixture.owner,
@@ -285,7 +381,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "헤더 없는 제목",
             expectedVersion = 0,
-            leaseToken = titleGrant.token
         ).andExpect(status().isOk)
         dateRequest(
             fixture.owner,
@@ -293,22 +388,11 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = LocalDate.of(2024, 1, 2),
             expectedVersion = 0,
-            leaseToken = dateGrant.token
-        ).andExpect(status().isOk)
-        captionRequest(
-            fixture.owner,
-            fixture.bunchId,
-            bundleId,
-            photoId,
-            value = "헤더 없는 캡션",
-            expectedVersion = 0,
-            leaseToken = captionGrant.token
         ).andExpect(status().isOk)
 
         val saved = detail(fixture.owner, fixture.bunchId, bundleId)
         assertThat(saved.path("title").asText()).isEqualTo("헤더 없는 제목")
         assertThat(saved.path("date").asText()).isEqualTo("2024-01-02")
-        assertThat(saved.path("photos").single().path("caption").asText()).isEqualTo("헤더 없는 캡션")
     }
 
     @Test
@@ -346,17 +430,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             .andReturn()
             .data()
         val participantCommentVersion = added.path("comments")
-            .first { it.path("memberId").asLong() == fixture.participant.memberId }
-            .path("version")
-            .asLong()
-        assertThat(participantCommentVersion).isGreaterThan(0)
-        val grant = leaseService.acquire(
-            actor = BundleActor(fixture.owner.memberId, fixture.owner.sessionId),
-            bunchId = fixture.bunchId,
-            bundleId = bundleId,
-            target = "TITLE",
-            connectionId = "publish-$bundleId"
-        )
+            .firstOrNull { it.path("memberId").asLong() == fixture.participant.memberId }
+            ?.path("version")?.asLong() ?: 0L
 
         titleRequest(
             fixture.owner,
@@ -364,7 +439,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "초안 제목",
             expectedVersion = 0,
-            leaseToken = grant.token
         ).andExpect(status().isOk)
 
         visibilityRequest(
@@ -419,7 +493,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "늦은 초안 저장",
             expectedVersion = published.path("titleVersion").asLong(),
-            leaseToken = grant.token,
             mode = BundleStatus.DRAFT
         ).expectError(ErrorCode.BUNDLE_STATE_CONFLICT)
 
@@ -429,7 +502,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "발행본 제목 수정",
             expectedVersion = published.path("titleVersion").asLong(),
-            leaseToken = null,
             mode = BundleStatus.PUBLISHED
         ).expectError(ErrorCode.BUNDLE_STATE_CONFLICT)
 
@@ -439,7 +511,6 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
             bundleId,
             value = "참여자 제목 수정",
             expectedVersion = published.path("titleVersion").asLong(),
-            leaseToken = null,
             mode = BundleStatus.PUBLISHED
         ).expectError(ErrorCode.FORBIDDEN)
 
@@ -530,7 +601,10 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     ): JsonNode = createRequest(
         auth,
         bunchId,
-        createBody(listOf(photoId)),
+        createBody(listOf(photoId), jdbc.queryForList(
+            "SELECT member_id FROM bunch_memberships WHERE bunch_id = ? AND status = 'ACTIVE' ORDER BY id",
+            Long::class.java, bunchId
+        ).filter { it != auth.memberId }),
         idempotencyKey
     ).andExpect(status().isOk).andReturn().data()
 
@@ -554,13 +628,12 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         bundleId: Long,
         value: String,
         expectedVersion: Long,
-        leaseToken: UUID?,
         mode: BundleStatus = BundleStatus.DRAFT
     ): ResultActions {
         val request = put("${bundlePath(bunchId, bundleId)}/title")
             .header(HttpHeaders.AUTHORIZATION, bearer(auth))
             .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode, leaseToken)))
+            .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode)))
         return mvc.perform(request)
     }
 
@@ -570,30 +643,12 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         bundleId: Long,
         value: LocalDate?,
         expectedVersion: Long,
-        leaseToken: UUID?,
         mode: BundleStatus = BundleStatus.DRAFT
     ): ResultActions {
         val request = put("${bundlePath(bunchId, bundleId)}/date")
             .header(HttpHeaders.AUTHORIZATION, bearer(auth))
             .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsBytes(BundleDateRequest(value, expectedVersion, mode, leaseToken)))
-        return mvc.perform(request)
-    }
-
-    private fun captionRequest(
-        auth: Auth,
-        bunchId: Long,
-        bundleId: Long,
-        photoId: Long,
-        value: String,
-        expectedVersion: Long,
-        leaseToken: UUID?,
-        mode: BundleStatus = BundleStatus.DRAFT
-    ): ResultActions {
-        val request = put("${bundlePath(bunchId, bundleId)}/photos/$photoId/caption")
-            .header(HttpHeaders.AUTHORIZATION, bearer(auth))
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsBytes(BundleTextRequest(value, expectedVersion, mode, leaseToken)))
+            .content(mapper.writeValueAsBytes(BundleDateRequest(value, expectedVersion, mode)))
         return mvc.perform(request)
     }
 
@@ -642,8 +697,8 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
         data.path("comments").first { it.path("memberId").asLong() == memberId }
             .path("content").asText()
 
-    private fun createBody(photoIds: List<Long>): String =
-        mapper.writeValueAsString(mapOf("photoIds" to photoIds))
+    private fun createBody(photoIds: List<Long>, participantMemberIds: List<Long>): String =
+        mapper.writeValueAsString(mapOf("photoIds" to photoIds, "participantMemberIds" to participantMemberIds))
 
     private fun bearer(auth: Auth): String = "Bearer ${auth.accessToken}"
 

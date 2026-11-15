@@ -5,6 +5,7 @@ import com.bunch.bundle.dto.BundleSnapshot
 import com.bunch.bundle.dto.CreateBundleRequest
 import com.bunch.bundle.service.BundleService
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,7 +25,6 @@ class RecommendationDraftIntegrationTest : RecommendationIntegrationSupport() {
 
     @AfterEach
     fun cleanDraftGraph() {
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")
@@ -207,12 +207,53 @@ class RecommendationDraftIntegrationTest : RecommendationIntegrationSupport() {
         assertThat(candidates(gathering.bunchId)).hasSize(1)
     }
 
+    @Test
+    fun `failed selected participant insertion restores recommendation graph notifications and request key`() {
+        val gathering = bunchWithGathering(count = 8, memberCount = 3)
+        recalculate(gathering.bunchId, gatheringDay)
+        val candidate = candidates(gathering.bunchId).single()
+        val key = UUID.randomUUID()
+        val actor = BundleActor(gathering.members.first(), "session")
+        val request = CreateBundleRequest(
+            gathering.photoIds, candidate.id, participantMemberIds = gathering.members.drop(1)
+        )
+        rejectWrite(
+            "bundle_test_reject_participant", "bundle_participants", "INSERT",
+            "WHEN (NEW.member_id = ${gathering.members.last()})"
+        )
+        try {
+            assertThatThrownBy { bundles.create(actor, gathering.bunchId, key, request) }.isNotNull()
+            assertThat(candidates(gathering.bunchId).map { it.id }).containsExactly(candidate.id)
+            assertThat(photosOf(candidate.id)).hasSize(gathering.photoIds.size)
+            assertThat(usedPhotoIds(gathering.bunchId)).isEmpty()
+            for (table in listOf("bundles", "bundle_photos", "bundle_participants", "bundle_requests")) {
+                assertThat(count(table)).isZero()
+            }
+            assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM notifications WHERE bunch_id = ? AND type = 'DRAFT_PARTICIPANT_ADDED'",
+                Long::class.java, gathering.bunchId
+            )).isZero()
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS bundle_test_reject_participant ON bundle_participants")
+            jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
+        }
+        val created = bundles.create(actor, gathering.bunchId, key, request)
+        assertThat(created.participants.map { it.memberId }).containsExactlyElementsOf(gathering.members)
+        assertThat(created.title).isEqualTo(candidate.title)
+        assertThat(candidates(gathering.bunchId)).isEmpty()
+        assertThat(bundles.create(actor, gathering.bunchId, key, request).id).isEqualTo(created.id)
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM notifications WHERE bunch_id = ? AND type = 'DRAFT_PARTICIPANT_ADDED'",
+            Long::class.java, gathering.bunchId
+        )).isEqualTo(2)
+    }
+
     private fun draftOf(gathering: Gathering, photoIds: List<Long>, recommendationId: Long?): BundleSnapshot =
         bundles.create(
             BundleActor(gathering.members.first(), "session"),
             gathering.bunchId,
             UUID.randomUUID(),
-            CreateBundleRequest(photoIds, recommendationId)
+            CreateBundleRequest(photoIds, recommendationId, participantMemberIds = gathering.members.drop(1))
         )
 
     private fun usedPhotoIds(bunchId: Long): List<Long> = jdbc.queryForList(
