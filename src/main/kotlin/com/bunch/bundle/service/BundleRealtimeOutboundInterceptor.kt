@@ -70,13 +70,8 @@ class BundleRealtimeOutboundInterceptor(
     }
 
     private fun privateDelivery(connectionId: String, destination: String): Boolean =
-        listOf(
-            BundleRealtimeDestinations.LEASE_QUEUE,
-            BundleRealtimeDestinations.ACTIVITY_QUEUE
-        ).any { rawDestination ->
-            registry.hasSubscription(connectionId, rawDestination) &&
-                BundleRealtimeDestinations.isPrivateDelivery(destination, rawDestination)
-        }
+        registry.hasSubscription(connectionId, BundleRealtimeDestinations.ACTIVITY_QUEUE) &&
+            BundleRealtimeDestinations.isPrivateDelivery(destination, BundleRealtimeDestinations.ACTIVITY_QUEUE)
 
     private fun privatePayloadIsReadable(memberId: Long, payload: JsonNode): Boolean {
         val bunchId = payload.longField("bunchId") ?: return false

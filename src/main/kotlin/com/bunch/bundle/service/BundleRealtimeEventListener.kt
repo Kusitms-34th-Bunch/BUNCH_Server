@@ -3,7 +3,6 @@ package com.bunch.bundle.service
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.bundle.dto.BundleActivityEvent
-import com.bunch.bundle.dto.BundleLeaseStateChangedEvent
 import org.slf4j.LoggerFactory
 import org.springframework.context.event.EventListener
 import org.springframework.messaging.simp.SimpMessagingTemplate
@@ -20,13 +19,6 @@ class BundleRealtimeEventListener(
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun changed(event: BundleChangedEvent) {
         send(event.bunchId, event.bundleId, event.type) {
-            messaging.convertAndSend(BundleRealtimeDestinations.topic(event.bunchId, event.bundleId), event.toMessage())
-        }
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    fun leaseStateChanged(event: BundleLeaseStateChangedEvent) {
-        send(event.bunchId, event.bundleId, BundleEventType.LEASES) {
             messaging.convertAndSend(BundleRealtimeDestinations.topic(event.bunchId, event.bundleId), event.toMessage())
         }
     }

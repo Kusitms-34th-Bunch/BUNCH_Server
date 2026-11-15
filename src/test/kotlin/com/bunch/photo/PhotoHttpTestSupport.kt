@@ -126,6 +126,42 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         return photoId
     }
 
+    /**
+     * Puts the photos into a new bundle of the given [status] straight through the tables, so a test does not need
+     * the bundle flow. A published bundle keeps the link to a photo that is still in the box, as the real one does.
+     * The caller removes the rows with [deleteInsertedBundles] before it removes its photos and image assets.
+     */
+    protected fun insertBundleWith(bunchId: Long, createdBy: Long, status: String, photoIds: List<Long>) {
+        val bundleId = jdbc.queryForObject(
+            """INSERT INTO bundles (bunch_id, created_by, status, created_at, updated_at, published_at)
+                VALUES (?, ?, ?, now(), now(), CASE WHEN ? = 'PUBLISHED' THEN now() ELSE NULL END) RETURNING id""",
+            Long::class.java,
+            bunchId,
+            createdBy,
+            status,
+            status
+        )!!
+        photoIds.forEachIndexed { position, photoId ->
+            jdbc.update(
+                """INSERT INTO bundle_photos (bundle_id, photo_id, image_asset_id, position, added_by, added_at)
+                    SELECT ?, id, image_asset_id, ?, ?, now() FROM photos WHERE id = ?""",
+                bundleId,
+                position,
+                createdBy,
+                photoId
+            )
+        }
+    }
+
+    protected fun deleteInsertedBundles() {
+        jdbc.update("DELETE FROM bundle_photos")
+        jdbc.update("DELETE FROM bundles")
+    }
+
+    /** The `usedInDraftBundle` of each photo of a list response's `photos`, by photo ID. */
+    protected fun JsonNode.usedInDraftBundleByPhotoId(): Map<Long, Boolean> =
+        associate { it.path("photoId").asLong() to it.path("usedInDraftBundle").asBoolean() }
+
     protected fun MvcResult.data(): JsonNode = mapper.readTree(response.contentAsString).path("data")
 
     protected fun ResultActions.expectError(error: ErrorCode): ResultActions =

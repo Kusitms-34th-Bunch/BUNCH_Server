@@ -23,13 +23,10 @@ class BundleTextTest {
     }
 
     @Test
-    fun `comments and captions allow line breaks and enforce grapheme limits`() {
+    fun `comments allow line breaks and enforce grapheme limits`() {
         assertEquals("  첫 줄\n둘째 줄  ", BundleText.comment("  첫 줄\n둘째 줄  "))
-        assertEquals("é", BundleText.caption("e\u0301"))
 
         assertEquals("a".repeat(400), BundleText.comment("a".repeat(400)))
-        assertEquals("a".repeat(200), BundleText.caption("a".repeat(200)))
         assertThrows<IllegalArgumentException> { BundleText.comment("a".repeat(401)) }
-        assertThrows<IllegalArgumentException> { BundleText.caption("a".repeat(201)) }
     }
 }

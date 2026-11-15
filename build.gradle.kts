@@ -9,6 +9,7 @@ group = "com.bunch"
 version = "0.0.1-SNAPSHOT"
 repositories { mavenCentral() }
 dependencies {
+    implementation("org.automerge:automerge:0.0.9")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-actuator")

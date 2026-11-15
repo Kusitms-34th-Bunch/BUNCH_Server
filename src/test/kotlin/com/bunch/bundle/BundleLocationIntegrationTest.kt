@@ -18,7 +18,6 @@ import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.BundleVisibilityRequest
 import com.bunch.bundle.dto.PublishBundleRequest
 import com.bunch.bundle.service.BundleAccessService
-import com.bunch.bundle.service.BundleLeaseService
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
 import com.bunch.global.exception.ErrorCode
@@ -75,8 +74,6 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     private lateinit var participants: BundleParticipantRepository
     @Autowired
     private lateinit var access: BundleAccessService
-    @Autowired
-    private lateinit var leases: BundleLeaseService
     @Autowired
     private lateinit var bundleService: BundleService
     @Autowired
@@ -200,46 +197,36 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         join(other, issue(f.owner.memberId, f.bunchId))
         assertError(ErrorCode.FORBIDDEN) {
             locations.saveDraft(BundleActor(other, UUID.randomUUID().toString()), f.bunchId, f.bundleId,
-                BundleLocationsRequest(listOf(place("a", 0)), 0, f.token), "nonparticipant")
+                BundleLocationsRequest(listOf(place("a", 0)), 0), "nonparticipant")
         }
         val stranger = member()
         assertError(ErrorCode.FORBIDDEN) {
             locations.saveDraft(BundleActor(stranger, UUID.randomUUID().toString()), f.bunchId, f.bundleId,
-                BundleLocationsRequest(emptyList(), 0, f.token), "stranger")
+                BundleLocationsRequest(emptyList(), 0), "stranger")
         }
         val another = create(f.owner.memberId).id
         assertError(ErrorCode.RESOURCE_NOT_FOUND) {
             locations.saveDraft(f.owner, another, f.bundleId,
-                BundleLocationsRequest(emptyList(), 0, f.token), "wrong-bunch")
+                BundleLocationsRequest(emptyList(), 0), "wrong-bunch")
         }
         jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?",
             f.bunchId, f.guest.memberId)
         assertError(ErrorCode.FORBIDDEN) {
             locations.saveDraft(f.guest, f.bunchId, f.bundleId,
-                BundleLocationsRequest(emptyList(), 0, f.token), "departed")
+                BundleLocationsRequest(emptyList(), 0), "departed")
         }
     }
 
     @Test
-    fun `requires lease token ownership freshness and optimistic location version`() {
+    fun `whole list saves across participant sessions retain optimistic location version`() {
         val f = fixture()
-        fun rejected(actor: BundleActor, token: UUID?) = assertError(ErrorCode.BUNDLE_LEASE_CONFLICT) {
-            locations.saveDraft(actor, f.bunchId, f.bundleId,
-                BundleLocationsRequest(listOf(place("a", 0)), 0, token), "lease")
-        }
-        rejected(f.owner, null)
-        rejected(f.owner, UUID.randomUUID())
-        rejected(f.owner.copy(sessionId = UUID.randomUUID().toString()), f.token)
-        rejected(f.guest, f.token)
-        val first = save(f, listOf(place("a", 0)))
-        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, emptyList()) }
-        assertThat(locations.get(f.owner.memberId, f.bunchId, f.bundleId)).isEqualTo(first)
-        leases.release(f.owner, f.bunchId, f.bundleId, "LOCATION", f.token, "owner-location")
-        val granted = leases.acquire(f.owner, f.bunchId, f.bundleId, "LOCATION", "new-location")
-        rejected(f.owner, f.token)
-        jdbc.update("UPDATE bundle_edit_leases SET last_heartbeat_at = ? WHERE bundle_id = ? AND target = 'LOCATION'",
-            java.sql.Timestamp.from(Instant.now().minusSeconds(16)), f.bundleId)
-        rejected(f.owner, granted.token)
+        val first = locations.saveDraft(f.guest, f.bunchId, f.bundleId,
+            BundleLocationsRequest(listOf(place("a", 0)), 0), "guest-save")
+        val second = locations.saveDraft(f.owner.copy(sessionId = UUID.randomUUID().toString()),
+            f.bunchId, f.bundleId, BundleLocationsRequest(listOf(place("b", 0)), 1), "owner-save")
+        assertThat(second.locationVersion).isEqualTo(first.locationVersion + 1)
+        assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, emptyList(), 1) }
+        assertThat(locations.get(f.owner.memberId, f.bunchId, f.bundleId)).isEqualTo(second)
     }
 
     @Test
@@ -315,19 +302,19 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(put(path).header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isBadRequest)
         val invalidBodies = listOf(
-            """{"locations": [], "leaseToken": "${f.token}"}""",
-            """{"locations": [], "expectedVersion": null, "leaseToken": "${f.token}"}""",
+            """{"locations": []}""",
+            """{"locations": [], "expectedVersion": null}""",
             """{"locations": [{"provider":"kakao","externalId":"a","name":"a","address":"b"}],
-                "expectedVersion": 0, "leaseToken": "${f.token}"}""",
+                "expectedVersion": 0}""",
             """{"locations": [{"provider":"kakao","externalId":"a","name":"a","address":"b","position":null}],
-                "expectedVersion": 0, "leaseToken": "${f.token}"}"""
+                "expectedVersion": 0}"""
         )
         invalidBodies.forEach { body ->
             mvc.perform(put(path).header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest)
         }
-        val body = BundleLocationsRequest(listOf(place("a", 0)), 0, f.token)
+        val body = BundleLocationsRequest(listOf(place("a", 0)), 0)
         mvc.perform(put(path).header("Authorization", bearer).header("X-Request-Id", UUID.randomUUID())
             .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(body)))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.locations[0].externalId").value("a"))
@@ -366,7 +353,6 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
             val body = mapper.createObjectNode().apply {
                 putArray("locations").add(location)
                 put("expectedVersion", saved.locationVersion)
-                put("leaseToken", f.token.toString())
             }
             mvc.perform(put(path).header("Authorization", authorization)
                 .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(body)))
@@ -383,7 +369,7 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         val authorization = credential(f.owner)
         val path = "/api/v1/bunches/${f.bunchId}/bundles/${f.bundleId}/locations"
         val body = """{"locations":[{"provider":" example-provider ","externalId":"region-01",
-            "name":" 여의도 ","address":null,"position":0}],"expectedVersion":0,"leaseToken":"${f.token}"}"""
+            "name":" 여의도 ","address":null,"position":0}],"expectedVersion":0}"""
         val result = mvc.perform(put(path).header("Authorization", authorization)
             .contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isOk)
@@ -410,9 +396,8 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         ))
         jdbc.update("""INSERT INTO bundle_photos(bundle_id, photo_id, image_asset_id, position, added_by, added_at)
             VALUES (?, ?, ?, 0, ?, CURRENT_TIMESTAMP)""", f.bundleId, photo.id, asset.id, f.owner.memberId)
-        val title = leases.acquire(f.owner, f.bunchId, f.bundleId, "TITLE", "publish-title")
         bundleService.title(f.owner, f.bunchId, f.bundleId,
-            BundleTextRequest("publishable", 0, BundleStatus.DRAFT, title.token), "title")
+            BundleTextRequest("publishable", 0, BundleStatus.DRAFT), "title")
         bundleService.visibility(f.owner, f.bunchId, f.bundleId,
             BundleVisibilityRequest(Visibility.PUBLIC, 0, BundleStatus.DRAFT), "visibility")
         listOf(f.owner, f.guest).forEach {
@@ -424,7 +409,6 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         assertThat(published.locations).isEmpty()
         assertThat(published.title).isEqualTo("publishable")
         assertThat(published.photos.single().photoId).isEqualTo(photo.id)
-        assertThat(published.leases).isEmpty()
     }
 
     @Test
@@ -509,12 +493,11 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         listOf(owner, guest).forEach {
             participants.saveAndFlush(BundleParticipant(bundleId = bundle.id, memberId = it.memberId))
         }
-        val token = leases.acquire(owner, bunchId, bundle.id, "LOCATION", "owner-location").token
-        return Fixture(owner, guest, bunchId, bundle.id, token)
+        return Fixture(owner, guest, bunchId, bundle.id)
     }
 
     private fun save(f: Fixture, input: List<BundleLocationInput>, version: Long = 0): BundleLocationState =
-        locations.saveDraft(f.owner, f.bunchId, f.bundleId, BundleLocationsRequest(input, version, f.token), "save")
+        locations.saveDraft(f.owner, f.bunchId, f.bundleId, BundleLocationsRequest(input, version), "save")
 
     private fun place(id: String, position: Int) = BundleLocationInput("kakao", id, "place $id", "address $id", position)
 
@@ -529,8 +512,7 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
         val owner: BundleActor,
         val guest: BundleActor,
         val bunchId: Long,
-        val bundleId: Long,
-        val token: UUID
+        val bundleId: Long
     )
 
     @TestConfiguration

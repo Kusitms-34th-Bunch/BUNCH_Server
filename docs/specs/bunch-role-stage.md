@@ -85,14 +85,14 @@ Repository를 재사용한다. 성공 재생 조회는 `expiresAt > now`만 허�
 
 사진 새 저장·공동 업로더 신규 연결, 실제 초안 내용 편집, 코멘트 저장 성공은 해당 ACTIVE
 Membership의 lastActivityAt을 같은 트랜잭션에서 갱신한다. 성공 재생·동일 내용 저장·조회·최근 사용·
-presence·편집권 획득/heartbeat·발행/삭제·역할 변경은 활동으로 세지 않는다.
+presence·활동 신호·발행/삭제·역할 변경은 활동으로 세지 않는다.
 발행 코멘트 수정은 기존 작성자 권한을 유지하며, 다른 사람의 코멘트를 관리자가 수정하지 못한다.
 
 ## 통합·검증 경계
 
 - V11 적용·재실행·JPA validate, 기존 데이터 보존·이상 OWNER 전체 실패·동시 OWNER 중복 거부를
   실제 PostgreSQL에서 검증한다. 버전·동시 참여·실패 롤백·활동 갱신도 검증한다.
-- 번들 권한은 DRAFT/PUBLISHED별 판정과 DTO/STOMP/lease가 일치해야 한다.
+- 번들 권한은 DRAFT/PUBLISHED별 판정과 DTO/STOMP가 일치해야 한다.
   Stage는 PUBLIC/PRIVATE 전체 현재 발행 수 0/2/6/10 경계의 1~4단계이며 삭제 시 하락한다.
   초안은 updatedAt DESC,id DESC다. 기존 BundlePage 형태를 유지한다.
   현재 Stage 제공 경로는 기존 번들 summary API다. 홈·외부 프로필 API 자체는 #51·#52의 범위다.

@@ -19,8 +19,6 @@ import com.bunch.bunch.service.BunchDeletionService
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleComment
 import com.bunch.bundle.domain.BundleCommentRepository
-import com.bunch.bundle.domain.BundleEditLease
-import com.bunch.bundle.domain.BundleEditLeaseRepository
 import com.bunch.bundle.domain.BundlePhoto
 import com.bunch.bundle.domain.BundlePhotoRepository
 import com.bunch.bundle.domain.BundleParticipant
@@ -97,9 +95,6 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var bundleComments: BundleCommentRepository
-
-    @Autowired
-    private lateinit var leases: BundleEditLeaseRepository
 
     @Autowired
     private lateinit var photos: PhotoRepository
@@ -218,18 +213,6 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
                 content = "기록",
                 createdAt = now,
                 updatedAt = now
-            )
-        )
-        leases.saveAndFlush(
-            BundleEditLease(
-                bundleId = bundle.id,
-                target = "TITLE",
-                memberId = owner,
-                sessionId = UUID.randomUUID().toString(),
-                connectionId = "issue-50-connection",
-                token = UUID.randomUUID(),
-                version = 1,
-                lastHeartbeatAt = now
             )
         )
         val otherBundle = bundleRepository.saveAndFlush(
@@ -385,7 +368,6 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
         assertThat(countWhere("SELECT count(*) FROM bundle_photos WHERE bundle_id = ?", bundle.id)).isZero
         assertThat(countWhere("SELECT count(*) FROM bundle_participants WHERE bundle_id = ?", bundle.id)).isZero
         assertThat(countWhere("SELECT count(*) FROM bundle_comments WHERE bundle_id = ?", bundle.id)).isZero
-        assertThat(countWhere("SELECT count(*) FROM bundle_edit_leases WHERE bundle_id = ?", bundle.id)).isZero
         assertThat(countWhere("SELECT count(*) FROM bunch_follows WHERE follower_bunch_id = ? OR followed_bunch_id = ?", bunch.id, bunch.id)).isZero
         assertThat(countWhere("SELECT count(*) FROM bunch_blocks WHERE blocker_bunch_id = ? OR blocked_bunch_id = ?", bunch.id, bunch.id)).isZero
         assertThat(countWhere("SELECT count(*) FROM bunch_profile_reports WHERE reporter_bunch_id = ? OR target_bunch_id = ?", bunch.id, bunch.id)).isZero

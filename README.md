@@ -182,19 +182,31 @@ DB에 기록하며, 서버가 재시작돼도 남은 작업을 이어서 처리�
 번들 REST·STOMP 클라이언트 계약은 [번들 API 계약](docs/specs/bundle-api.md)을 따른다.
 REST 기본 경로는 `/api/v1/bunches/{bunchId}/bundles`이고 공동 편집 WebSocket의
 STOMP endpoint는 `/ws`다. 서버 이벤트는 `BundleEventType` enum과
-`type / bunchId / bundleId / revision / requestId / data` 공통 형식으로 전달한다. REST와 STOMP 모두 기존 access JWT의 `sid`를 검증한 활성
-인증 세션을 사용하며, WebSocket 연결의 URL에 토큰을 넣지 않는다.
+`type / bunchId / bundleId / revision / requestId / data` 공통 형식으로 전달한다. REST는 기존 access JWT를 사용하며 STOMP CONNECT는 `POST /api/v1/auth/ws-token`으로
+발급한 60초 WS JWT를 사용한다(기존 access CONNECT도 허용). 둘 다 기존 `sid`의 활성 Redis
+세션을 검증하며 연결 이후에는 JWT 만료 대신 기존 세션·권한 검사를 유지한다.
+WS 토큰은 REST·재발급·토큰 발급 API에서 사용할 수 없다. WebSocket URL에 토큰을 넣지 않는다.
 
 번들 생성·사진 구성 변경·발행은 `Idempotency-Key` UUID를 사용하고, 상태 변경의
-상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다. 제목·날짜·캡션의 `DRAFT` 저장은
-단독 사용자도 먼저 해당 target lease를 STOMP로 획득한 뒤, 현재 `leaseToken`과 최신
-`expectedVersion`을 REST 요청에 함께 보내야 한다. 장소 목록은 [장소 계약](docs/specs/bundle-locations.md)의
-전용 요청을 사용하며 같은 편집권 정책을 따른다. 편집권 target은 `TITLE`, `DATE`, `LOCATION`,
-`PHOTO:{bundlePhotoId}`이며, 서버는 STOMP 연결별 `connectionId`로 lease를 검증하고
-private lease token은 획득한 연결에만 전달한다. 내용 변경은 REST 요청 → DB commit →
-서버 STOMP 이벤트 순서로 처리하며, 클라이언트가 내용을 STOMP로 중복 전송하지 않는다.
-Flyway `V7__bundle_edit_leases.sql`은 적용된 이력으로 보존하고, 이번 변경의 V8 마이그레이션으로
-`bundle_edit_leases.screen_id`를 삭제한다.
+상관관계에는 선택적인 `X-Request-Id` UUID를 사용한다.
+제목은 [제목 CRDT](docs/specs/bundle-title-crdt.md)로 글자 단위 병합하고,
+날짜는 마지막 저장값, 사진·장소는 ID 기반 의도를 서버에서 재적용한다.
+[편집 상태](docs/specs/bundle-realtime-107.md)는 BEGIN/END로 필드 작업을,
+TYPE로 제목·본인 코멘트의 실제 입력을 알리는 비독점 신호다.
+편집 상태는 내용 저장 권한·잠금이 아니며 내용 revision과 활동을 바꾸지 않는다.
+원격 내용을 받아도 편집할 수 있으며, 연결이 끊기면 읽기 전용으로 전환하고 재연결 때
+서버 snapshot을 다시 읽어 미전송 입력을 버린다.
+2026-11-14 결정으로 구형 편집권 API·토큰·전용 큐·snapshot의 leases를 제거했다.
+클라이언트는 편집권 획득 없이 현재 내용 저장 API와 비독점 presence를 사용한다.
+활동·presence 응답·명령 거절은 `/user/queue/bundle-activity`에서 받는다.
+최초 발행은 선택한 공개 범위와 최신 저장 내용을 한 트랜잭션으로 확정하며 실제 발행자를 기록한다.
+발행본 내용과 공개 범위는 별도 경로로 저장하고, 픽은 발행 후 고정한다.
+기존 적용 Flyway 이력은 보존하며, 새 번들·콕 마이그레이션은 선행 PR 순서대로 적용한다.
+사진 픽 저장은 `V38__bundle_photo_picks.sql`, 초기 픽 버전은
+`V39__bundle_pick_initial_versions.sql`로 관리한다.
+캡션은 현재 활성 제품 계약에서 제거했다. 캡션 쓰기·편집 API, 발행 입력,
+Bundle/public/feed 응답 필드, `CAPTION` 이벤트와 캡션 검증은 제공하지 않는다. 이미 적용된
+DB/Flyway의 caption 컬럼·값은 내부 과거 데이터로만 보존하며 새 DDL이나 호환 계층은 추가하지 않는다.
 사진함 업로드·목록·중복 병합 HTTP API는 이 저장소의 번들 API에 포함되지 않으며,
 테스트 fixture의 Photo ID를 실제 사진함 API로 간주하지 않는다.
 
@@ -215,10 +227,13 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 테스트 저장소 포트가 다르면 `DB_URL`, `REDIS_HOST`, `REDIS_PORT`를 지정한다. 운영 저장소나 다른 프로젝트 데이터를 사용하지 않는다.
 - V4→V5의 실제 PostgreSQL 백필·불일치 롤백·재실행, JPA validate, Photo·공동 업로더
   제약·소속 검증·공유 파일 보호·커밋 후 삭제를 검증한다. 사진함 fixture와 실제 API 연동은 구분한다.
-- 번들 REST의 상태·버전·멱등성·편집권 충돌과 STOMP의 두 연결 인증·구독·동일 member/session의
-  다른 connection 충돌·token 재발급·5초 heartbeat·15초 만료·실제 변경 이벤트·재연결
-  snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
+- 번들 REST의 상태·버전·멱등성과 STOMP의 두 연결 인증·구독·여러 연결의 비독점 작업,
+  presence 갱신·만료·실제 변경 이벤트·재연결 snapshot을 실제 PostgreSQL·Redis로 검증한다. 사진함 HTTP API가
   준비되기 전에는 fixture 검증을 실제 사진함 연동 완료로 표시하지 않는다.
+- 사진 픽은 실제 PostgreSQL에서 HTTP 정상·동일 상태 stale no-op·상태 변경 stale `BUNDLE_003`,
+  동시 요청 직렬화, 응답 요약, false row의 ABA 방지, 사진·참여자 FK cascade, 발행 동결과
+  사진 원본 삭제 후 보존을 검증한다. 픽 전용 STOMP event·알림은 만들지 않으며 snapshot 재조회로
+  revision gap을 복구한다.
 - 별도 lint·정적 분석 도구는 아직 구성하지 않았다.
 - 실제 iOS SDK·WebView·권한·Universal Link 연동은 앱·제공자 설정 준비 후 수동 검증한다.
   자동 테스트 통과와 실제 앱 연동 완료는 별개다.
@@ -263,7 +278,7 @@ python3 deploy/monitoring/smoke_test.py
 | [피드 6장 색인](docs/specs/feed.md) | 승인 원문 24항목·구현 Spec 연결·앱 확인 범위 |
 | [피드 API](docs/specs/feed-api.md) | 두 구간 keyset·문맥 변경 409·카드 배치·공통 접근·운영 숨김 |
 | [좋아요](docs/specs/feed-likes.md) / [댓글](docs/specs/feed-comments.md) / [신고](docs/specs/feed-reports.md) | 번치 좋아요·개인 댓글/답글·삭제 자리·신고 한도·알림 |
-| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·lease·번치 공동 핀·출처 수명 |
+| [번들 위치](docs/specs/bundle-locations.md) / [장소 콕](docs/specs/pinned-places.md) | 장소 입력·동시 편집·번치 공동 핀·출처 수명 |
 | [광고](docs/specs/feed-ads.md) / [멤버 프로필](docs/specs/member-social-profile.md) | 요청별 랜덤·개인 숨김·참여 번치 프로필 |
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |

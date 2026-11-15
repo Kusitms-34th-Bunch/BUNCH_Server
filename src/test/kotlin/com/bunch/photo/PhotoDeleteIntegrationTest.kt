@@ -84,7 +84,6 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanPhotoDeleteData() {
         // BunchIntegrationSupport removes bunches and members afterwards, so clear what references them first.
-        jdbc.update("DELETE FROM bundle_edit_leases")
         jdbc.update("DELETE FROM bundle_comments")
         jdbc.update("DELETE FROM bundle_participants")
         jdbc.update("DELETE FROM bundle_photos")

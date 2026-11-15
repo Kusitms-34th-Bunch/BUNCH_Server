@@ -80,7 +80,7 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 
 - `canViewBundles`, `canViewMembers`, `canViewRelations`는 응답에 항상 명시한다. 공개 대상
   또는 서버 현재 번치가 대상의 승인된 follower인 경우 `true`, 비공개 미승인 외부 조회는
-  모두 `false`다. 사진함·초안·PRIVATE 발행본·편집권은 어떤 외부 flag로도 열리지 않는다.
+  모두 `false`다. 사진함·초안·PRIVATE 발행본은 어떤 외부 flag로도 열리지 않는다.
 - `permissions`의 내부 값은 기존 현재 소속 권한을 유지한다. 외부에서는 target의 역할을
   노출하거나 사용하지 않는다. `canBlock`만 서버 현재 번치의 `ACTIVE` membership 역할이
   `OWNER` 또는 `CO_OWNER`이면 표시 가능한 다른 번치 대상에 `true`이고, 현재 소속이 없으면

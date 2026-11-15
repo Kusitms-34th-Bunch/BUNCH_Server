@@ -27,7 +27,7 @@ nextCursor, hasNext, endReached}`다. `bundleCount`는 이번 응답의 실제 �
 카드는 `{id, bunch, publishedAt, title, date, coverImageUrl, photos, locations,
 participants, likeCount, likedByCurrentBunch, commentCount}`다.
 `bunch`는 `{id, name, imageUrl, characterType, visibility}`이며 번치 프로필 이동에 쓴다.
-`photos`는 `{id, imageUrl, position, caption}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
+`photos`는 `{id, imageUrl, position}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
 `date`는 nullable ISO 날짜, 경과 시간은 `publishedAt` 기준으로 앱이 표시한다.
 `locations`는 [장소 계약](bundle-locations.md)의 순서 있는 배열이다.
 `participants`는 [발행본 계약](published-bundle-edit.md)의 공통 표시 DTO
@@ -133,7 +133,7 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 공통 경계로 연결했다. 기존 응답 모양과 현재 번치 내부/다른 소속 외부 구분은 유지한다.
 `BundleService`·`BundleAccessService`의 내부 편집/조회 경로는 C(#88)가 소유한다.
 발행 상세는 위 공통 검사를 연결하며 `BunchPublicService`도 같은 경계를 유지한다.
-운영 숨김을 초안 편집권 등 다른 권한으로 대체하지 않는다.
+운영 숨김을 초안 수정 권한 등 다른 권한으로 대체하지 않는다.
 
 ## 페이지 DB 조건 재사용 (#95)
 
