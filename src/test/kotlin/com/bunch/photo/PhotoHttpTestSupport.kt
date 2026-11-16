@@ -1,6 +1,7 @@
 package com.bunch.photo
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -82,6 +83,18 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         return memberId
     }
 
+    /** The main administrator for [MembershipRole.OWNER], or a new member made the bunch's co-administrator. */
+    protected fun administrator(ownerId: Long, bunchId: Long, role: MembershipRole): Long {
+        if (role == MembershipRole.OWNER) return ownerId
+        val memberId = joined(ownerId, bunchId)
+        jdbc.update(
+            "UPDATE bunch_memberships SET role = 'CO_OWNER' WHERE bunch_id = ? AND member_id = ?",
+            bunchId,
+            memberId
+        )
+        return memberId
+    }
+
     /**
      * Inserts a photo straight into the tables, so a test does not need the upload flow. The caller removes the
      * rows it adds: photo_uploaders, photos and the image_assets whose public_id starts with `test-http/`.
@@ -125,6 +138,42 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         }
         return photoId
     }
+
+    /**
+     * Puts the photos into a new bundle of the given [status] straight through the tables, so a test does not need
+     * the bundle flow. A published bundle keeps the link to a photo that is still in the box, as the real one does.
+     * The caller removes the rows with [deleteInsertedBundles] before it removes its photos and image assets.
+     */
+    protected fun insertBundleWith(bunchId: Long, createdBy: Long, status: String, photoIds: List<Long>) {
+        val bundleId = jdbc.queryForObject(
+            """INSERT INTO bundles (bunch_id, created_by, status, created_at, updated_at, published_at)
+                VALUES (?, ?, ?, now(), now(), CASE WHEN ? = 'PUBLISHED' THEN now() ELSE NULL END) RETURNING id""",
+            Long::class.java,
+            bunchId,
+            createdBy,
+            status,
+            status
+        )!!
+        photoIds.forEachIndexed { position, photoId ->
+            jdbc.update(
+                """INSERT INTO bundle_photos (bundle_id, photo_id, image_asset_id, position, added_by, added_at)
+                    SELECT ?, id, image_asset_id, ?, ?, now() FROM photos WHERE id = ?""",
+                bundleId,
+                position,
+                createdBy,
+                photoId
+            )
+        }
+    }
+
+    protected fun deleteInsertedBundles() {
+        jdbc.update("DELETE FROM bundle_photos")
+        jdbc.update("DELETE FROM bundles")
+    }
+
+    /** The `usedInDraftBundle` of each photo of a list response's `photos`, by photo ID. */
+    protected fun JsonNode.usedInDraftBundleByPhotoId(): Map<Long, Boolean> =
+        associate { it.path("photoId").asLong() to it.path("usedInDraftBundle").asBoolean() }
 
     protected fun MvcResult.data(): JsonNode = mapper.readTree(response.contentAsString).path("data")
 

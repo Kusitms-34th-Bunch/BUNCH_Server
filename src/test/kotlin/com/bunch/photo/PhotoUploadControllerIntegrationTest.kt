@@ -174,6 +174,35 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `the original file hash form field is stored with the photo`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val original = "0123456789abcdef".repeat(4)
+
+        upload(ownerId, bunchId, jpeg(13), originalFileHash = original)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+
+        val stored = jdbc.queryForObject(
+            "SELECT original_file_hash FROM photos WHERE bunch_id = ?",
+            String::class.java,
+            bunchId
+        )
+        assertThat(stored).isEqualTo(original)
+    }
+
+    @Test
+    fun `a malformed original file hash is rejected as invalid input`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        listOf("A".repeat(64), "a".repeat(63), "not-a-hash", "").forEach { invalid ->
+            upload(ownerId, bunchId, jpeg(14), originalFileHash = invalid).expectError(ErrorCode.INVALID_INPUT)
+        }
+
+        assertThat(photoCount(bunchId)).isZero()
+        verify(storage, never()).upload(anyImage())
+    }
+
+    @Test
     fun `a full bunch answers with the bunch limit error`() {
         val (ownerId, bunchId) = bunchWithOwner()
         seedPhotos(bunchId, PhotoUploadLimits.MAX_PHOTOS_PER_BUNCH)
@@ -198,7 +227,8 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
         batchId: UUID = UUID.randomUUID(),
         capturedDate: String? = null,
         capturedTime: String? = null,
-        contentType: String = "image/jpeg"
+        contentType: String = "image/jpeg",
+        originalFileHash: String? = null
     ): ResultActions {
         val request = multipart(path(bunchId))
             .file(photoPart(bytes, contentType))
@@ -206,6 +236,7 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
             .header(HttpHeaders.AUTHORIZATION, bearer(memberId))
         if (capturedDate != null) request.param("capturedDate", capturedDate)
         if (capturedTime != null) request.param("capturedTime", capturedTime)
+        if (originalFileHash != null) request.param("originalFileHash", originalFileHash)
         return mvc.perform(request)
     }
 

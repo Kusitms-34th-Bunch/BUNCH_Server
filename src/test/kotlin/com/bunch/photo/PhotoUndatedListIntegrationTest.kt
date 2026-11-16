@@ -22,6 +22,7 @@ import java.util.UUID
 class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanUndatedFixtures() {
+        deleteInsertedBundles()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-undated/%'")
@@ -258,6 +259,24 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
     }
 
     private data class Page(val ids: List<Long>, val nextCursor: String?)
+
+    @Test
+    fun `marks the photos a draft bundle uses and no others`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val inDraft = photo(bunchId, null)
+        val inPublished = photo(bunchId, null)
+        val unused = photo(bunchId, null)
+        insertBundleWith(bunchId, ownerId, "DRAFT", listOf(inDraft))
+        insertBundleWith(bunchId, ownerId, "PUBLISHED", listOf(inPublished))
+
+        val photos = undated(ownerId, bunchId).andExpect(status().isOk).andReturn().data().path("photos")
+
+        assertThat(photos).hasSize(3)
+        assertThat(photos.usedInDraftBundleByPhotoId())
+            .containsEntry(inDraft, true)
+            .containsEntry(inPublished, false)
+            .containsEntry(unused, false)
+    }
 
     private fun page(memberId: Long, bunchId: Long, size: Int, cursor: String?): Page {
         val params = mutableMapOf("size" to size.toString())
