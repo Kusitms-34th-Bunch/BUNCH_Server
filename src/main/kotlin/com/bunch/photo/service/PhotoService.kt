@@ -128,16 +128,25 @@ class PhotoService(
      * per member and per bunch, so the bunch lock alone serializes the uploads it protects. The batch limit is
      * counted per member and per batch across bunches, so it needs its own lock: two bunches never share a bunch
      * lock.
+     *
+     * A photo is the same as one of the bunch when the app sent the same original file hash, or, without that hash,
+     * when the shrunk file is the same (photo box 3.2.2 rule 5).
      */
     fun upload(command: PhotoUploadCommand, image: PhotoImage): PhotoUploadResult {
         // Photo rejects a time without a date, which would otherwise surface as a server error.
         if (command.capturedTime != null && command.capturedDate == null) fail(ErrorCode.INVALID_INPUT)
+        if (command.originalFileHash != null && !Photo.isSha256Hex(command.originalFileHash)) {
+            fail(ErrorCode.INVALID_INPUT)
+        }
         val hash = sha256Hex(image.bytes)
+        // Decoding the image takes a while, so it is read outside the transactions that hold the locks: before the
+        // first one only when an original hash is to be checked against a stored photo, otherwise after it.
+        val checked = if (command.originalFileHash != null) ImageFingerprint.of(image.bytes) else null
 
-        val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash) }
+        val shared = transaction.execute<PhotoUploadResult?> { beforeUpload(command, hash, checked) }
         if (shared != null) return shared
 
-        val fingerprint = ImageFingerprint.of(image.bytes)
+        val fingerprint = checked ?: ImageFingerprint.of(image.bytes)
         val file = storage.upload(image)
         val result = try {
             transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint) }!!
@@ -150,9 +159,9 @@ class PhotoService(
         return result
     }
 
-    private fun beforeUpload(command: PhotoUploadCommand, hash: String): PhotoUploadResult? {
+    private fun beforeUpload(command: PhotoUploadCommand, hash: String, fingerprint: Long?): PhotoUploadResult? {
         val locked = lockForUpload(command)
-        photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
+        findSamePhoto(command, hash, fingerprint).photo?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
         return null
     }
@@ -164,7 +173,8 @@ class PhotoService(
         fingerprint: Long?
     ): PhotoUploadResult {
         val locked = lockForUpload(command)
-        photos.findByBunchIdAndFileHash(command.bunchId, hash)?.let { return joinUpload(locked, command, it) }
+        val same = findSamePhoto(command, hash, fingerprint)
+        same.photo?.let { return joinUpload(locked, command, it) }
         requireRoomForNewPhoto(command)
 
         val photo = photos.save(
@@ -176,6 +186,8 @@ class PhotoService(
                 capturedDate = command.capturedDate,
                 capturedTime = command.capturedTime,
                 dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF,
+                // A bunch keeps one photo per original hash, so a hash another photo already owns is not stored again.
+                originalFileHash = command.originalFileHash.takeUnless { same.originalHashTaken },
                 capturedUtcOffset = command.capturedUtcOffset
             )
         )
@@ -186,6 +198,42 @@ class PhotoService(
         locked.membership.recordActivity()
         events.publishEvent(PhotoChangedEvent(command.bunchId, photo.capturedDate, photoAdded = true))
         return PhotoUploadResult(photo.id, PhotoUploadKind.STORED)
+    }
+
+    /**
+     * The photo of the bunch this upload is the same as, if there is one. The original hash comes first, because the
+     * shrunk file of one original differs from device to device. It is the app's word and cannot be checked here, so
+     * it only counts when the pictures also look alike. Everything else is told apart by the shrunk file.
+     */
+    private fun findSamePhoto(command: PhotoUploadCommand, hash: String, fingerprint: Long?): SamePhoto {
+        val original = command.originalFileHash?.let { photos.findByBunchIdAndOriginalFileHash(command.bunchId, it) }
+        if (original != null && looksAlike(command.bunchId, original, fingerprint)) return SamePhoto(original, true)
+        return SamePhoto(photos.findByBunchIdAndFileHash(command.bunchId, hash), original != null)
+    }
+
+    // A wrong original hash must not join pictures that are plainly different. A photo without a stored fingerprint
+    // cannot be compared and is trusted.
+    private fun looksAlike(bunchId: Long, existing: Photo, incoming: Long?): Boolean {
+        val stored = fingerprints.findById(existing.id).orElse(null)?.fingerprint
+        if (stored == null || incoming == null) return true
+        val difference = java.lang.Long.bitCount(stored xor incoming)
+        if (difference <= PhotoUploadLimits.MAX_ORIGINAL_HASH_FINGERPRINT_DIFFERENCE) {
+            logger.debug(
+                "Original hash match accepted: bunchId={} photoId={} difference={}",
+                bunchId,
+                existing.id,
+                difference
+            )
+            return true
+        }
+        logger.warn(
+            "Original hash match rejected, the images differ: bunchId={} photoId={} difference={} limit={}",
+            bunchId,
+            existing.id,
+            difference,
+            PhotoUploadLimits.MAX_ORIGINAL_HASH_FINGERPRINT_DIFFERENCE
+        )
+        return false
     }
 
     // The existing photo is not changed: the uploader list grows, and what the first upload did not say (the UTC
@@ -268,7 +316,9 @@ class PhotoService(
             photos.findListPageByUploader(bunchId, uploaderId, position, limit)
         }
         val page = rows.take(size)
-        val uploaderIds = uploaderIdsOf(page.map { it.id })
+        val pageIds = page.map { it.id }
+        val uploaderIds = uploaderIdsOf(pageIds)
+        val inDraft = draftBundlePhotoIdsOf(pageIds)
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) {
             PhotoListCursor(last.capturedDate, last.capturedTime, last.id).encode()
@@ -284,7 +334,8 @@ class PhotoService(
                     thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
                     capturedDate = it.capturedDate,
                     capturedTime = it.capturedTime,
-                    uploaderIds = uploaderIds[it.id].orEmpty()
+                    uploaderIds = uploaderIds[it.id].orEmpty(),
+                    usedInDraftBundle = it.id in inDraft
                 )
             },
             nextCursor = nextCursor
@@ -307,7 +358,9 @@ class PhotoService(
             photos.findUndatedPageByUploader(bunchId, uploaderId, position, limit)
         }
         val page = rows.take(size)
-        val uploaderIds = uploaderIdsOf(page.map { it.id })
+        val pageIds = page.map { it.id }
+        val uploaderIds = uploaderIdsOf(pageIds)
+        val inDraft = draftBundlePhotoIdsOf(pageIds)
         val last = page.lastOrNull()
         val nextCursor = if (rows.size > size && last != null) PhotoUndatedCursor(last.id).encode() else null
         // The "N" of the area follows the member filter (3.1.2) and not the page.
@@ -322,7 +375,8 @@ class PhotoService(
                 PhotoUndatedItem(
                     photoId = it.id,
                     thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
-                    uploaderIds = uploaderIds[it.id].orEmpty()
+                    uploaderIds = uploaderIds[it.id].orEmpty(),
+                    usedInDraftBundle = it.id in inDraft
                 )
             },
             nextCursor = nextCursor
@@ -339,7 +393,8 @@ class PhotoService(
             imageUrl = photo.imageUrl,
             capturedDate = photo.capturedDate,
             uploaders = photos.findUploaderProfiles(photoId)
-                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) }
+                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) },
+            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty()
         )
     }
 
@@ -358,6 +413,11 @@ class PhotoService(
         } else {
             photos.findUploaderIdsByPhotoIds(photoIds).groupBy({ it.photoId }, { it.memberId })
         }
+
+    // The photos among these that a draft bundle uses, from one query for the whole page. The app picks the delete
+    // confirmation text from it (3.3.5): deleting such a photo also takes it out of the draft.
+    private fun draftBundlePhotoIdsOf(photoIds: List<Long>): Set<Long> =
+        if (photoIds.isEmpty()) emptySet() else photos.findDraftBundlePhotoIds(photoIds).toSet()
 
     private fun requireMember(userId: Long, bunchId: Long) {
         members.findById(userId).orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }.requireCompleted()
@@ -580,8 +640,9 @@ class PhotoService(
         if (date != null) events.publishEvent(PhotoChangedEvent(bunchId, date, photoAdded = false))
     }
 
-    // A co-administrator has the same photo rights (5.6.2). Add that role here when it exists.
-    private fun isAdministrator(role: MembershipRole) = role == MembershipRole.OWNER
+    // The main administrator and a co-administrator have the same photo rights (5.6.2, 3.3.5, 3.4.1).
+    private fun isAdministrator(role: MembershipRole) =
+        role == MembershipRole.OWNER || role == MembershipRole.CO_OWNER
 
     private fun validateReadySelection(
         bunchId: Long,
@@ -608,6 +669,9 @@ class PhotoService(
     private fun fail(errorCode: ErrorCode): Nothing = throw BusinessException(errorCode)
 
     private class UploadLocks(val member: Member, val bunch: Bunch, val membership: BunchMembership)
+
+    // The photo an upload is the same as, and whether the bunch already has a photo with the upload's original hash.
+    private class SamePhoto(val photo: Photo?, val originalHashTaken: Boolean)
 
     companion object {
         const val DEFAULT_SIZE = 60

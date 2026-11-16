@@ -27,6 +27,7 @@ POST /api/v1/bunches/{bunchId}/photos
 | `uploadBatchId` | UUID | O | 사진 선택창에서 한 번 고른 사진들에 같은 값. 「다시 시도」로 다시 올려도 원래 값을 유지한다(3.2.2 로직 3 ⑤) |
 | `capturedDate` | `yyyy-MM-dd` | 선택 | 앱이 사진 파일 정보에서 뽑은 촬영 현지 날짜. 카메라 촬영은 촬영 시각의 날짜(3.2.3) |
 | `capturedTime` | `HH:mm:ss` | 선택 | 촬영 현지 시각. **`capturedDate` 없이 보낼 수 없다** |
+| `originalFileHash` | 소문자 hex 64자 | 선택 | 앱이 사진을 고른 시점에 **줄이기 전 원본 파일**의 SHA-256으로 계산한 값. 평면 폼 필드이며 JSON 파트가 아니다. 「다시 시도」로 다시 올려도 같은 값을 보낸다. 값이 있으면 대문자·다른 길이·빈 문자열은 거부한다. 필드를 빼면 기존처럼 줄인 파일의 SHA-256으로 판단한다 |
 | `capturedUtcOffset` | `±HH:mm` | 선택 | 촬영한 곳의 UTC 오프셋(예: `+09:00`, 범위 `-12:00`~`+14:00`). 앱이 EXIF `OffsetTimeOriginal`에서 읽고, 앱 안에서 직접 찍은 사진은 기기의 현재 오프셋을 보낸다. 없으면 추천에서 `Asia/Seoul`로 본다 |
 | `sourceType` | `CAMERA` / `SCREENSHOT` / `SAVED_IMAGE` / `UNKNOWN` | 선택 | 원본 유형. 앱이 판단한다. `CAMERA`는 EXIF에 `Make`/`Model` 또는 `DateTimeOriginal`이 있거나 앱 안에서 직접 찍은 사진, `SAVED_IMAGE`는 카메라 정보가 없는 저장 이미지, `SCREENSHOT`은 스크린샷으로 판별될 때만, `UNKNOWN`은 앱이 판단하지 못한 경우 |
 
@@ -34,6 +35,8 @@ POST /api/v1/bunches/{bunchId}/photos
 - `capturedUtcOffset`과 `sourceType`은 추천 번들 조합이 쓴다(추천 번들 조합 명세 3-6, 4-4, 5-2). 보내지 않은 구버전 앱의 업로드도 성공하고, 값은 비어 있다. 빈 문자열은 보내지 않은 것으로 본다.
 - 서버는 `sourceType`을 명세의 값으로 바꿔 저장한다: `CAMERA`→`CAMERA`, `SCREENSHOT`→`SCREENSHOT`, `SAVED_IMAGE`→`SAVED`. `UNKNOWN`은 명세에 없는 값이라 저장하지 않는다(판단 안 됨과 같다). 이 값이 없는 사진을 추천에서 어떻게 볼지는 서버가 추천 입력을 만들 때 정한다.
 - 이미 올라온 사진을 다시 올리거나(`ALREADY_UPLOADED`) 다른 멤버가 같은 사진을 올리면(`MERGED`), 기존 사진에 비어 있는 오프셋·원본 유형만 새 값으로 채운다. **이미 값이 있으면 바꾸지 않는다.**
+- 카메라 촬영(3.2.3)과 번들의 갤러리 가져오기(4.3.7)도 같은 업로드 규칙을 따른다. 앱이 `originalFileHash`를 보내지
+  않으면 기존 방식으로 판단한다.
 - 위치 정보(EXIF·XMP의 GPS 등)는 앱이 보내기 전에 지운다. 남아 있으면 서버가 거부한다.
 - 서버는 리사이즈를 하지 않는다. 긴 변 4096px 초과와 30MiB 초과 파일은 거부한다.
 - 서버는 JPEG만 받는다(확정 대기: 앱이 보낼 형식).
@@ -59,6 +62,10 @@ Content-Disposition: form-data; name="capturedDate"
 Content-Disposition: form-data; name="capturedTime"
 
 14:05:09
+--...
+Content-Disposition: form-data; name="originalFileHash"
+
+f64fdb17c09c54a0775548d2199f43d474bf9b38e9deb42805efabf343e1f743
 --...
 Content-Disposition: form-data; name="capturedUtcOffset"
 
@@ -90,8 +97,10 @@ CAMERA
 | `ALREADY_UPLOADED` | 내가 이미 올린 같은 사진이다 | 변화 없음 |
 
 - 세 경우 모두 `photoId`를 돌려준다. 갤러리에서 가져오기(4.3.7)는 이 `photoId`로 번들에 사진을 넣는다.
-- 같은 사진은 **파일이 완전히 같은 사진**이다. 서버가 업로드된 파일의 SHA-256으로 판단하므로, 같은 원본이
-  기기마다 같은 파일로 나오는지는 앱 연동 뒤에 확인한다.
+- 같은 사진은 **원본 파일이 같은 사진**이다(3.2.2 로직 5). `originalFileHash`가 같은 사진을 같은 번치에서 찾고,
+  이미지가 전혀 다르면 합치지 않는다. 메신저로 받은 사진·스크린샷·편집한 사진은 원본이 달라 따로 저장된다.
+  `originalFileHash`가 없으면 줄인 파일의 SHA-256으로 판단한다. 자세한 순서는 [사진함](photo-box.md)을 따른다.
+- `ALREADY_UPLOADED`도 같은 판단을 따른다. 이미 올라간 기존 사진에는 원본 해시가 없어서 줄인 파일로만 판단한다.
 - 같은 요청을 다시 보내도 사진은 1장만 저장된다. `Idempotency-Key`는 쓰지 않는다.
 
 ## 오류
@@ -100,7 +109,7 @@ CAMERA
 
 | 상태 | 코드 | 원인 | 다시 시도 |
 | --- | --- | --- | --- |
-| 400 | `COMMON_001` | 형식·용량·해상도 초과, 위치 정보 남음, `photo` 누락, UUID·날짜·시각 형식 오류, 날짜 없이 시각만 보냄, `capturedUtcOffset`이 `±HH:mm`(`-12:00`~`+14:00`)이 아님, `sourceType`이 네 값(대문자 정확히)이 아님 | 불가 |
+| 400 | `COMMON_001` | 형식·용량·해상도 초과, 위치 정보 남음, `photo` 누락, UUID·날짜·시각 형식 오류, 날짜 없이 시각만 보냄, `originalFileHash` 형식 오류, `capturedUtcOffset`이 `±HH:mm`(`-12:00`~`+14:00`)이 아님, `sourceType`이 네 값(대문자 정확히)이 아님 | 불가 |
 | 401 | `AUTH_001` | 토큰 없음·만료·세션 없음 | 로그인 후 |
 | 403 | `AUTH_002` | 번치 멤버가 아님(나간 멤버 포함) | 불가 |
 | 403 | `AUTH_015` | 가입이 끝나지 않음 | 불가 |

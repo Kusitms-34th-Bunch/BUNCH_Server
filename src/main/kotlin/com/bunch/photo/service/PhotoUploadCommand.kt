@@ -6,8 +6,10 @@ import java.time.LocalTime
 import java.util.UUID
 
 /**
- * One photo upload. The batch ID is the one the client picked for the whole selection. [capturedUtcOffset] is already
- * checked (`±HH:mm`) and [sourceType] already named as the specification does; both are null when the app did not say.
+ * One photo upload. The batch ID is the one the client picked for the whole selection. The original file hash is the
+ * SHA-256 the app computed on the file before it shrank the photo; it is not checked against the file.
+ * [capturedUtcOffset] is already checked (`±HH:mm`) and [sourceType] already named as the specification does; both
+ * are null when the app did not say.
  */
 data class PhotoUploadCommand(
     val bunchId: Long,
@@ -15,6 +17,7 @@ data class PhotoUploadCommand(
     val uploadBatchId: UUID,
     val capturedDate: LocalDate? = null,
     val capturedTime: LocalTime? = null,
+    val originalFileHash: String? = null,
     val capturedUtcOffset: String? = null,
     val sourceType: PhotoSourceType? = null
 )

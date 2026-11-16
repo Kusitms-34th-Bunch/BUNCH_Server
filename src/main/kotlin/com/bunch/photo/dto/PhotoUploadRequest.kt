@@ -23,6 +23,8 @@ data class PhotoUploadRequest(
     val capturedDate: LocalDate? = null,
     @DateTimeFormat(iso = DateTimeFormat.ISO.TIME)
     val capturedTime: LocalTime? = null,
+    // The SHA-256 of the original file in lowercase hexadecimal, computed by the app before it shrinks the photo.
+    val originalFileHash: String? = null,
     val capturedUtcOffset: String? = null,
     val sourceType: String? = null
 ) {
@@ -32,6 +34,7 @@ data class PhotoUploadRequest(
         uploadBatchId = uploadBatchId,
         capturedDate = capturedDate,
         capturedTime = capturedTime,
+        originalFileHash = originalFileHash,
         capturedUtcOffset = checkedUtcOffset(),
         sourceType = checkedSourceType()
     )

@@ -62,6 +62,7 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         batchId: UUID = UUID.randomUUID(),
         capturedDate: LocalDate? = null,
         capturedTime: LocalTime? = null,
+        originalFileHash: String? = null,
         capturedUtcOffset: String? = null,
         sourceType: PhotoSourceType? = null
     ) = PhotoUploadCommand(
@@ -70,6 +71,7 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         uploadBatchId = batchId,
         capturedDate = capturedDate,
         capturedTime = capturedTime,
+        originalFileHash = originalFileHash,
         capturedUtcOffset = capturedUtcOffset,
         sourceType = sourceType
     )
