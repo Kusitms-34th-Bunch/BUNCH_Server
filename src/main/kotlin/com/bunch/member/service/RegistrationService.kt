@@ -112,7 +112,8 @@ class RegistrationService(
                         MemberConsent(
                             memberId = memberId,
                             type = TermType.DEMOGRAPHICS,
-                            version = request.demographicsConsentVersion
+                            version = request.demographicsConsentVersion,
+                            agreed = true
                         )
                     )
                 }

@@ -135,7 +135,8 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
             image.id, "a".repeat(64), memberId
         )
         jdbc.update(
-            "INSERT INTO member_consents(member_id, type, version, agreed_at) VALUES (?, 'SERVICE', 'v1', now())",
+            "INSERT INTO member_consents(member_id, type, version, agreed, agreed_at) " +
+                "VALUES (?, 'SERVICE', 'v1', true, now())",
             memberId
         )
         linkIdentity(memberId)

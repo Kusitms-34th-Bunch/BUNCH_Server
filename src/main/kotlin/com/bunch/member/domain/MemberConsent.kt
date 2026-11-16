@@ -20,6 +20,10 @@ class MemberConsent(
     @Column(nullable = false, length = 100)
     val version: String,
 
+    // False is a withdrawal. The state of a consent is what its latest row says.
+    @Column(nullable = false)
+    val agreed: Boolean,
+
     @Column(nullable = false)
     val agreedAt: Instant = Instant.now()
 )

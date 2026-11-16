@@ -4,4 +4,6 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface MemberConsentRepository : JpaRepository<MemberConsent, Long> {
     fun findAllByMemberId(memberId: Long): List<MemberConsent>
+
+    fun findFirstByMemberIdAndTypeOrderByIdDesc(memberId: Long, type: TermType): MemberConsent?
 }
