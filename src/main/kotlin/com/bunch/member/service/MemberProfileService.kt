@@ -7,6 +7,7 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
 import com.bunch.image.service.ImageAssetService
+import com.bunch.member.domain.BirthYearRule
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.dto.MemberProfileRequest
 import org.springframework.dao.DataIntegrityViolationException
@@ -20,6 +21,7 @@ class MemberProfileService(
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val additionalInfos: AdditionalInfoService,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactions = TransactionTemplate(transactionManager)
@@ -53,6 +55,9 @@ class MemberProfileService(
             ProfileImageAction.KEEP, ProfileImageAction.RESET -> if (photo != null) fail(ErrorCode.INVALID_INPUT)
             ProfileImageAction.REPLACE -> if (photo == null || photo.isEmpty) fail(ErrorCode.INVALID_INPUT)
         }
+        // The birth year follows the signup rule (1.4.5). The gender is an enum, so an unknown one never gets here.
+        val birthYear = request.demographics?.birthYear
+        if (birthYear != null && !BirthYearRule.isValid(birthYear)) fail(ErrorCode.INVALID_INPUT)
         return request.copy(nickname = ProfileText.name(request.nickname))
     }
 
@@ -66,6 +71,9 @@ class MemberProfileService(
     private fun save(memberId: Long, input: MemberProfileRequest, uploaded: StoredImage?): Boolean {
         val member = members.findLockedById(memberId)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)
+        // The consent is read under the member lock, so a withdrawal from another device is seen here (7.2.6).
+        val demographics = input.demographics
+        if (demographics != null && !additionalInfos.consenting(memberId)) fail(ErrorCode.FORBIDDEN)
         if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
 
         val previousAssetId = member.profileImageAsset?.id
@@ -76,6 +84,10 @@ class MemberProfileService(
         }
         member.nickname = input.nickname
         member.profileImageAsset = newAsset
+        if (demographics != null) {
+            member.birthYear = demographics.birthYear
+            member.gender = demographics.gender
+        }
         imageAssets.releaseAfterCommit(previousAssetId.takeUnless { it == newAsset?.id })
         members.saveAndFlush(member)
         return input.imageAction == ProfileImageAction.REPLACE

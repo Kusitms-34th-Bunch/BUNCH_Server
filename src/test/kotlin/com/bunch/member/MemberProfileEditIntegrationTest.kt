@@ -15,9 +15,13 @@ import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.Member
+import com.bunch.member.domain.MemberConsentRepository
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.domain.SignupStatus
+import com.bunch.member.dto.AdditionalInfoConsentRequest
 import com.bunch.member.dto.MemberProfileRequest
+import com.bunch.member.dto.ProfileDemographics
+import com.bunch.member.service.AdditionalInfoService
 import com.bunch.member.service.MemberProfileService
 import com.bunch.notification.domain.Notification
 import com.bunch.notification.domain.NotificationRepository
@@ -42,6 +46,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.web.multipart.MultipartFile
 import java.text.Normalizer
 import java.time.Instant
+import java.time.Year
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -52,6 +58,8 @@ import java.util.concurrent.TimeUnit
 @ActiveProfiles("test")
 class MemberProfileEditIntegrationTest @Autowired constructor(
     private val service: MemberProfileService,
+    private val additionalInfos: AdditionalInfoService,
+    private val consents: MemberConsentRepository,
     private val members: MemberRepository,
     private val assets: ImageAssetRepository,
     private val bunches: BunchService,
@@ -182,14 +190,127 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `birth year and gender are never changed by the edit`() {
-        val member = member(birthYear = 1990, gender = Gender.MALE)
+    fun `a request without demographics keeps the birth year and the gender`() {
+        val member = consenting(member(birthYear = 1990, gender = Gender.MALE))
 
         edit(member, nickname = unique("그대로"))
 
         val saved = saved(member)
         assertThat(saved.birthYear).isEqualTo(1990)
         assertThat(saved.gender).isEqualTo(Gender.MALE)
+    }
+
+    @Test
+    fun `a consenting member changes the birth year and the gender with the rest of the profile`() {
+        val member = consenting(member(birthYear = 1990, gender = Gender.MALE))
+        val nickname = unique("함께")
+
+        edit(member, nickname = nickname, demographics = ProfileDemographics(2003, Gender.FEMALE))
+
+        val saved = saved(member)
+        assertThat(saved.nickname).isEqualTo(nickname)
+        assertThat(saved.birthYear).isEqualTo(2003)
+        assertThat(saved.gender).isEqualTo(Gender.FEMALE)
+    }
+
+    @Test
+    fun `the two values are replaced together and an empty one is cleared`() {
+        val member = consenting(member(birthYear = 1990, gender = Gender.MALE))
+
+        edit(member, demographics = ProfileDemographics(null, Gender.FEMALE))
+        assertThat(saved(member).birthYear).isNull()
+        assertThat(saved(member).gender).isEqualTo(Gender.FEMALE)
+
+        edit(member, demographics = ProfileDemographics(2001, null))
+        assertThat(saved(member).birthYear).isEqualTo(2001)
+        assertThat(saved(member).gender).isNull()
+
+        edit(member, demographics = ProfileDemographics())
+        assertThat(saved(member).birthYear).isNull()
+        assertThat(saved(member).gender).isNull()
+    }
+
+    @Test
+    fun `the same demographics sent twice end in the same state`() {
+        val member = consenting(member())
+
+        repeat(2) { edit(member, demographics = ProfileDemographics(1999, Gender.MALE)) }
+
+        assertThat(saved(member).birthYear).isEqualTo(1999)
+        assertThat(saved(member).gender).isEqualTo(Gender.MALE)
+    }
+
+    @Test
+    fun `a member who never agreed is refused and nothing else changes`() {
+        val member = member(nickname = unique("거부"))
+        val before = saved(member).nickname
+
+        val error = assertThrows<BusinessException> {
+            edit(member, nickname = unique("바꿈"), demographics = ProfileDemographics(2000, Gender.MALE))
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.FORBIDDEN)
+        val saved = saved(member)
+        assertThat(saved.nickname).isEqualTo(before)
+        assertThat(saved.birthYear).isNull()
+        assertThat(saved.gender).isNull()
+    }
+
+    @Test
+    fun `a member who withdrew the consent is refused even with empty values`() {
+        val member = consenting(member(birthYear = 1990, gender = Gender.MALE))
+        additionalInfos.change(member.id, AdditionalInfoConsentRequest(false))
+
+        val error = assertThrows<BusinessException> { edit(member, demographics = ProfileDemographics()) }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.FORBIDDEN)
+        assertThat(saved(member).birthYear).isNull()
+    }
+
+    @Test
+    fun `the birth year is from 1930 to this year minus 14 and a wrong one changes nothing`() {
+        val member = consenting(member(nickname = unique("범위"), birthYear = 1990))
+        val before = saved(member).nickname
+        val latest = Year.now(ZoneId.of("Asia/Seoul")).value - 14
+
+        listOf(1929, latest + 1, 0, -1, 20000).forEach { year ->
+            val error = assertThrows<BusinessException> {
+                edit(member, nickname = unique("틀림"), demographics = ProfileDemographics(year, Gender.MALE))
+            }
+            assertThat(error.errorCode).describedAs("year $year").isEqualTo(ErrorCode.INVALID_INPUT)
+        }
+        assertThat(saved(member).nickname).isEqualTo(before)
+        assertThat(saved(member).birthYear).isEqualTo(1990)
+
+        edit(member, demographics = ProfileDemographics(1930, null))
+        assertThat(saved(member).birthYear).isEqualTo(1930)
+        edit(member, demographics = ProfileDemographics(latest, null))
+        assertThat(saved(member).birthYear).isEqualTo(latest)
+    }
+
+    @Test
+    fun `a withdrawal and an edit at once leave the consent off and no values`() {
+        repeat(3) {
+            val member = consenting(member(birthYear = 1990, gender = Gender.MALE))
+            val start = CountDownLatch(1)
+            val pool = Executors.newFixedThreadPool(2)
+
+            val results = listOf<() -> Unit>(
+                { edit(member, demographics = ProfileDemographics(2002, Gender.FEMALE)) },
+                { additionalInfos.change(member.id, AdditionalInfoConsentRequest(false)) }
+            ).map { action -> pool.submit(Callable { start.await(); runCatching(action) }) }
+                .also { start.countDown() }
+                .map { it.get(30, TimeUnit.SECONDS) }
+            pool.shutdown()
+
+            // The edit either ran first and was cleared by the withdrawal, or was refused after it.
+            results.filter { it.isFailure }.forEach {
+                assertThat((it.exceptionOrNull() as BusinessException).errorCode).isEqualTo(ErrorCode.FORBIDDEN)
+            }
+            assertThat(additionalInfos.consenting(member.id)).isFalse()
+            assertThat(saved(member).birthYear).isNull()
+            assertThat(saved(member).gender).isNull()
+        }
     }
 
     @Test
@@ -378,8 +499,14 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         member: Member,
         nickname: String = member.nickname!!,
         action: ProfileImageAction = ProfileImageAction.KEEP,
-        photo: MultipartFile? = null
-    ) = service.update(member.id, MemberProfileRequest(nickname, action), photo)
+        photo: MultipartFile? = null,
+        demographics: ProfileDemographics? = null
+    ) = service.update(member.id, MemberProfileRequest(nickname, action, demographics), photo)
+
+    // The member agrees to the optional consent, as the app does through the consent API.
+    private fun consenting(member: Member): Member = member.also {
+        consents.agreeToDemographics(it.id)
+    }
 
     private fun member(
         nickname: String = unique("닉"),
