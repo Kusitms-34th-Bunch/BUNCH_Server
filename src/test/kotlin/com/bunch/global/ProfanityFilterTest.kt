@@ -1,5 +1,7 @@
 package com.bunch.global
 
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.exception.ErrorCode
 import com.bunch.global.profanity.ProfanityFilter
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.assertj.core.api.Assertions.assertThat
@@ -9,9 +11,6 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class ProfanityFilterTest {
     @TempDir
@@ -44,49 +43,66 @@ class ProfanityFilterTest {
     }
 
     @Test
-    fun `failed reload retains immutable old snapshot and later atomic replacement recovers`() {
+    fun `file replacement takes effect only for a new filter instance`() {
         val path = directory.resolve("dictionary.json")
         replace(path, listOf("old"))
         val filter = filter(path)
         val old = filter.current()
-        Files.writeString(path, "{invalid")
-        assertThat(filter.reload()).isFalse()
-        assertThat(filter.current()).isSameAs(old)
-        Files.delete(path)
-        assertThat(filter.reload()).isFalse()
-        assertThat(filter.current()).isSameAs(old)
         replace(path, listOf("new"))
-        assertThat(filter.reload()).isTrue()
-        assertThat(filter.contains("NEW")).isTrue()
-        assertThat(filter.contains("old")).isFalse()
+        assertThat(filter.current()).isSameAs(old)
+        assertThat(filter.contains("OLD")).isTrue()
+        assertThat(filter.contains("new")).isFalse()
+        filter.requireClean(mapOf("title" to "new"))
+        assertThat(assertThrows<BusinessException> { filter.requireClean(mapOf("title" to "old")) }.errorCode)
+            .isEqualTo(ErrorCode.PROHIBITED_WORD)
+
+        val restarted = filter(path)
+        assertThat(restarted.current().version).isNotEqualTo(old.version)
+        assertThat(restarted.contains("NEW")).isTrue()
+        assertThat(restarted.contains("old")).isFalse()
+        restarted.requireClean(mapOf("title" to "old"))
+        assertThat(assertThrows<BusinessException> { restarted.requireClean(mapOf("title" to "new")) }.errorCode)
+            .isEqualTo(ErrorCode.PROHIBITED_WORD)
         assertThat(old.contains("old")).isTrue()
         assertThat(old.contains("new")).isFalse()
-        assertThat(filter.reload()).isFalse()
     }
 
     @Test
-    fun `concurrent readers always observe one whole dictionary snapshot`() {
+    fun `file deletion leaves existing filter usable but prevents a new instance from starting`() {
         val path = directory.resolve("dictionary.json")
         replace(path, listOf("old"))
         val filter = filter(path)
-        val pool = Executors.newFixedThreadPool(3)
-        try {
-            val reads = (1..2).map {
-                pool.submit(Callable {
-                    repeat(1000) {
-                        val current = filter.current()
-                        assertThat(current.contains("old") xor current.contains("new")).isTrue()
-                    }
-                })
-            }
-            repeat(12) { index ->
-                replace(path, listOf(if (index % 2 == 0) "new" else "old"))
-                filter.reload()
-            }
-            reads.forEach { it.get(10, TimeUnit.SECONDS) }
-        } finally {
-            pool.shutdownNow()
-        }
+        val snapshot = filter.current()
+        Files.delete(path)
+
+        assertThat(filter.current()).isSameAs(snapshot)
+        assertThat(filter.contains("OLD")).isTrue()
+        assertThat(filter.contains("clean")).isFalse()
+        filter.requireClean(mapOf("title" to "clean"))
+        assertThat(assertThrows<BusinessException> { filter.requireClean(mapOf("title" to "old")) }.errorCode)
+            .isEqualTo(ErrorCode.PROHIBITED_WORD)
+        val error = assertThrows<IllegalStateException> { filter(path) }
+        assertThat(error.cause).isNull()
+        assertThat(error.message).startsWith("Unable to load profanity dictionary:")
+    }
+
+    @Test
+    fun `file corruption leaves existing filter usable but prevents a new instance from starting`() {
+        val path = directory.resolve("dictionary.json")
+        replace(path, listOf("old"))
+        val filter = filter(path)
+        val snapshot = filter.current()
+        Files.writeString(path, "{invalid")
+
+        assertThat(filter.current()).isSameAs(snapshot)
+        assertThat(filter.contains("OLD")).isTrue()
+        assertThat(filter.contains("clean")).isFalse()
+        filter.requireClean(mapOf("title" to "clean"))
+        assertThat(assertThrows<BusinessException> { filter.requireClean(mapOf("title" to "old")) }.errorCode)
+            .isEqualTo(ErrorCode.PROHIBITED_WORD)
+        val error = assertThrows<IllegalStateException> { filter(path) }
+        assertThat(error.cause).isNull()
+        assertThat(error.message).startsWith("Unable to load profanity dictionary:")
     }
 
     private fun filter(path: Path) = ProfanityFilter(mapper, path.toString(), "classpath:profanity/dictionary.json")

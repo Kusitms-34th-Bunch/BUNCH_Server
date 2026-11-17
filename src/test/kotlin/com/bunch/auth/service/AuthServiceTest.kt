@@ -35,7 +35,7 @@ class AuthServiceTest {
         override fun reserve(provider: AuthProvider, idToken: String, acceptedUntil: Instant) = consumed.add("$provider:$idToken")
     }
     private val pushDevices = mock(PushDeviceService::class.java)
-    private val profanity = ProfanityFilter(ObjectMapper(), "", "classpath:profanity/dictionary-test.json", false)
+    private val profanity = ProfanityFilter(ObjectMapper(), "", "classpath:profanity/dictionary-test.json")
     private val service = AuthService(tokens, refresh, replay, registry, members, verifierList, pushDevices, profanity)
 
     @Test

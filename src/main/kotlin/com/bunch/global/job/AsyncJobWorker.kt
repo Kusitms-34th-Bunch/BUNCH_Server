@@ -22,9 +22,7 @@ class AsyncJobWorker(
     @Value("\${async-job.retry.max-attempts:5}")
     private val maxAttempts: Int,
     @Value("\${async-job.retry.base-seconds:10}")
-    private val retryBaseSeconds: Long,
-    @Value("\${async-job.worker.enabled:true}")
-    private val enabled: Boolean = true
+    private val retryBaseSeconds: Long
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val transactions = TransactionTemplate(transactionManager)
@@ -35,10 +33,9 @@ class AsyncJobWorker(
             sameType.single()
         }
 
-    // Other features can also enable scheduling, so this worker checks its own switch.
+    // Scheduling is switched on by SchedulingConfig; without it this method is never called.
     @Scheduled(fixedDelayString = "\${async-job.worker.poll-interval-ms:2000}")
     fun poll() {
-        if (!enabled) return
         try {
             runOnce()
         } catch (ex: Exception) {

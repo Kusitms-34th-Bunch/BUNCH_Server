@@ -28,22 +28,4 @@ interface BundleRepository : JpaRepository<Bundle, Long> {
     ): Long
 
     fun findAllByBunchIdOrderByIdAsc(bunchId: Long): List<Bundle>
-
-    @Query(
-        value = """
-            SELECT id
-            FROM bundles
-            WHERE status = 'DRAFT'
-              AND id > :afterId
-              AND profanity_dictionary_version IS DISTINCT FROM :dictionaryVersion
-            ORDER BY id
-            LIMIT :limit
-        """,
-        nativeQuery = true
-    )
-    fun findDraftIdsForProfanityRecheck(
-        @Param("dictionaryVersion") dictionaryVersion: String,
-        @Param("afterId") afterId: Long,
-        @Param("limit") limit: Int
-    ): List<Long>
 }

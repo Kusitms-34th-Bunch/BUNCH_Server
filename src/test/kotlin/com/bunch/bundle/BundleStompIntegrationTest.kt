@@ -20,7 +20,6 @@ import com.bunch.bundle.dto.BundleLocationIntentRequest
 import com.bunch.bundle.domain.BundleLocationIntent
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
-import com.bunch.bundle.service.BundleProfanityRecheckWorker
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -75,7 +74,6 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var presence: BundlePresenceService
     @Autowired private lateinit var events: ApplicationEventPublisher
     @Autowired private lateinit var bundles: BundleService
-    @Autowired private lateinit var profanityRechecks: BundleProfanityRecheckWorker
     @Autowired private lateinit var locations: BundleLocationService
     @Autowired private lateinit var tokenProvider: TokenProvider
     @Autowired private lateinit var sessions: RefreshTokenRepository
@@ -106,35 +104,6 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         ownAssets.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
-    }
-
-    @Test
-    fun `profanity backfill broadcasts warnings on both connections without recording an edit`() {
-        val fixture = fixture()
-        val owner = connect(fixture.owner)
-        val guest = connect(fixture.guest)
-        subscribe(owner, fixture)
-        subscribe(guest, fixture)
-        val saved = putTitle(fixture, "씨발", UUID.randomUUID().toString())
-        owner.json { it.path("type").asText() == "TITLE" }
-        guest.json { it.path("type").asText() == "TITLE" }
-        // Compare persisted snapshots: PostgreSQL stores timestamps at microsecond precision.
-        val persistedBeforeRecheck = getSnapshot(fixture, fixture.guest)
-        jdbc.update("UPDATE bundles SET title_has_prohibited_word=false,profanity_dictionary_version=NULL WHERE id=?",
-            fixture.bundleId)
-
-        assertThat(profanityRechecks.runOnce()).isEqualTo(1)
-
-        listOf(owner, guest).forEach { client ->
-            val event = client.json { it.path("type").asText() == "PROFANITY" }
-            assertThat(event.path("revision").asLong()).isEqualTo(saved.path("revision").asLong() + 1)
-            assertThat(event.path("data").path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
-            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
-                .contains("TITLE_PROHIBITED_WORD")
-        }
-        val recovered = getSnapshot(fixture, fixture.guest)
-        assertThat(recovered.path("updatedAt")).isEqualTo(persistedBeforeRecheck.path("updatedAt"))
-        assertThat(recovered.path("titleVersion")).isEqualTo(persistedBeforeRecheck.path("titleVersion"))
     }
 
     @Test

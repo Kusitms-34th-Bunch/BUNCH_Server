@@ -3,7 +3,6 @@ package com.bunch.bundle
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.Visibility
-import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleTextRequest
@@ -12,7 +11,6 @@ import com.bunch.bundle.dto.EditPublishedBundleRequest
 import com.bunch.bundle.dto.PublishBundleRequest
 import com.bunch.bundle.dto.PublishedBundlePhotoInput
 import com.bunch.bundle.service.BundleService
-import com.bunch.bundle.service.BundleProfanityRecheckWorker
 import com.bunch.bundle.service.TitleCrdtService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -44,9 +42,7 @@ import java.util.concurrent.atomic.AtomicReference
 @ActiveProfiles("test")
 class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var service: BundleService
-    @Autowired private lateinit var rechecks: BundleProfanityRecheckWorker
     @Autowired private lateinit var crdt: TitleCrdtService
-    @Autowired private lateinit var bundleRows: BundleRepository
     @Autowired private lateinit var bunchRows: BunchRepository
     @Autowired private lateinit var assets: ImageAssetRepository
     @Autowired private lateinit var photos: PhotoRepository
@@ -56,8 +52,6 @@ class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
 
     @AfterEach
     fun cleanup() {
-        jdbc.execute("DROP TRIGGER IF EXISTS profanity_recheck_failure ON bundles")
-        jdbc.execute("DROP FUNCTION IF EXISTS profanity_recheck_failure()")
         jdbc.update("DELETE FROM bundles")
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
@@ -217,80 +211,31 @@ class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `recheck changes only warning revision and later clearing or same policy stays idempotent`() {
+    fun `legacy unexamined draft reads use current dictionary without persisting a backfill`() {
         val f = fixture()
         title(f, "여행기록")
         comment(f, f.guest, "한줄기록")
-        val before = service.get(f.owner, f.bunch, f.id)
-        val timestamps = jdbc.queryForList(
-            "SELECT member_id,last_activity_at FROM bunch_memberships WHERE bunch_id=? ORDER BY member_id", f.bunch)
-        val notificationCount = count("notifications")
-        val pushCount = count("push_jobs")
+        jdbc.update("UPDATE bundles SET profanity_dictionary_version=NULL,title_has_prohibited_word=false WHERE id=?", f.id)
+        jdbc.update("UPDATE bundle_comments SET has_prohibited_word=false WHERE bundle_id=?", f.id)
+        val bundleQuery = """SELECT title,title_version,revision,profanity_dictionary_version,
+            title_has_prohibited_word,created_at,updated_at FROM bundles WHERE id=?"""
+        val commentsQuery = """SELECT member_id,content,version,has_prohibited_word,created_at,updated_at
+            FROM bundle_comments WHERE bundle_id=? ORDER BY member_id"""
+        val before = jdbc.queryForMap(bundleQuery, f.id)
+        val commentsBefore = jdbc.queryForList(commentsQuery, f.id)
         val dictionary = ProfanityDictionary(listOf("여행기록", "한줄기록"))
         doReturn(dictionary).`when`(profanity).current()
 
-        assertThat(rechecks.runOnce()).isEqualTo(1)
-
-        val updated = service.get(f.owner, f.bunch, f.id)
-        assertThat(updated.revision).isEqualTo(before.revision + 1)
-        assertThat(updated.updatedAt).isEqualTo(before.updatedAt)
-        assertThat(updated.titleVersion).isEqualTo(before.titleVersion)
-        assertThat(updated.comments).isEqualTo(before.comments)
-        assertThat(updated.profanity!!.dictionaryVersion).isEqualTo(dictionary.version)
-        assertThat(jdbc.queryForObject("SELECT profanity_dictionary_version FROM bundles WHERE id=?",
-            String::class.java, f.id)).isEqualTo(dictionary.version)
-        assertThat(rechecks.runOnce()).isZero()
-        assertThat(count("notifications")).isEqualTo(notificationCount)
-        assertThat(count("push_jobs")).isEqualTo(pushCount)
-        assertThat(jdbc.queryForList(
-            "SELECT member_id,last_activity_at FROM bunch_memberships WHERE bunch_id=? ORDER BY member_id", f.bunch))
-            .isEqualTo(timestamps)
-
-        doReturn(ProfanityDictionary(emptyList())).`when`(profanity).current()
-        assertThat(rechecks.runOnce()).isEqualTo(1)
-        val cleared = service.get(f.owner, f.bunch, f.id)
-        assertThat(cleared.revision).isEqualTo(updated.revision + 1)
-        assertThat(cleared.publishBlockers).doesNotContain("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
-        assertThat(cleared.updatedAt).isEqualTo(before.updatedAt)
-    }
-
-    @Test
-    fun `hundred row batches advance past a failing draft and retry it after the scan`() {
-        val f = fixture()
-        title(f, "batchbad")
-        jdbc.update("""INSERT INTO bundles(bunch_id,created_by,title,created_at,updated_at)
-            SELECT ?,?,'batchbad',now(),now() FROM generate_series(1,100)""", f.bunch, f.owner)
-        val dictionary = ProfanityDictionary(listOf("batchbad"))
-        doReturn(dictionary).`when`(profanity).current()
-        jdbc.execute("""CREATE FUNCTION profanity_recheck_failure() RETURNS trigger LANGUAGE plpgsql AS
-            'BEGIN IF NEW.id = ${f.id} THEN RAISE EXCEPTION ''injected recheck failure''; END IF; RETURN NEW; END'""")
-        jdbc.execute("""CREATE TRIGGER profanity_recheck_failure BEFORE UPDATE ON bundles
-            FOR EACH ROW EXECUTE FUNCTION profanity_recheck_failure()""")
-
-        assertThat(rechecks.runOnce()).isEqualTo(99)
-        assertThat(rechecks.runOnce()).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM bundles WHERE profanity_dictionary_version=?",
-            Long::class.java, dictionary.version)).isEqualTo(100L)
-
-        jdbc.execute("DROP TRIGGER profanity_recheck_failure ON bundles")
-        jdbc.execute("DROP FUNCTION profanity_recheck_failure()")
-        assertThat(rechecks.runOnce()).isEqualTo(1)
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM bundles WHERE profanity_dictionary_version=?",
-            Long::class.java, dictionary.version)).isEqualTo(101L)
-        assertThat(rechecks.runOnce()).isZero()
-    }
-
-    @Test
-    fun `legacy unexamined clean drafts are persisted without pretending user content changed`() {
-        val f = fixture()
-        jdbc.update("UPDATE bundles SET profanity_dictionary_version=NULL,title_has_prohibited_word=false WHERE id=?", f.id)
-        val before = service.get(f.owner, f.bunch, f.id)
-        assertThat(rechecks.runOnce()).isEqualTo(1)
-        val after = service.get(f.owner, f.bunch, f.id)
-        assertThat(after.revision).isEqualTo(before.revision)
-        assertThat(after.updatedAt).isEqualTo(before.updatedAt)
-        assertThat(jdbc.queryForObject("SELECT profanity_dictionary_version FROM bundles WHERE id=?",
-            String::class.java, f.id)).isEqualTo(profanity.current().version)
+        repeat(2) {
+            val read = service.get(f.owner, f.bunch, f.id)
+            assertThat(read.profanity!!.dictionaryVersion).isEqualTo(dictionary.version)
+            assertThat(read.profanity!!.titleHasProhibitedWord).isTrue()
+            assertThat(read.profanity!!.comments.single { it.memberId == f.guest }.hasProhibitedWord).isTrue()
+            assertThat(read.profanity!!.comments.single { it.memberId == f.owner }.hasProhibitedWord).isFalse()
+            assertThat(read.publishBlockers).contains("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
+            assertThat(jdbc.queryForMap(bundleQuery, f.id)).isEqualTo(before)
+            assertThat(jdbc.queryForList(commentsQuery, f.id)).isEqualTo(commentsBefore)
+        }
     }
 
     @Test

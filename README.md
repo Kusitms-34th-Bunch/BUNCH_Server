@@ -165,10 +165,12 @@ HTTP 400 `COMMON_003`의 `detail.fields`로 식별한다. 단어 원문은 응�
 이벤트 데이터에 추가된다. 관련 API·CRDT·댓글·발행본 경계는 각 [인증](docs/specs/auth.md),
 [온보딩](docs/specs/onboarding.md), [번들 API](docs/specs/bundle-api.md) 계약을 따른다.
 
-기본 런타임 설정은 `profanity.reload-interval-ms=30000`, `reload-enabled=true`,
-`recheck-enabled=true`다. 재검사 worker는 활성화 시 1초마다 최대 100개 초안을 처리한다.
-운영 외부 사전은 디렉터리 read-only 마운트에서 같은 디렉터리 안의 임시 파일을 원자적으로
-교체하며, 잘못된 갱신은 마지막 정상 snapshot을 유지한다. 운영 서버의
+사전은 서버 기동 시 한 번 읽고 프로세스 수명 동안 불변으로 사용한다. 설정한 외부 파일을
+읽지 못하거나 형식이 잘못되면 기동에 실패한다. 운영 외부 사전은 디렉터리 read-only 마운트에서
+같은 디렉터리 안의 임시 파일을 원자적으로 교체한 뒤 서버를 재시작해 반영한다. 앱 업데이트는
+필요 없다. 핫 리로드·수동 리로드 API·금칙어 전용 스케줄러는 제공하지 않는다.
+초안 조회는 시작 시점 사전으로 검사 상태를 계산하며 DB·revision·사용자 활동을 바꾸지 않는다.
+실제 제목·코멘트·참여자 변경은 검사 상태를 저장하고 기존 이벤트로 전달한다. 운영 서버의
 마운트 준비와 CI 동작은 [배포 안내](deploy/README.md#profanity-dictionary)를 따른다.
 
 ## 이미지·Photo 기반

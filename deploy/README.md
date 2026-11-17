@@ -129,23 +129,33 @@ scp /path/to/checked-out/BUNCH_Server/src/main/resources/profanity/dictionary.js
 그 다음 서버 `.env`에 다음을 설정한다. `PROFANITY_DICTIONARY_MOUNT`는 기본값을 쓰면 생략할
 수 있다. 지정한 JSON은 `base`, `additions`, `exclusions` 배열을 모두 포함하는 완전한 파일이어야
 하며, 번들 사전과 자동 병합하지 않는다. 외부 경로를 지정했는데 파일이 없거나 잘못되면
-앱 최초 기동은 실패한다.
+앱 기동은 실패한다. 사전은 서버 기동 시 한 번 로딩하며 프로세스 수명 동안 불변이다.
 
 ```dotenv
 PROFANITY_DICTIONARY_MOUNT=./profanity
 PROFANITY_DICTIONARY_PATH=/app/profanity/dictionary.json
 ```
 
-기본 reload interval은 30,000ms(30초), 재검사는 활성화되어 있으며 worker는 1초마다 최대
-100개 초안을 처리한다. 새 사전은 임시 파일을 같은 디렉터리에 만든 뒤 `mv`로 교체한다.
-외부 사전을 사용하지 않을 때는
-`PROFANITY_DICTIONARY_PATH=''`로 두거나 서버 `.env`에서 해당 변수를 생략한다.
+새 사전은 임시 파일을 같은 디렉터리에 만든 뒤 `mv`로 교체하고 서버를 재시작해 반영한다.
+파일 내용만 바꾸었다면 다음 명령을 사용한다. 앱 업데이트는 필요 없다.
+
+```bash
+cd ~
+docker compose restart app
+```
+
+경로·마운트 등 `.env`를 바꾸었다면 restart만으로는 적용되지 않으므로 컨테이너를 재생성한다.
 
 ```bash
 cd ~
 docker compose config --quiet
-docker compose up -d --no-deps app
+docker compose up -d --no-deps --force-recreate app
 ```
+
+핫 리로드·수동 리로드 API·금칙어 전용 스케줄러·초안 DB 스캔은 제공하지 않는다.
+외부 사전을 사용하지 않을 때는
+`PROFANITY_DICTIONARY_PATH=''`로 두거나 서버 `.env`에서 해당 변수를 생략하고,
+위 환경 변수 변경 절차로 앱 컨테이너를 재생성한다.
 
 ## 4. GitHub Actions 설정과 배포
 
@@ -201,12 +211,13 @@ main push의 검증 성공 후 다음 순서로 진행한다.
 ### Flyway 마이그레이션 롤아웃 순서
 
 2026-11-17 `dev`에는 PR #153의 V44와 PR #159의 V45가 통합됐다. 이번 금칙어
-마이그레이션은 `V46__bundle_profanity.sql`을 사용한다. 최종 릴리스에는 세 마이그레이션을
-함께 포함하고 Flyway가 V44 → V45 → V46 순서로 적용하도록 한다.
+스키마는 `V46__bundle_profanity.sql`과 사용하지 않는 재검사 인덱스를 삭제하는
+`V47__drop_bundle_profanity_recheck_index.sql`을 사용한다. 최종 릴리스에는 네 마이그레이션을
+함께 포함하고 Flyway가 V44 → V45 → V46 → V47 순서로 적용하도록 한다.
 
-Flyway의 기본 `outOfOrder=false`를 유지한다. V46을 먼저 적용하면 이후 배포에서 더 낮은
-V44/V45가 자동 적용되지 않으므로, 선행 버전이 릴리스에 포함됐는지 확인한 뒤 V46을 배포한다.
-이미 적용된 마이그레이션 파일은 수정하지 않는다.
+Flyway의 기본 `outOfOrder=false`를 유지한다. 높은 버전을 먼저 적용하면 이후 배포에서 더 낮은
+버전이 자동 적용되지 않으므로, 선행 버전이 릴리스에 포함됐는지 확인한다.
+V46을 포함한 이미 적용된 마이그레이션 파일은 수정하지 않는다.
 
 PostgreSQL·Redis·cloudflared는 CI에서 갱신하거나 재시작하지 않는다.
 공통 Compose 변경도 이 세 서비스에 적용해야 한다면 별도 운영 작업으로 수행한다.

@@ -43,9 +43,6 @@ spring:
       timeout: 2s
 profanity:
   dictionary-path: ${PROFANITY_DICTIONARY_PATH:}
-  reload-enabled: true
-  reload-interval-ms: 30000
-  recheck-enabled: true
 jwt:
   secret: ${JWT_SECRET}
 auth:

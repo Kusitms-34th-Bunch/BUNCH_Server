@@ -25,7 +25,7 @@ caption 컬럼·값과 마이그레이션 이력은 내부 과거 데이터로�
 
 제목·참여자 코멘트·발행 입력의 금칙어 검사 연계는 [공통 금칙어 검사 계약](profanity.md)을
 따른다. 이 문서는 아래의 additive snapshot/event 필드와 발행 오류만 고정하며, 공통 정규화·
-사전 교체·재검사 규칙을 복제하지 않는다.
+사전 로딩·서버 재시작 반영 규칙을 복제하지 않는다.
 
 장소 목록의 REST·이벤트·snapshot·내부 일괄 편집/콕 연계는
 [장소 목록 계약](bundle-locations.md)을 따른다. `BundleSnapshot`에 `locations`와
@@ -564,6 +564,11 @@ error.message = error.idempotency_conflict
 | `likedByCurrentBunch` | `Boolean` | 현재 번치 공동 좋아요 상태 |
 | `commentCount` | `Long` | 삭제 자리를 포함한 소셜 댓글·답글 수. comments 배열 크기와 다름 |
 
+초안 조회의 `profanity`와 `publishBlockers`는 현재 서버가 기동 시 한 번 로딩한 사전으로
+실제 제목·현재 참여자 코멘트에서 계산한다. 조회로 DB·revision·필드 버전·updatedAt·사용자
+활동을 변경하지 않는다. 실제 제목·코멘트·참여자 편집은 내용과 검사 상태를 함께 저장하고,
+응답과 동일한 상태를 기존 `TITLE`·`COMMENT`·`PARTICIPANTS` 이벤트로 전달한다.
+
 `dateChips`는 지정 날짜가 null인 경우에만 같은 번들 사진의 현지 촬영일을 그대로
 모아 빈도 내림차순·날짜 오름차순으로 최대 세 개 반환한다. 미래 촬영일은 제외한다.
 
@@ -813,7 +818,6 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 | `PHOTOS` | `{photos, dateChips}` |
 | `PUBLISHED` | `CREATED`와 같은 전체 내용. status=PUBLISHED |
 | `EDITED` | 발행본 전체 일괄 저장. `CREATED`와 같은 전체 내용 |
-| `PROFANITY` | `{profanity, publishBlockers}`. 재검사 결과 경고가 달라질 때만 전송하며 revision을 증가시킨다 |
 | `DELETED` | null |
 
 다음 이벤트는 내용 revision을 증가시키지 않는다.

@@ -819,30 +819,6 @@ class BundleService(
         return result
     }
 
-    /** System rechecks use the same bunch -> bundle lock order as editor writes. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun recheckProfanity(id: Long): Boolean {
-        val bunchId = bundles.findBunchId(id) ?: return false
-        bunches.findLocked(bunchId) ?: return false
-        val bundle = bundles.findLocked(id) ?: return false
-        if (bundle.status != BundleStatus.DRAFT) return false
-        val dictionary = profanity.current()
-        if (bundle.profanityDictionaryVersion == dictionary.version) return false
-        val rows = comments.findAllByBundleIdOrderByIdAsc(id).associateBy { it.memberId }
-        val state = draftProfanity(bundle, dictionary)
-        val warningChanged = (bundle.titleHasProhibitedWord == true) != state.titleHasProhibitedWord ||
-            state.comments.any { (rows[it.memberId]?.hasProhibitedWord == true) != it.hasProhibitedWord }
-        persistProfanity(bundle, state)
-        if (warningChanged) {
-            bundle.revision++
-            events.publishEvent(BundleChangedEvent(
-                bundle.bunchId, bundle.id, bundle.revision, UUID.randomUUID().toString(), BundleEventType.PROFANITY,
-                mapOf("profanity" to state, "publishBlockers" to publishBlockers(bundle, state))
-            ))
-        }
-        return true
-    }
-
     private fun draftProfanity(bundle: Bundle, dictionary: ProfanityDictionary): BundleProfanityState {
         val rows = comments.findAllByBundleIdOrderByIdAsc(bundle.id).associateBy { it.memberId }
         val people = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
