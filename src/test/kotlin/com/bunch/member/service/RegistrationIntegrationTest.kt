@@ -4,6 +4,9 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.NameAvailabilityStatus
+import com.bunch.global.profanity.ProfanityDictionary
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.member.domain.*
 import com.bunch.member.dto.*
 import org.assertj.core.api.Assertions.assertThat
@@ -14,6 +17,7 @@ import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.mock.web.MockMultipartFile
 import java.time.Year
@@ -33,6 +37,7 @@ class RegistrationIntegrationTest @Autowired constructor(
     private val jdbc: org.springframework.jdbc.core.JdbcTemplate
 ) {
     @MockitoBean lateinit var images: ProfileImageStorage
+    @MockitoSpyBean lateinit var profanity: ProfanityFilter
     private val created = mutableListOf<Long>()
 
     @AfterEach
@@ -77,6 +82,68 @@ class RegistrationIntegrationTest @Autowired constructor(
         assertThat(registrations.complete(member.id, RegistrationRequest("번치"), null)).isEqualTo(result)
         assertThat(assertThrows<BusinessException> { registrations.complete(member.id, RegistrationRequest("다른이름"), null) }.errorCode)
             .isEqualTo(ErrorCode.REGISTRATION_CONFLICT)
+    }
+
+    @Test
+    fun `prohibited nickname is rejected before photo upload`() {
+        val member = member()
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
+
+        val error = assertThrows<BusinessException> {
+            registrations.complete(member.id, RegistrationRequest("fuck"), photo)
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(error.detail).isEqualTo(mapOf("fields" to listOf("nickname")))
+        org.mockito.Mockito.verify(images, org.mockito.Mockito.never()).upload(photo)
+        assertThat(members.findById(member.id).get().signupStatus).isEqualTo(SignupStatus.IN_PROGRESS)
+    }
+
+    @Test
+    fun `registration final save rechecks profanity and compensates uploaded photo`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val member = member()
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
+        val publicId = "registration-profanity/${UUID.randomUUID()}"
+        `when`(images.upload(photo)).thenAnswer {
+            dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+            StoredImage(publicId, "https://res.cloudinary.com/test/registration-profanity.jpg")
+        }
+
+        val error = assertThrows<BusinessException> {
+            registrations.complete(member.id, RegistrationRequest("fuck"), photo)
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(error.detail).isEqualTo(mapOf("fields" to listOf("nickname")))
+        verify(images).delete(publicId)
+        val saved = members.findById(member.id).get()
+        assertThat(saved.signupStatus).isEqualTo(SignupStatus.IN_PROGRESS)
+        assertThat(saved.nickname).isNull()
+    }
+
+    @Test
+    fun `successful registration replay survives a dictionary change`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val member = member()
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(7, 8, 9))
+        val publicId = "registration-replay/${UUID.randomUUID()}"
+        val uploaded = StoredImage(publicId, "https://res.cloudinary.com/test/registration-replay.jpg")
+        `when`(images.upload(photo)).thenReturn(uploaded)
+        val request = RegistrationRequest("fuck")
+
+        val first = registrations.complete(member.id, request, photo)
+        dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+        val replay = registrations.complete(member.id, request, photo)
+
+        assertThat(replay).isEqualTo(first)
+        verify(images, times(1)).upload(photo)
     }
 
     @Test
@@ -160,8 +227,15 @@ class RegistrationIntegrationTest @Autowired constructor(
         registrations.complete(member().id, RegistrationRequest("Bunch"), null)
         val another = member()
         assertThat(registrations.nicknameAvailable(another.id, " Bunch ").available).isFalse()
-        assertThat(registrations.nicknameAvailable(another.id, "bunch").available).isTrue()
-        assertThat(registrations.nicknameAvailable(another.id, "Bun ch").available).isTrue()
+        assertThat(registrations.nicknameAvailable(another.id, " Bunch ").status)
+            .isEqualTo(NameAvailabilityStatus.DUPLICATE)
+        assertThat(registrations.nicknameAvailable(another.id, "bunch").status)
+            .isEqualTo(NameAvailabilityStatus.AVAILABLE)
+        assertThat(registrations.nicknameAvailable(another.id, "Bun ch").status)
+            .isEqualTo(NameAvailabilityStatus.AVAILABLE)
+        assertThat(registrations.nicknameAvailable(another.id, "fuck").available).isFalse()
+        assertThat(registrations.nicknameAvailable(another.id, "fuck").status)
+            .isEqualTo(NameAvailabilityStatus.PROHIBITED_WORD)
         registrations.complete(another.id, RegistrationRequest("번치"), null)
         assertThat(registrations.nicknameAvailable(another.id, "번치").available).isFalse()
     }

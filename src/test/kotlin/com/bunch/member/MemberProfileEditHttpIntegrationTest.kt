@@ -2,6 +2,7 @@ package com.bunch.member
 
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.image.domain.ImageAssetRepository
@@ -25,6 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -137,6 +139,43 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         put(access, body(other.nickname!!, "KEEP"))
             .andExpect(status().isConflict)
             .andExpect(jsonPath("$.error.code").value("USER_002"))
+    }
+
+    @Test
+    fun `prohibited nickname is rejected before replacement upload`() {
+        val (_, access) = account()
+        val photo = MockMultipartFile("photo", "p.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
+
+        put(access, body("fuck", "REPLACE"), photo)
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error.code").value(ErrorCode.PROHIBITED_WORD.code))
+            .andExpect(jsonPath("$.error.detail.fields[0]").value("nickname"))
+        org.mockito.Mockito.verifyNoInteractions(images)
+    }
+
+    @Test
+    fun `nickname and bunch availability expose prohibited status over HTTP`() {
+        val (_, access) = account()
+
+        mvc.perform(
+            get("/api/v1/members/nickname-availability")
+                .param("nickname", "fuck")
+                .header("Authorization", "Bearer $access")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.normalizedValue").value("fuck"))
+            .andExpect(jsonPath("$.data.available").value(false))
+            .andExpect(jsonPath("$.data.status").value("PROHIBITED_WORD"))
+
+        mvc.perform(
+            get("/api/v1/bunches/name-availability")
+                .param("name", "fuck")
+                .header("Authorization", "Bearer $access")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.normalizedValue").value("fuck"))
+            .andExpect(jsonPath("$.data.available").value(false))
+            .andExpect(jsonPath("$.data.status").value("PROHIBITED_WORD"))
     }
 
     @Test

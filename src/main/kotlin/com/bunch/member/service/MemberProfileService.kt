@@ -6,6 +6,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.dto.MemberProfileRequest
@@ -20,6 +21,7 @@ class MemberProfileService(
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val profanity: ProfanityFilter,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactions = TransactionTemplate(transactionManager)
@@ -29,6 +31,7 @@ class MemberProfileService(
     fun update(memberId: Long, request: MemberProfileRequest, photo: MultipartFile?) {
         val input = normalize(request, photo)
         requireEditable(memberId)
+        profanity.requireClean(mapOf("nickname" to input.nickname))
 
         var uploaded: StoredImage? = null
         var attached = false
@@ -66,6 +69,7 @@ class MemberProfileService(
     private fun save(memberId: Long, input: MemberProfileRequest, uploaded: StoredImage?): Boolean {
         val member = members.findLockedById(memberId)?.requireCompleted()
             ?: fail(ErrorCode.USER_NOT_FOUND)
+        profanity.requireClean(mapOf("nickname" to input.nickname))
         if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
 
         val previousAssetId = member.profileImageAsset?.id

@@ -3,6 +3,7 @@ package com.bunch.member.dto
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.SignupStatus
 import com.bunch.member.domain.TermType
+import com.bunch.global.profanity.NameAvailabilityStatus
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 
@@ -44,5 +45,6 @@ data class RegistrationResponse(
 
 data class NameAvailability(
     val normalizedValue: String,
-    val available: Boolean
+    val available: Boolean,
+    val status: NameAvailabilityStatus
 )

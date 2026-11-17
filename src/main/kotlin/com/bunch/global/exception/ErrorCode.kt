@@ -7,6 +7,7 @@ enum class ErrorCode(
 ) {
     INVALID_INPUT("COMMON_001", "error.invalid_input", 400),
     INVALID_JSON("COMMON_002", "error.invalid_json", 400),
+    PROHIBITED_WORD("COMMON_003", "error.prohibited_word", 400),
     INTERNAL_ERROR("COMMON_999", "error.internal_error", 500),
     RESOURCE_NOT_FOUND("RESOURCE_001", "error.resource_not_found", 404),
     USER_NOT_FOUND("USER_001", "error.user_not_found", 404),

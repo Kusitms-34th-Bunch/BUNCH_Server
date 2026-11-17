@@ -52,6 +52,11 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 
 ## 문자·이미지
 
+닉네임·번치 이름·소개를 저장할 때의 금칙어 검사와 이름 사용 가능성의 additive `status`는
+[공통 금칙어 검사 계약](profanity.md)을 따른다. 기존 `normalizedValue`·`available`, 형식·중복·
+권한 판단은 바꾸지 않으며 `available`은 `AVAILABLE`일 때만 true다. 최종 저장 거부는 HTTP 400
+`COMMON_003`/`error.prohibited_word`와 `detail.fields`를 사용하고 단어 원문은 반환하지 않는다.
+
 - 닉네임·번치 이름은 trim+NFC 후 1~12자, 한글·영문·숫자·ASCII 공백만 허용한다.
   NFC로 합쳐진 한글은 1자이며 남은 조합되지 않은 자모는 각각 1자(코드 포인트)로 센다.
   연속 자모를 하나의 grapheme로 합쳐 길이 제한을 우회하지 않는다.
@@ -131,9 +136,9 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] (현재 약관 버전 조회, 원문 없음) |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
-| GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available |
+| GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available,status |
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
-| GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available |
+| GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available,status |
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |

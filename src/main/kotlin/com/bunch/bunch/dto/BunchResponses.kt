@@ -6,11 +6,13 @@ import com.bunch.bunch.domain.CharacterType
 import com.bunch.bunch.domain.InviteEligibility
 import com.bunch.bunch.domain.JoinOutcome
 import com.bunch.bunch.domain.MembershipRole
+import com.bunch.global.profanity.NameAvailabilityStatus
 import java.time.Instant
 
 data class NameAvailability(
     val normalizedValue: String,
-    val available: Boolean
+    val available: Boolean,
+    val status: NameAvailabilityStatus
 )
 
 data class BunchResponse(

@@ -41,6 +41,7 @@ BUNCH_Server/
 │       ├── auth.md
 │       ├── onboarding.md
 │       ├── login-onboarding-api.md
+│       ├── profanity.md
 │       ├── bundle.md
 │       ├── bundle-api.md
 │       ├── photo-foundation.md
@@ -63,6 +64,7 @@ BUNCH_Server/
     │   ├── bundle/           # 번들 생성·공동 편집·발행
     │   └── global/           # config / security / oidc / redis / job 등
     ├── main/resources/
+    │   └── profanity/       # 번들 기본 사전과 출처·라이선스
     ├── test/kotlin/com/bunch/
     └── test/resources/
 ```
@@ -102,6 +104,7 @@ set +a
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` |
 | `POSTGRES_DB` | Compose 최초 DB / `bunch` |
 | `BUNCH_WS_ALLOWED_ORIGINS` | STOMP WebSocket을 허용할 브라우저 Origin 목록(쉼표 구분) / `http://localhost:3000` |
+| `PROFANITY_DICTIONARY_PATH` | 외부 금칙어 JSON의 프로세스 경로. 비우면 번들 사전 사용 / 빈 값 |
 
 프로필은 `local / test / dev / prod`다. 기존 영속 볼륨에서는 `POSTGRES_DB` 변경만으로
 새 DB가 생성되지 않는다. 실제 운영 자격 증명은 커밋하지 않는다.
@@ -146,6 +149,27 @@ set +a
 번치 사진 변경 실패는 기존 이미지를 유지한다. 서버는 앱이 변환한 JPEG만 받는다.
 이전 sid 없는 인증 토큰은 세션 정책 변경 배포 후 다시 로그인해야 한다.
 실제 약관 원문·이미지 디자인·초대 도메인/AASA는 앱 연동 시 별도로 준비한다.
+
+## 공통 금칙어 사전
+
+금칙어 검사와 검사 시점·오류·초안·실시간 상태의 단일 계약은
+[공통 금칙어 검사 계약](docs/specs/profanity.md)이다. 기본 사전은
+[`src/main/resources/profanity/`](src/main/resources/profanity/)에 번들되며 목록의 고정 출처와
+라이선스는 [`SOURCES.md`](src/main/resources/profanity/SOURCES.md)에 기록한다.
+
+`PROFANITY_DICTIONARY_PATH`가 비어 있으면 이 번들 사전을 사용한다. 외부 파일을 지정하면
+전체 JSON(`base`, `additions`, `exclusions`)을 읽으며 자동 병합하지 않는다. 이름 사용 가능성
+응답은 기존 `normalizedValue`·`available`을 유지하면서 `status`를 추가하고, 최종 저장 거부는
+HTTP 400 `COMMON_003`의 `detail.fields`로 식별한다. 단어 원문은 응답·로그에 포함하지 않는다.
+번들 초안 자동 저장은 계속 허용되며 현재 검사 상태·발행 차단 사유만 snapshot과 기존 실시간
+이벤트 데이터에 추가된다. 관련 API·CRDT·댓글·발행본 경계는 각 [인증](docs/specs/auth.md),
+[온보딩](docs/specs/onboarding.md), [번들 API](docs/specs/bundle-api.md) 계약을 따른다.
+
+기본 런타임 설정은 `profanity.reload-interval-ms=30000`, `reload-enabled=true`,
+`recheck-enabled=true`다. 재검사 worker는 활성화 시 1초마다 최대 100개 초안을 처리한다.
+운영 외부 사전은 디렉터리 read-only 마운트에서 같은 디렉터리 안의 임시 파일을 원자적으로
+교체하며, 잘못된 갱신은 마지막 정상 snapshot을 유지한다. 운영 서버의
+마운트 준비와 CI 동작은 [배포 안내](deploy/README.md#profanity-dictionary)를 따른다.
 
 ## 이미지·Photo 기반
 
@@ -283,7 +307,7 @@ python3 deploy/monitoring/smoke_test.py
 | [사진함 기반 계약](docs/specs/photo-foundation.md) | ImageAsset·Photo·공동 업로더 스키마와 연결·최종 삭제 |
 | [비동기 작업 처리 계약](docs/specs/async-processing.md) | 작업 기록·점유·재시도·사진 처리 상태 전이 |
 | [협업 규칙](CONTRIBUTING.md) | 브랜치·커밋·이슈·PR·리뷰·머지 |
-| [AI 지침](AGENTS.md) | 에이전트 작업 원칙과 문서 탐색 |
+| [AI 지침](AGENTS.md) | 저장소 작업 원칙과 문서 탐색 |
 
 ## 기반 출처와 후속 설정
 

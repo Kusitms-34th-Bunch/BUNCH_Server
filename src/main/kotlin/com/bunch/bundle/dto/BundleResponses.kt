@@ -74,6 +74,17 @@ data class BundlePermissions(
     val canComment: Boolean = false
 )
 
+data class BundleCommentProfanity(
+    val memberId: Long,
+    val hasProhibitedWord: Boolean
+)
+
+data class BundleProfanityState(
+    val dictionaryVersion: String,
+    val titleHasProhibitedWord: Boolean,
+    val comments: List<BundleCommentProfanity>
+)
+
 data class BundleSnapshot(
     val id: Long,
     val bunchId: Long,
@@ -104,7 +115,8 @@ data class BundleSnapshot(
     val publisherNickname: String? = null,
     val titleCrdtState: ByteArray? = null,
     val titleTooLong: Boolean = false,
-    val photoChangeResult: BundlePhotoChangeResult? = null
+    val photoChangeResult: BundlePhotoChangeResult? = null,
+    val profanity: BundleProfanityState? = null
 )
 
 data class BundlePage(val items: List<BundleSnapshot>, val page: Int, val size: Int, val total: Long)
@@ -135,7 +147,9 @@ data class BundleTitleState(
     val title: String,
     val titleCrdtState: ByteArray,
     val titleVersion: Long,
-    val titleTooLong: Boolean
+    val titleTooLong: Boolean,
+    val profanity: BundleProfanityState,
+    val publishBlockers: List<String>
 )
 
 data class TitleMergeResult(val state: ByteArray, val value: String, val tooLong: Boolean)

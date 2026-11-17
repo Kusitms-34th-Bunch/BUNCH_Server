@@ -7,6 +7,8 @@ import com.bunch.bundle.domain.*
 import com.bunch.bundle.dto.*
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.profanity.ProfanityDictionary
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.social.dto.SocialLikeSummary
@@ -56,6 +58,7 @@ class BundleService(
     private val mapper: ObjectMapper,
     private val stagePolicy: BundleStagePolicy,
     private val titleCrdt: TitleCrdtService,
+    private val profanity: ProfanityFilter,
     private val photoOrder: BundlePhotoOrderService,
     private val recommendations: RecommendationService,
     private val notifications: NotificationWriter,
@@ -103,6 +106,7 @@ class BundleService(
         }
         val selected = photoService.lockReadyPhotosForConnection(bunchId, request.photoIds)
         val recommended = request.recommendationId?.let { recommendations.useCandidate(bunchId, it) }
+        val dictionary = profanity.current()
         val bundle = bundles.saveAndFlush(
             Bundle(
                 bunchId = bunchId,
@@ -121,7 +125,8 @@ class BundleService(
             )
             notifications.participantAdded(bundle, participant, actor.memberId)
         }
-        changed(bundle, key.toString(), BundleEventType.CREATED, content(bundle))
+        val profanityState = refreshProfanity(bundle, dictionary)
+        changed(bundle, key.toString(), BundleEventType.CREATED, content(bundle, profanityState))
         remember(actor.memberId, bundle, "CREATE", key, fingerprint)
         return snapshot(bundle, actor.memberId)
     }
@@ -164,6 +169,7 @@ class BundleService(
         requestId: String
     ): BundleSnapshot {
         val bundle = editable(actor, bunchId, id, request.mode)
+        val dictionary = profanity.current()
         version(bundle.titleVersion, request.expectedVersion, mapOf("value" to bundle.title))
         val value = validateText { BundleText.title(request.value) }
         if (bundle.title != value) {
@@ -171,7 +177,8 @@ class BundleService(
             bundle.title = rebased.value
             bundle.titleCrdt = rebased.state
             bundle.titleVersion++
-            changed(bundle, requestId, BundleEventType.TITLE, titleChanges(bundle))
+            val profanityState = refreshProfanity(bundle, dictionary)
+            changed(bundle, requestId, BundleEventType.TITLE, titleChanges(bundle, profanityState))
             recordActivity(bundle, actor.memberId)
             notifyReady(bundle, actor.memberId)
         }
@@ -187,21 +194,33 @@ class BundleService(
         requestId: String
     ): BundleTitleState {
         val bundle = editable(actor, bunchId, id, BundleStatus.DRAFT)
+        val dictionary = profanity.current()
         val current = bundle.titleCrdt ?: titleCrdt.initialState(bundle.title)
         val merged = titleCrdt.merge(current, incomingState)
         if (!current.contentEquals(merged.state)) {
             bundle.title = merged.value
             bundle.titleCrdt = merged.state
             bundle.titleVersion++
-            changed(bundle, requestId, BundleEventType.TITLE, titleChanges(bundle))
+            val profanityState = refreshProfanity(bundle, dictionary)
+            changed(bundle, requestId, BundleEventType.TITLE, titleChanges(bundle, profanityState))
             recordActivity(bundle, actor.memberId)
             notifyReady(bundle, actor.memberId)
         }
-        return BundleTitleState(bundle.title, bundle.titleCrdt ?: current, bundle.titleVersion,
-            BundleText.titleTooLong(bundle.title))
+        val profanityState = draftProfanity(bundle, dictionary)
+        return BundleTitleState(
+            title = bundle.title,
+            titleCrdtState = bundle.titleCrdt ?: current,
+            titleVersion = bundle.titleVersion,
+            titleTooLong = BundleText.titleTooLong(bundle.title),
+            profanity = profanityState,
+            publishBlockers = publishBlockers(bundle, profanityState)
+        )
     }
 
-    private fun titleChanges(bundle: Bundle): Map<String, Any?> = mapOf(
+    private fun titleChanges(
+        bundle: Bundle,
+        profanityState: BundleProfanityState? = eventProfanity(bundle)
+    ): Map<String, Any?> = mapOf(
         "value" to bundle.title,
         "version" to bundle.titleVersion,
         "title" to bundle.title,
@@ -209,7 +228,11 @@ class BundleService(
         "titleCrdtState" to if (bundle.status == BundleStatus.DRAFT) {
             bundle.titleCrdt ?: titleCrdt.initialState(bundle.title)
         } else null,
-        "titleTooLong" to BundleText.titleTooLong(bundle.title)
+        "titleTooLong" to BundleText.titleTooLong(bundle.title),
+        "profanity" to profanityState,
+        "publishBlockers" to if (bundle.status == BundleStatus.DRAFT && profanityState != null) {
+            publishBlockers(bundle, profanityState)
+        } else emptyList<String>()
     )
 
     @Transactional
@@ -272,6 +295,7 @@ class BundleService(
         val bundle = access.lock(actor.memberId, bunchId, id)
         mode(bundle, request.mode)
         access.requireParticipant(actor.memberId, bundle)
+        val dictionary = profanity.current()
         val existing = comments.findByBundleIdAndMemberId(id, actor.memberId)
         version(existing?.version ?: 0, request.expectedVersion, mapOf("value" to (existing?.content ?: "")))
         val value = validateText { BundleText.comment(request.value) }
@@ -280,7 +304,8 @@ class BundleService(
             row.content = value
             row.version++
             row.updatedAt = Instant.now()
-            changed(bundle, requestId, BundleEventType.COMMENT, commentResponse(row))
+            val profanityState = refreshProfanity(bundle, dictionary)
+            changed(bundle, requestId, BundleEventType.COMMENT, commentEvent(bundle, row, profanityState))
             recordActivity(bundle, actor.memberId, comment = true)
             if (value.isNotBlank()) {
                 participants.findByBundleIdAndMemberId(id, actor.memberId)?.let {
@@ -299,6 +324,7 @@ class BundleService(
         access.requireParticipant(actor.memberId, bundle)
         access.requireMember(memberId, bunchId)
         if (!access.isParticipant(memberId, id)) {
+            val dictionary = profanity.current()
             val participant = participants.saveAndFlush(
                 BundleParticipant(
                     bundleId = id,
@@ -309,8 +335,16 @@ class BundleService(
             )
             // A newly added participation starts above every prior comment version. Removing
             // and re-adding a member must not let an old expectedVersion=0 save become valid.
-            comments.saveAndFlush(BundleComment(bundleId = id, memberId = memberId, version = bundle.revision + 1))
-            changed(bundle, requestId, BundleEventType.PARTICIPANTS, participantChanges(bundle))
+            comments.saveAndFlush(
+                BundleComment(
+                    bundleId = id,
+                    memberId = memberId,
+                    version = bundle.revision + 1,
+                    hasProhibitedWord = false
+                )
+            )
+            val profanityState = refreshProfanity(bundle, dictionary)
+            changed(bundle, requestId, BundleEventType.PARTICIPANTS, participantChanges(bundle, profanityState))
             notifications.participantAdded(bundle, participant, actor.memberId)
         }
         return snapshot(bundle, actor.memberId)
@@ -477,23 +511,29 @@ class BundleService(
             return snapshot(bundle, actor.memberId)
         }
         access.requireParticipant(actor.memberId, bundle)
+        val dictionary = profanity.current()
+        val profanityState = draftProfanity(bundle, dictionary)
+        rejectProhibitedPublish(profanityState)
         request.visibility?.let { selected ->
             if (bundle.visibility != selected) {
                 bundle.visibility = selected
                 bundle.visibilityVersion++
             }
         }
-        val blockers = publishBlockers(bundle) +
+        val blockers = publishBlockers(bundle, profanityState) +
             if (bundle.visibility == null) listOf("VISIBILITY_REQUIRED") else emptyList()
         if (blockers.isNotEmpty()) fail(ErrorCode.BUNDLE_PUBLISH_BLOCKED, mapOf("reasons" to blockers))
         val originalIds = photoRows(id).map { it.photoId ?: fail(ErrorCode.BUNDLE_PUBLISH_BLOCKED) }
         photoService.lockReadyPhotosForConnection(bunchId, originalIds)
         val beforeCount = bundles.countByBunchIdAndStatus(bunchId, BundleStatus.PUBLISHED)
+        val finalProfanity = draftProfanity(bundle, profanity.current())
+        rejectProhibitedPublish(finalProfanity)
+        persistProfanity(bundle, finalProfanity)
         bundle.status = BundleStatus.PUBLISHED
         bundle.publishedAt = clock.instant()
         bundle.publishedBy = actor.memberId
         pushJobs.cancelCommentRemindersForBundle(id)
-        changed(bundle, key.toString(), BundleEventType.PUBLISHED, content(bundle))
+        changed(bundle, key.toString(), BundleEventType.PUBLISHED, content(bundle, finalProfanity))
         remember(actor.memberId, bundle, operation, key, fingerprint)
         bundles.flush()
         notifications.published(
@@ -515,6 +555,10 @@ class BundleService(
         mode(bundle, BundleStatus.PUBLISHED)
         version(bundle.revision, request.expectedRevision, mapOf("revision" to bundle.revision))
         val title = validateText { BundleText.title(request.title) }
+        val dictionary = profanity.current()
+        if (dictionary.contains(title)) {
+            fail(ErrorCode.PROHIBITED_WORD, mapOf("fields" to listOf("title")))
+        }
         if (title.isBlank() || request.photos.size !in 1..20 ||
             request.date?.isAfter(LocalDate.ofInstant(clock.instant(), ZoneId.of("Asia/Seoul"))) == true) {
             fail(ErrorCode.INVALID_INPUT)
@@ -560,7 +604,11 @@ class BundleService(
             bundle.dateVersion++
             edited = true
         }
-        if (edited) changed(bundle, requestId, BundleEventType.EDITED, content(bundle))
+        profanity.requireClean(mapOf("title" to title))
+        if (edited) {
+            bundle.titleHasProhibitedWord = false
+            changed(bundle, requestId, BundleEventType.EDITED, content(bundle))
+        }
         return snapshot(bundle, actor.memberId)
     }
 
@@ -630,16 +678,18 @@ class BundleService(
 
     private fun removeParticipation(bundle: Bundle, memberId: Long, requestId: String, actorId: Long) {
         val row = participants.findByBundleIdAndMemberId(bundle.id, memberId) ?: return
+        val dictionary = profanity.current()
         pushJobs.cancelCommentReminderForMember(bundle.id, memberId)
         participants.delete(row)
         comments.findByBundleIdAndMemberId(bundle.id, memberId)?.let(comments::delete)
         participants.flush()
         comments.flush()
+        val profanityState = refreshProfanity(bundle, dictionary)
         changed(
             bundle,
             requestId,
             BundleEventType.PARTICIPANTS,
-            participantChanges(bundle) + ("removedCommentMemberIds" to listOf(memberId))
+            participantChanges(bundle, profanityState) + ("removedCommentMemberIds" to listOf(memberId))
         )
         notifications.participantRemoved(bundle, memberId, actorId)
         if (participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id).size == 1) {
@@ -745,7 +795,10 @@ class BundleService(
         }
     }
 
-    private fun publishBlockers(bundle: Bundle): List<String> {
+    private fun publishBlockers(
+        bundle: Bundle,
+        profanityState: BundleProfanityState = draftProfanity(bundle, profanity.current())
+    ): List<String> {
         val result = mutableListOf<String>()
         if (bundle.title.isBlank()) result.add("TITLE_REQUIRED")
         if (BundleText.titleTooLong(bundle.title)) {
@@ -761,7 +814,70 @@ class BundleService(
         if (people.any { it !in written }) result.add("COMMENTS_REQUIRED")
         val rows = photoRows(bundle.id)
         if (rows.size !in 1..20) result.add("PHOTOS_REQUIRED")
+        if (profanityState.titleHasProhibitedWord) result.add("TITLE_PROHIBITED_WORD")
+        if (profanityState.comments.any { it.hasProhibitedWord }) result.add("COMMENTS_PROHIBITED_WORD")
         return result
+    }
+
+    /** System rechecks use the same bunch -> bundle lock order as editor writes. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    fun recheckProfanity(id: Long): Boolean {
+        val bunchId = bundles.findBunchId(id) ?: return false
+        bunches.findLocked(bunchId) ?: return false
+        val bundle = bundles.findLocked(id) ?: return false
+        if (bundle.status != BundleStatus.DRAFT) return false
+        val dictionary = profanity.current()
+        if (bundle.profanityDictionaryVersion == dictionary.version) return false
+        val rows = comments.findAllByBundleIdOrderByIdAsc(id).associateBy { it.memberId }
+        val state = draftProfanity(bundle, dictionary)
+        val warningChanged = (bundle.titleHasProhibitedWord == true) != state.titleHasProhibitedWord ||
+            state.comments.any { (rows[it.memberId]?.hasProhibitedWord == true) != it.hasProhibitedWord }
+        persistProfanity(bundle, state)
+        if (warningChanged) {
+            bundle.revision++
+            events.publishEvent(BundleChangedEvent(
+                bundle.bunchId, bundle.id, bundle.revision, UUID.randomUUID().toString(), BundleEventType.PROFANITY,
+                mapOf("profanity" to state, "publishBlockers" to publishBlockers(bundle, state))
+            ))
+        }
+        return true
+    }
+
+    private fun draftProfanity(bundle: Bundle, dictionary: ProfanityDictionary): BundleProfanityState {
+        val rows = comments.findAllByBundleIdOrderByIdAsc(bundle.id).associateBy { it.memberId }
+        val people = participants.findAllByBundleIdOrderByJoinedAtAscIdAsc(bundle.id)
+        return BundleProfanityState(
+            dictionary.version,
+            dictionary.contains(bundle.title),
+            people.map { BundleCommentProfanity(it.memberId, dictionary.contains(rows[it.memberId]?.content.orEmpty())) }
+        )
+    }
+
+    private fun eventProfanity(bundle: Bundle): BundleProfanityState? =
+        if (bundle.status == BundleStatus.DRAFT) draftProfanity(bundle, profanity.current()) else null
+
+    private fun persistProfanity(bundle: Bundle, state: BundleProfanityState) {
+        bundle.profanityDictionaryVersion = state.dictionaryVersion
+        bundle.titleHasProhibitedWord = state.titleHasProhibitedWord
+        val flags = state.comments.associate { it.memberId to it.hasProhibitedWord }
+        comments.findAllByBundleIdOrderByIdAsc(bundle.id).forEach { row ->
+            flags[row.memberId]?.let { row.hasProhibitedWord = it }
+        }
+    }
+
+    private fun refreshProfanity(bundle: Bundle, dictionary: ProfanityDictionary): BundleProfanityState =
+        draftProfanity(bundle, dictionary).also { persistProfanity(bundle, it) }
+
+    private fun rejectProhibitedPublish(state: BundleProfanityState) {
+        val fields = mutableListOf<String>()
+        if (state.titleHasProhibitedWord) fields.add("title")
+        val rejectedMembers = state.comments.filter { it.hasProhibitedWord }.map { it.memberId }
+        if (rejectedMembers.isNotEmpty()) fields.add("comments")
+        if (fields.isNotEmpty()) {
+            val detail = mutableMapOf<String, Any>("fields" to fields.toList())
+            if (rejectedMembers.isNotEmpty()) detail["commentMemberIds"] = rejectedMembers
+            fail(ErrorCode.PROHIBITED_WORD, detail)
+        }
     }
 
     private fun snapshot(
@@ -771,6 +887,7 @@ class BundleService(
         commentTotal: Long? = null
     ): BundleSnapshot {
         val draft = bundle.status == BundleStatus.DRAFT
+        val profanityState = eventProfanity(bundle)
         if (draft && bundle.titleCrdt == null) bundle.titleCrdt = titleCrdt.initialState(bundle.title)
         val people = if (draft) attribution.draft(bundle) else attribution.published(bundle)
         val photoPicks = picks.summaries(bundle, userId, people.participants)
@@ -785,14 +902,15 @@ class BundleService(
             },
             people.participants,
             people.comments,
-            dateChips(bundle), if (draft) publishBlockers(bundle) else emptyList(),
+            dateChips(bundle), if (draft) publishBlockers(bundle, requireNotNull(profanityState)) else emptyList(),
             access.permissions(userId, bundle),
             bundle.createdAt, bundle.updatedAt, bundle.publishedAt,
             bundle.locationVersion, locations.listForBundles(listOf(bundle.id)).getValue(bundle.id),
             social.likeCount, social.likedByCurrentBunch, count,
             bundle.publishedBy, publisherNickname(bundle),
             if (draft) bundle.titleCrdt ?: titleCrdt.initialState(bundle.title) else null,
-            BundleText.titleTooLong(bundle.title)
+            BundleText.titleTooLong(bundle.title),
+            profanity = profanityState
         )
     }
 
@@ -800,24 +918,34 @@ class BundleService(
         memberships.findByMemberIdAndBunchIdAndStatus(memberId, bundle.bunchId)?.member?.nickname ?: "작성자"
     }
 
-    private fun content(bundle: Bundle): Map<String, Any?> = mapOf(
+    private fun content(
+        bundle: Bundle,
+        profanityState: BundleProfanityState? = eventProfanity(bundle)
+    ): Map<String, Any?> = mapOf(
         "status" to bundle.status, "title" to bundle.title, "titleVersion" to bundle.titleVersion,
         "visibility" to bundle.visibility, "visibilityVersion" to bundle.visibilityVersion,
         "date" to bundle.date, "dateVersion" to bundle.dateVersion, "publishedAt" to bundle.publishedAt,
         "publishedBy" to bundle.publishedBy, "publisherNickname" to publisherNickname(bundle),
         "locationVersion" to bundle.locationVersion,
         "locations" to locations.listForBundles(listOf(bundle.id)).getValue(bundle.id)
-    ) + titleChanges(bundle) + photoChanges(bundle) + participantChanges(bundle)
+    ) + titleChanges(bundle, profanityState) + photoChanges(bundle) + participantChanges(bundle, profanityState)
 
     private fun photoChanges(bundle: Bundle): Map<String, Any?> = mapOf(
         "photos" to photoRows(bundle.id).map(::photoResponse), "dateChips" to dateChips(bundle)
     )
 
-    private fun participantChanges(bundle: Bundle): Map<String, Any?> {
+    private fun participantChanges(
+        bundle: Bundle,
+        profanityState: BundleProfanityState? = eventProfanity(bundle)
+    ): Map<String, Any?> {
         val people = if (bundle.status == BundleStatus.PUBLISHED) attribution.published(bundle) else attribution.draft(bundle)
         return mapOf(
             "participants" to people.participants,
-            "comments" to people.comments
+            "comments" to people.comments,
+            "profanity" to profanityState,
+            "publishBlockers" to if (bundle.status == BundleStatus.DRAFT && profanityState != null) {
+                publishBlockers(bundle, profanityState)
+            } else emptyList<String>()
         )
     }
 
@@ -827,6 +955,17 @@ class BundleService(
 
     private fun commentResponse(row: BundleComment) = BundleCommentResponse(
         row.memberId, row.content, row.version, row.createdAt, row.updatedAt, id = row.id
+    )
+
+    private fun commentEvent(bundle: Bundle, row: BundleComment, state: BundleProfanityState) = BundleCommentEventData(
+        memberId = row.memberId,
+        content = row.content,
+        version = row.version,
+        createdAt = row.createdAt,
+        updatedAt = row.updatedAt,
+        id = row.id,
+        profanity = state,
+        publishBlockers = publishBlockers(bundle, state)
     )
 
     private fun fingerprint(value: Any): String = MessageDigest.getInstance("SHA-256")

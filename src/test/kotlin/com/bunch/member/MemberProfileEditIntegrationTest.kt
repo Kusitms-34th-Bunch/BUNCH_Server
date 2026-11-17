@@ -10,6 +10,8 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.ProfanityDictionary
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.domain.ImageAsset
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.member.domain.AccountStatus
@@ -39,6 +41,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.web.multipart.MultipartFile
 import java.text.Normalizer
 import java.time.Instant
@@ -61,6 +64,9 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
 ) {
     @MockitoBean
     lateinit var images: ProfileImageStorage
+
+    @MockitoSpyBean
+    lateinit var profanity: ProfanityFilter
 
     private val memberIds = mutableListOf<Long>()
     private val publicIds = mutableListOf<String>()
@@ -145,6 +151,51 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         val saved = saved(member)
         assertThat(saved.nickname).isEqualTo(member.nickname)
         assertThat(saved.profileImageAsset?.id).isEqualTo(old.id)
+    }
+
+    @Test
+    fun `a prohibited nickname is rejected before replacement upload`() {
+        val member = member(image = asset("prohibited"))
+        val old = saved(member).profileImageAsset
+        val photo = photo(1, 2, 3)
+
+        val error = assertThrows<BusinessException> {
+            edit(member, nickname = "씨발", action = ProfileImageAction.REPLACE, photo = photo)
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(error.detail).isEqualTo(mapOf("fields" to listOf("nickname")))
+        verifyNoInteractions(images)
+        assertThat(saved(member).nickname).isEqualTo(member.nickname)
+        assertThat(saved(member).profileImageAsset?.id).isEqualTo(old?.id)
+    }
+
+    @Test
+    fun `profile final save rechecks profanity and compensates uploaded file`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val old = asset("profile-profanity-old")
+        val member = member(image = old)
+        val photo = photo(4, 5, 6)
+        val uploaded = StoredImage(
+            publicId("profile-profanity-new"),
+            "https://res.cloudinary.com/test/profile-profanity-new.jpg"
+        )
+        `when`(images.upload(photo)).thenAnswer {
+            dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+            uploaded
+        }
+
+        val error = assertThrows<BusinessException> {
+            edit(member, nickname = "fuck", action = ProfileImageAction.REPLACE, photo = photo)
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(saved(member).nickname).isEqualTo(member.nickname)
+        assertThat(saved(member).profileImageAsset?.id).isEqualTo(old.id)
+        verify(images).delete(uploaded.publicId)
     }
 
     @Test

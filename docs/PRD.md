@@ -36,6 +36,19 @@
 2026-10-31 번치 5장 원문과 사용자 답변으로 외부 실제 Stage, 직접 나가기·내보내짐 후 재참여, 남은 발행 기록 표시 복구, 일반 멤버로 재참여를 확정했습니다. 기능 구현·자동 검증·앱 수동 검증·출시는 각각 구분합니다.
 2026-10-17 사용자 합의로 확정한 미정 정책과 API는 [이슈 #5 계약](specs/login-onboarding-api.md)을 따릅니다. 해당 결정이 원문의 미정·제안보다 우선하며 구현 완료를 의미하지는 않습니다. 요청·응답·경로·오류 코드·토큰 구조 등 API 계약은 이 PRD에서 새로 정하지 않습니다. 기존 인증 기반은 dev에 커밋되어 있으며 제품 가입·온보딩 전체의 출시 완료를 뜻하지 않습니다.
 
+2026-11-16 이슈 #161 공통 금칙어 정책은 [금칙어 검사 계약](specs/profanity.md)을 단일 기준으로
+삼는다. 닉네임·번치 이름 사용 가능성 조회는 기존 `normalizedValue`·`available`을 유지하고
+`status: AVAILABLE | DUPLICATE | PROHIBITED_WORD`를 추가하며, `available`은 AVAILABLE일 때만
+true다. 최종 저장 거부는 HTTP 400 `COMMON_003`과 `detail.fields`로 식별하고 적발 단어는
+반환하지 않는다. 번들 발행의 멤버 코멘트 위반은 `fields: ["comments"]`와
+`commentMemberIds`로 구분한다. 초안 자동 저장은 허용하고 검사 상태·최신 `publishBlockers`만
+기존 snapshot과 이벤트 data에 추가한다. `BundleSnapshot.profanity`는 DRAFT에서 현재 객체,
+PUBLISHED에서 `null`이며, 실시간 envelope·기존 필드는 유지한다. 닉네임·가입은
+[인증](specs/auth.md)·[온보딩](specs/onboarding.md)·[로그인·온보딩 API](specs/login-onboarding-api.md),
+번치 프로필은 [홈·프로필 계약](specs/bunch-home-profile.md), 번들은 [번들 API](specs/bundle-api.md)·
+[제목 CRDT](specs/bundle-title-crdt.md)·[피드 댓글](specs/feed-comments.md)·
+[발행본 편집](specs/published-bundle-edit.md)의 각 입력 경계를 따른다.
+
 2026-11-10 재전달 「사진함번들 만들기」의 4.1.1~4.1.4(J21/J24), 3.3.4(J14/K14)는
 #122의 생성자+명시 선택 멤버 계약에 적용한다. 업로더 자동 참여를 대체한다.
 사용자 보완으로 삭제 사진은 경로 없이 전체 거부+누락 ID 반환으로 통일하며 화면별 재요청은 프론트가 담당한다.

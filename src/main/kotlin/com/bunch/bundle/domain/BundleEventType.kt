@@ -3,6 +3,7 @@ package com.bunch.bundle.domain
 enum class BundleEventType {
     CREATED,
     TITLE,
+    PROFANITY,
     VISIBILITY,
     DATE,
     LOCATION,

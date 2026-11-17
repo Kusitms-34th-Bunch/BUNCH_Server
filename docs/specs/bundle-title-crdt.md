@@ -27,9 +27,13 @@ Maven JAR에는 macOS arm64/x64와 Linux GNU arm64/x64 바이너리가 포함된
 가입 완료·활성 번치 소속·DRAFT 참여자만 가능하다. mode/version을 보내지 않는다.
 현재 상태와 incoming 전체 저장 문서를 Automerge로 병합하고, 제목·바이너리·버전·revision을
 한 트랜잭션에 저장한다. `X-Request-Id`는 선택 UUID이며 기존 envelope로 응답한다.
+병합 응답의 `BundleTitleState`와 DRAFT snapshot은 [공통 금칙어 검사 계약](profanity.md)에
+따른 현재 `profanity` 객체와 `publishBlockers`를 기존 필드에 additive로 항상 포함한다.
+PUBLISHED snapshot의 `profanity`는 `null`이며 소급 재검사하지 않는다. 금칙어가 있어도 초안
+CRDT 원문은 수정하지 않는다.
 
 ```json
-{"success":true,"data":{"title":"부산 여행 1일차","titleCrdtState":"<base64>","titleVersion":3,"titleTooLong":false},"error":null}
+{"success":true,"data":{"title":"부산 여행 1일차","titleCrdtState":"<base64>","titleVersion":3,"titleTooLong":false,"profanity":{"dictionaryVersion":"<dictionary-version>","titleHasProhibitedWord":false,"comments":[]},"publishBlockers":[]},"error":null}
 ```
 
 snapshot에도 titleCrdtState/titleTooLong이 있다. 구 초안은 최초 잠금 조회에서 문서를
@@ -45,6 +49,8 @@ TITLE 이벤트는 value/version 및 title/titleVersion/titleCrdtState/titleTooL
 
 raw CRDT의 문자 위치를 유지한다. 표시 제목만 NFC·trim하며 40자 초과 병합을 자르지 않는다.
 발행 blocker TITLE_TOO_LONG으로 업로드를 막고 40자 이하로 수정하면 해제한다.
+`TITLE_PROHIBITED_WORD`도 현재 병합 제목에 대한 발행 blocker이며, 최종 발행 잠금에서 최신
+제목을 다시 검사한다. 금칙어 검사 자체는 CRDT의 문서 병합·버전 규칙을 바꾸지 않는다.
 기존 `PUT /title`은 전환용이며 최대40자·expectedVersion을 검사한다.
 저장 시 같은 TEXT를 splice하여 기존 바이너리도 갱신한다.
 

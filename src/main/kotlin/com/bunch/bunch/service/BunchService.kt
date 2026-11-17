@@ -6,6 +6,8 @@ import com.bunch.global.common.ProfileText
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
+import com.bunch.global.profanity.NameAvailabilityStatus
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.MemberRepository
 import org.springframework.stereotype.Service
@@ -26,6 +28,7 @@ class BunchService(
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val profanity: ProfanityFilter,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactions = TransactionTemplate(transactionManager)
@@ -34,13 +37,17 @@ class BunchService(
     fun nameAvailability(userId: Long, name: String, excludeBunchId: Long? = null): NameAvailability {
         completed(userId)
         val normalized = ProfileText.name(name)
-        val available = if (excludeBunchId == null) {
-            !bunches.existsByName(normalized)
-        } else {
+        if (excludeBunchId != null) {
             requireOwner(userId, excludeBunchId)
-            !bunches.existsByNameAndIdNot(normalized, excludeBunchId)
         }
-        return NameAvailability(normalized, available)
+        val status = when {
+            profanity.contains(normalized) -> NameAvailabilityStatus.PROHIBITED_WORD
+            excludeBunchId == null && bunches.existsByName(normalized) -> NameAvailabilityStatus.DUPLICATE
+            excludeBunchId != null && bunches.existsByNameAndIdNot(normalized, excludeBunchId) ->
+                NameAvailabilityStatus.DUPLICATE
+            else -> NameAvailabilityStatus.AVAILABLE
+        }
+        return NameAvailability(normalized, status == NameAvailabilityStatus.AVAILABLE, status)
     }
 
     @Transactional
@@ -52,6 +59,7 @@ class BunchService(
 
         val name = ProfileText.name(request.name)
         val introduction = ProfileText.introduction(request.introduction)
+        val fields = mapOf("name" to name, "introduction" to introduction)
         val fingerprint = fingerprint(name, introduction, request.visibility.name, request.characterType.name)
         val now = Instant.now()
 
@@ -62,6 +70,7 @@ class BunchService(
         }
 
         if (memberships.countByMemberIdAndStatus(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
+        profanity.requireClean(fields)
         if (
             bunches.insertIfNameAvailable(
                 userId,

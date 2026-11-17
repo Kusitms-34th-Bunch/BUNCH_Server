@@ -20,6 +20,7 @@ import com.bunch.bundle.dto.BundleLocationIntentRequest
 import com.bunch.bundle.domain.BundleLocationIntent
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.service.BundleService
+import com.bunch.bundle.service.BundleProfanityRecheckWorker
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
@@ -74,6 +75,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var presence: BundlePresenceService
     @Autowired private lateinit var events: ApplicationEventPublisher
     @Autowired private lateinit var bundles: BundleService
+    @Autowired private lateinit var profanityRechecks: BundleProfanityRecheckWorker
     @Autowired private lateinit var locations: BundleLocationService
     @Autowired private lateinit var tokenProvider: TokenProvider
     @Autowired private lateinit var sessions: RefreshTokenRepository
@@ -104,6 +106,96 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         ownAssets.forEach { jdbc.update("DELETE FROM image_assets WHERE id = ?", it) }
+    }
+
+    @Test
+    fun `profanity backfill broadcasts warnings on both connections without recording an edit`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+        val saved = putTitle(fixture, "씨발", UUID.randomUUID().toString())
+        owner.json { it.path("type").asText() == "TITLE" }
+        guest.json { it.path("type").asText() == "TITLE" }
+        jdbc.update("UPDATE bundles SET title_has_prohibited_word=false,profanity_dictionary_version=NULL WHERE id=?",
+            fixture.bundleId)
+
+        assertThat(profanityRechecks.runOnce()).isEqualTo(1)
+
+        listOf(owner, guest).forEach { client ->
+            val event = client.json { it.path("type").asText() == "PROFANITY" }
+            assertThat(event.path("revision").asLong()).isEqualTo(saved.path("revision").asLong() + 1)
+            assertThat(event.path("data").path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
+            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
+                .contains("TITLE_PROHIBITED_WORD")
+        }
+        val recovered = getSnapshot(fixture, fixture.guest)
+        assertThat(recovered.path("updatedAt")).isEqualTo(saved.path("updatedAt"))
+        assertThat(recovered.path("titleVersion")).isEqualTo(saved.path("titleVersion"))
+    }
+
+    @Test
+    fun `draft profanity saves reach both connections and reconnect restores flags until each field is cleared`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+
+        val title = putTitle(fixture, "씨.발", UUID.randomUUID().toString())
+        listOf(owner, guest).forEach { client ->
+            val event = client.json { it.path("type").asText() == "TITLE" }
+            assertThat(event.path("data").path("value").asText()).isEqualTo("씨.발")
+            assertThat(event.path("data").path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
+            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
+                .contains("TITLE_PROHIBITED_WORD")
+            assertThat(event.path("revision").asLong()).isEqualTo(title.path("revision").asLong())
+        }
+
+        val comment = bundles.comment(
+            actor(fixture.guest), fixture.bunchId, fixture.bundleId,
+            BundleTextRequest("F.U.C.K", 0, BundleStatus.DRAFT), UUID.randomUUID().toString()
+        )
+        listOf(owner, guest).forEach { client ->
+            val event = client.json { it.path("type").asText() == "COMMENT" }
+            assertThat(event.path("data").path("memberId").asLong()).isEqualTo(fixture.guest.memberId)
+            assertThat(event.path("data").path("content").asText()).isEqualTo("F.U.C.K")
+            assertThat(event.path("data").path("profanity").path("comments")
+                .single { it.path("memberId").asLong() == fixture.guest.memberId }
+                .path("hasProhibitedWord").asBoolean()).isTrue()
+            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
+                .contains("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
+        }
+
+        guest.close()
+        val reconnected = connect(fixture.guest)
+        subscribe(reconnected, fixture)
+        val recovered = getSnapshot(fixture, fixture.guest)
+        assertThat(recovered.path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
+        assertThat(recovered.path("profanity").path("comments")
+            .single { it.path("memberId").asLong() == fixture.guest.memberId }
+            .path("hasProhibitedWord").asBoolean()).isTrue()
+
+        putTitle(fixture, "함께한 여행", UUID.randomUUID().toString(), title.path("titleVersion").asLong())
+        listOf(owner, reconnected).forEach { client ->
+            val state = client.json { it.path("type").asText() == "TITLE" }.path("data")
+            assertThat(state.path("profanity").path("titleHasProhibitedWord").asBoolean()).isFalse()
+            assertThat(state.path("publishBlockers").map { it.asText() })
+                .doesNotContain("TITLE_PROHIBITED_WORD").contains("COMMENTS_PROHIBITED_WORD")
+        }
+        bundles.comment(
+            actor(fixture.guest), fixture.bunchId, fixture.bundleId,
+            BundleTextRequest("즐거운 여행", comment.comments.single { it.memberId == fixture.guest.memberId }.version,
+                BundleStatus.DRAFT), UUID.randomUUID().toString()
+        )
+        listOf(owner, reconnected).forEach { client ->
+            val state = client.json { it.path("type").asText() == "COMMENT" }.path("data")
+            assertThat(state.path("profanity").path("comments").map { it.path("hasProhibitedWord").asBoolean() })
+                .doesNotContain(true)
+            assertThat(state.path("publishBlockers").map { it.asText() })
+                .doesNotContain("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
+        }
     }
 
     @Test
