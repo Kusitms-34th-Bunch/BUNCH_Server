@@ -11,3 +11,5 @@ data class CreateBunchRequest(
 )
 
 data class InvitationRequest(val invitation: String)
+
+data class ValidateBunchIntroductionRequest(val introduction: String)

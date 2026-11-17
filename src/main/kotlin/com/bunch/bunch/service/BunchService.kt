@@ -50,6 +50,12 @@ class BunchService(
         return NameAvailability(normalized, status == NameAvailabilityStatus.AVAILABLE, status)
     }
 
+    @Transactional(readOnly = true)
+    fun validateIntroduction(userId: Long, introduction: String) {
+        completed(userId)
+        profanity.requireClean(mapOf("introduction" to ProfileText.introduction(introduction)))
+    }
+
     @Transactional
     fun create(userId: Long, key: UUID, request: CreateBunchRequest): BunchResponse {
         val member = members

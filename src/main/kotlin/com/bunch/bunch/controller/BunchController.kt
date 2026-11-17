@@ -1,6 +1,7 @@
 package com.bunch.bunch.controller
 
 import com.bunch.bunch.dto.CreateBunchRequest
+import com.bunch.bunch.dto.ValidateBunchIntroductionRequest
 import com.bunch.bunch.service.BunchService
 import com.bunch.bunch.service.InvitationService
 import com.bunch.global.common.ApiResponse
@@ -19,6 +20,15 @@ class BunchController(private val bunches: BunchService, private val invitations
         @RequestParam name: String,
         @RequestParam(required = false) excludeBunchId: Long?
     ) = ApiResponse.ok(bunches.nameAvailability(userId.toLong(), name, excludeBunchId))
+
+    @PostMapping("/introduction-validation")
+    fun validateIntroduction(
+        @AuthenticationPrincipal userId: String,
+        @RequestBody request: ValidateBunchIntroductionRequest
+    ): ApiResponse<Unit> {
+        bunches.validateIntroduction(userId.toLong(), request.introduction)
+        return ApiResponse.empty(Unit)
+    }
 
     @PostMapping
     fun create(

@@ -62,7 +62,10 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   연속 자모를 하나의 grapheme로 합쳐 길이 제한을 우회하지 않는다.
   대소문자·내부 공백은 구분하며 조회·저장·요청 fingerprint에 같은 규칙을 쓴다.
   DB도 대소문자를 구분하는 유일성 제약을 둔다. 서버는 금지 문자를 임의 삭제하지 않는다.
-- 소개는 앞뒤 공백·빈 줄 제거 후 1~50개 grapheme. 이모지·내부 줄바꿈을 허용한다.
+- 소개는 `ProfileText.introduction`을 재사용해 앞뒤 공백·빈 줄 제거(trim) 후 1~50개 grapheme이며
+  공백·줄바꿈만 있으면 거부한다. 모든 문자·이모지·내부 줄바꿈을 허용한다.
+  소개 단계 「다음」에서 [사전 검증 API](#bunch-introduction-validation)를 호출하고,
+  최종 생성(2.2.10)에서도 이름과 소개의 형식·금칙어를 다시 검사한다.
 - CharacterType: TYPE_1 / TYPE_2 / TYPE_3 / TYPE_4. 생성 후 변경하지 않는다.
   이미지·분위기 이름은 앱 매핑이며 초기 Stage는 1이다. Stage·발행 개수는 저장하지 않는다.
 - 앱은 JPEG/PNG/HEIC/WebP를 선택받아 정사각형 JPEG로 변환한다. 서버 wire는 JPEG만 받는다.
@@ -139,6 +142,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available,status |
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
 | GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available,status |
+| POST /api/v1/bunches/introduction-validation | JSON introduction:String, 인증·가입 완료 필수 | null, 소개 형식·금칙어 사전 검증, DB 쓰기·Idempotency-Key 없음 ([상세](#bunch-introduction-validation)) |
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
@@ -155,6 +159,52 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 
 온보딩 상태 조회는 `GET /api/v1/members/me/onboarding`만 제공한다. 기존
 `/api/v1/auth/session` 경로는 alias로 유지하지 않으며 인증된 요청도 404다.
+
+<a id="bunch-introduction-validation"></a>
+### 번치 소개 사전 검증 — 2.2.6, 2.2.8 (2026-11-17 승인)
+
+`POST /api/v1/bunches/introduction-validation`은 유효한 access JWT·활성 세션으로 인증한
+가입 완료(`signupStatus: COMPLETED`) 회원의 소개를 검사한다.
+`Content-Type: application/json`으로 필수 문자열 `{"introduction":"우리의 순간 📷\n함께 기록해요"}`를
+보낸다. `Idempotency-Key`를 요구하지 않으며 DB 쓰기·초안 저장·번치 생성은 하지 않는다.
+
+서버는 생성과 동일하게 앞뒤를 trim하고 빈 값·1~50 grapheme 여부를 검증한다.
+모든 문자·이모지·내부 줄바꿈을 허용하며, 통과한 소개를 공통 금칙어 검사기로 검사한다.
+성공은 HTTP 200이며 정규화된 입력이나 별도 검증 토큰을 반환하지 않는다.
+
+```json
+{"success":true,"data":null,"error":null}
+```
+
+| 실패 | HTTP / 오류 |
+| --- | --- |
+| 깨진 JSON·필수 introduction 문자열 누락/null·요청 형식 불일치 | 400 `COMMON_002 / error.invalid_json` (`INVALID_JSON`), 기존 JSON 처리 규칙 |
+| trim 후 빈 값·공백/줄바꿈만 입력·1~50 grapheme 길이 위반 | 400 `COMMON_001 / error.invalid_input` (`INVALID_INPUT`) |
+| 소개 금칙어 | 400 `COMMON_003 / error.prohibited_word`, `detail.fields:["introduction"]` |
+| 미인증·유효하지 않은 access JWT/세션 | 401 `AUTH_001 / error.unauthorized` |
+| 가입 미완료 | 403 `AUTH_015 / error.signup_incomplete` (`SIGNUP_INCOMPLETE`) |
+
+실패도 기존 envelope를 사용한다. 금칙어 응답은 아래와 같으며 적발 단어를 응답·로그에 남기지 않는다.
+
+```json
+{"success":false,"data":null,"error":{"code":"COMMON_003","message":"error.prohibited_word","detail":{"fields":["introduction"]}}}
+```
+
+프런트엔드는 2.2.6/2.2.8의 「다음」에 이 API 호출을 연결해야 한다. 다음을 누를 때의 최신
+소개를 보내고, 응답이 해당 요청과 정확히 같은 현재 최신 입력에 대한 성공일 때만 분위기 단계로
+이동한다. 이전 입력의 성공·실패 응답은 현재 입력의 이동·오류 표시에 적용하지 않는다.
+금칙어 응답이면 현재 단계에 머물며 빨간색 「사용할 수 없는 단어가 포함되어 있어요」를 표시하고,
+소개를 수정하면 문구를 지운다. 검사 중·네트워크/서버 오류·기타 검증 오류에는 이동하지 않고
+입력을 유지하며 재시도를 허용한다. 소개의 debounce·글자마다 실시간 검사는 요구하지 않는다.
+프런트엔드 API 호출·화면 동작은 연동이 필요하며 이 문서는 UI 구현 완료를 주장하지 않는다.
+
+사전 검증은 저장 승인이 아니다. 2.2.10 최종 생성은 사전 검증 우회·이후 입력 변경에도
+이름과 소개의 형식·금칙어를 다시 검사하며 기존 생성 멱등 재시도 계약은 유지한다.
+
+검증 기준: HTTP 200 null envelope, trim·grapheme 경계·모든 문자/내부 줄바꿈, JSON 오류와
+내용 오류 구분, introduction 필드 금칙어 오류·단어 비노출, 미인증·가입 미완료,
+DB 무변경·요청 키 없이 성공, 최종 생성 재검사를 확인한다. 최신 입력과 응답 일치·빨간 문구·
+수정 시 해제·검사 중/오류 시 이동 금지·재시도는 실제 iOS/WebView 수동 검증과 구분한다.
 
 <a id="member-profile"></a>
 ### 본인 프로필 조회 — 이슈 #11 (2026-10-18 추가)
