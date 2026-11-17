@@ -16,6 +16,9 @@ import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.profanity.ProfanityDictionary
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.notification.domain.NotificationRepository
@@ -39,6 +42,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -90,6 +94,9 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var mappings: org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 
+    @MockitoSpyBean
+    private lateinit var profanity: ProfanityFilter
+
     private val sessionIds = mutableListOf<Pair<String, Long>>()
 
     @AfterEach
@@ -130,6 +137,50 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.IDEMPOTENCY_CONFLICT) {
             service.create(owner, bundle.id, key, CreateSocialCommentRequest("다른 내용"))
         }
+    }
+
+    @Test
+    fun `new root and reply reject prohibited content without persisting rows`() {
+        val owner = member()
+        val bundle = published(owner, publicBunch(owner))
+
+        val rootError = org.junit.jupiter.api.assertThrows<BusinessException> {
+            service.create(owner, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest("시발"))
+        }
+        assertThat(rootError.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(rootError.detail).isEqualTo(mapOf("fields" to listOf("content")))
+
+        val root = write(owner, bundle.id)
+        val replyError = org.junit.jupiter.api.assertThrows<BusinessException> {
+            service.create(owner, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest("ㅅㅂ", root.id))
+        }
+        assertThat(replyError.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(replyError.detail).isEqualTo(mapOf("fields" to listOf("content")))
+        assertThat(count("social_comments")).isEqualTo(1)
+    }
+
+    @Test
+    fun `successful comment and reply replays survive a dictionary change`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val owner = member()
+        val bundle = published(owner, publicBunch(owner))
+        val rootKey = UUID.randomUUID()
+        val rootRequest = CreateSocialCommentRequest("fuck")
+        val root = service.create(owner, bundle.id, rootKey, rootRequest)
+        val replyKey = UUID.randomUUID()
+        val replyRequest = CreateSocialCommentRequest("fuck", root.id)
+        val reply = service.create(owner, bundle.id, replyKey, replyRequest)
+
+        dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+        assertThat(service.create(owner, bundle.id, rootKey, rootRequest).id).isEqualTo(root.id)
+        assertThat(service.create(owner, bundle.id, replyKey, replyRequest).id).isEqualTo(reply.id)
+        assertError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            service.create(owner, bundle.id, rootKey, CreateSocialCommentRequest("fuck!"))
+        }
+        assertThat(count("social_comments")).isEqualTo(2)
     }
 
     @Test
@@ -598,6 +649,12 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         mvc.perform(post(path).header(HttpHeaders.AUTHORIZATION, bearer).header("Idempotency-Key", UUID.randomUUID())
             .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"   \"}"))
             .andExpect(status().isBadRequest)
+        mvc.perform(post(path).header(HttpHeaders.AUTHORIZATION, bearer)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(CreateSocialCommentRequest("fuck"))))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error.code").value(ErrorCode.PROHIBITED_WORD.code))
+            .andExpect(jsonPath("$.error.detail.fields[0]").value("content"))
         val response = mvc.perform(post(path).header(HttpHeaders.AUTHORIZATION, bearer)
             .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(CreateSocialCommentRequest("댓글\n두줄"))))

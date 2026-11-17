@@ -41,6 +41,8 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       timeout: 2s
+profanity:
+  dictionary-path: ${PROFANITY_DICTIONARY_PATH:}
 jwt:
   secret: ${JWT_SECRET}
 auth:

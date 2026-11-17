@@ -23,6 +23,10 @@
 caption 컬럼·값과 마이그레이션 이력은 내부 과거 데이터로만 보존하며 새 DDL이나 호환
 계층은 추가하지 않는다.
 
+제목·참여자 코멘트·발행 입력의 금칙어 검사 연계는 [공통 금칙어 검사 계약](profanity.md)을
+따른다. 이 문서는 아래의 additive snapshot/event 필드와 발행 오류만 고정하며, 공통 정규화·
+사전 로딩·서버 재시작 반영 규칙을 복제하지 않는다.
+
 장소 목록의 REST·이벤트·snapshot·내부 일괄 편집/콕 연계는
 [장소 목록 계약](bundle-locations.md)을 따른다. `BundleSnapshot`에 `locations`와
 `locationVersion`이 추가되며 기존 발행 조건에 장소 필수 조건은 추가하지 않는다.
@@ -264,6 +268,8 @@ ID가 아니라 번들 내부 `BundlePhoto.id`다.
 - 제목은 NFC 정규화 후 trim하며 줄바꿈을 허용하지 않고 최대 40 grapheme이다.
 - 코멘트는 NFC 정규화하며 최대 400 grapheme이다. 발행 후에는 수정할 수 없다.
 - 초안 제목은 빈 값일 수 있지만 발행 조건에서 `TITLE_REQUIRED`로 막힌다.
+- 초안 제목·코멘트 자동 저장은 금칙어가 있어도 허용한다. 응답에는 현재 `profanity` 상태와
+  `publishBlockers`를 additive로 포함하며 CRDT 원문·기존 title/comment version은 바꾸지 않는다.
 
 새 공동 편집은 [제목 CRDT](bundle-title-crdt.md), [장소 작업](bundle-locations.md),
 [typing/presence](bundle-realtime-107.md)를 쓴다. 기존 문자열 제목 저장은 expectedVersion을
@@ -492,13 +498,18 @@ visibility는 최종 선택 값이다. expectedRevision은 선택 호환 필드�
 | --- | --- |
 | TITLE_REQUIRED | 빈 제목 |
 | TITLE_TOO_LONG | CRDT 병합 제목이 40 grapheme 초과 |
+| TITLE_PROHIBITED_WORD | 제목에 금칙어가 있음 |
 | VISIBILITY_REQUIRED | 최종 범위도 기존 범위도 없음 (최종 발행 전용) |
 | PARTICIPANTS_REQUIRED | 참여자 2명 미만 |
 | PARTICIPANT_INACTIVE | 비활성 참여자 |
 | COMMENTS_REQUIRED | 코멘트 미작성 참여자 |
+| COMMENTS_PROHIBITED_WORD | 참여자 코멘트 중 하나 이상에 금칙어가 있음 |
 | PHOTOS_REQUIRED | 사진 1~20장 조건 실패 |
 
 실제 발행자의 `publishedBy`와 `publisherNickname`은 snapshot·PUBLISHED에 포함한다.
+잠금 아래 최신 제목·참여자 코멘트를 재검사하며 금칙어 위반이면 일반 `BUNDLE_005`가 아니라
+HTTP 400 `COMMON_003`을 반환한다. `detail.fields`는 `title`·`comments`를, 코멘트 위반은
+`detail.commentMemberIds`를 사용한다. 적발 단어는 반환하지 않는다.
 이탈자는 기존 익명화 규칙으로 이름을 표시하며 과거 알 수 없는 발행자는 null이다.
 같은 Idempotency-Key와 같은 body는 기존 결과를 반환한다. 같은 key의 다른 body는 REQUEST_001,
 다른 key는 최초 body fingerprint와 같을 때만 같은 발행을 반환한다.
@@ -544,6 +555,7 @@ error.message = error.idempotency_conflict
 | `comments` | `BundleCommentResponse[]` | member별 코멘트 |
 | `dateChips` | `LocalDate[]` | 날짜가 지정되지 않았을 때의 촬영일 추천 |
 | `publishBlockers` | `String[]` | 초안의 현재 발행 차단 사유, 발행본은 빈 목록 |
+| `profanity` | object \| null | DRAFT에서는 현재 `dictionaryVersion`, `titleHasProhibitedWord`, `comments[{memberId,hasProhibitedWord}]` 객체를 포함한다. PUBLISHED에서는 소급 재검사하지 않으며 항상 `null`이다 |
 | `permissions` | `BundlePermissions` | 현재 요청자 권한 |
 | `createdAt` | `Instant` | 생성 시각 |
 | `updatedAt` | `Instant` | 마지막 내용 변경 시각 |
@@ -551,6 +563,12 @@ error.message = error.idempotency_conflict
 | `likeCount` | `Long` | 공통 접근 필터를 적용한 소셜 좋아요 수 |
 | `likedByCurrentBunch` | `Boolean` | 현재 번치 공동 좋아요 상태 |
 | `commentCount` | `Long` | 삭제 자리를 포함한 소셜 댓글·답글 수. comments 배열 크기와 다름 |
+
+초안 조회의 `profanity`와 `publishBlockers`는 현재 서버가 기동 시 한 번 로딩한 사전으로
+실제 제목·현재 참여자 코멘트에서 계산한다. 금칙어 계산은 DB·revision·필드 버전·updatedAt·사용자
+활동을 변경하지 않으며, 기존 미초기화 제목 CRDT 복구는 유지한다.
+실제 제목·코멘트·참여자 편집은 내용과 검사 상태를 함께 저장하고,
+응답과 동일한 상태를 기존 `TITLE`·`COMMENT`·`PARTICIPANTS` 이벤트로 전달한다.
 
 `dateChips`는 지정 날짜가 null인 경우에만 같은 번들 사진의 현지 촬영일을 그대로
 모아 빈도 내림차순·날짜 오름차순으로 최대 세 개 반환한다. 미래 촬영일은 제외한다.
@@ -667,6 +685,7 @@ nickname/imageUrl/profileAvailable을 제공한다. 비활성 작성자는 conte
 | --- | --- | --- | --- |
 | 400 | `COMMON_001` | 잘못된 UUID·필수 header·범위·문자열 또는 누락/타 번치/비READY Photo 선택 | validation이면 `field`, `reason`을 포함할 수 있다. |
 | 400 | `COMMON_002` | JSON 역직렬화 실패 | 보통 null |
+| 400 | `COMMON_003` | 최종 저장·발행 입력에 금칙어가 있음 | `{"fields":["title","comments"],"commentMemberIds":[123]}`처럼 위반 필드와 코멘트 member ID를 포함할 수 있음. 적발 단어는 포함하지 않음 |
 | 401 | `AUTH_001` | access JWT·활성 session 없음 | null |
 | 403 | `AUTH_002` | 번치 소속·작업 권한 없음 | null |
 | 404 | `RESOURCE_001` | 없는 번들·번들 사진 또는 경로 번치와 다른 번들 | null |
@@ -790,13 +809,13 @@ Kotlin 타입은 `BundleRealtimeMessage<T>`이고 `type`은 `BundleEventType` en
 
 | `type` | `data` |
 | --- | --- |
-| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, locations/locationVersion, publishedAt, photos, dateChips, participants, comments |
-| `TITLE` | `{value, version, title, titleVersion, titleCrdtState, titleTooLong}` |
+| `CREATED` | status, title/titleVersion, visibility/visibilityVersion, date/dateVersion, locations/locationVersion, publishedAt, photos, dateChips, participants, comments, `profanity`, `publishBlockers` |
+| `TITLE` | 기존 `{value, version, title, titleVersion, titleCrdtState, titleTooLong}` + `profanity`, `publishBlockers` |
 | `VISIBILITY` | `{value, version}` |
 | `DATE` | `{value, version, dateChips}` |
 | `LOCATION` | `{locations: BundleLocationResponse[], version: locationVersion}` |
-| `COMMENT` | `BundleCommentResponse` |
-| `PARTICIPANTS` | `{participants, comments, removedCommentMemberIds?}` |
+| `COMMENT` | 기존 `BundleCommentResponse` 필드 + `profanity`, `publishBlockers` |
+| `PARTICIPANTS` | 기존 `{participants, comments, removedCommentMemberIds?}` + `profanity`, `publishBlockers` |
 | `PHOTOS` | `{photos, dateChips}` |
 | `PUBLISHED` | `CREATED`와 같은 전체 내용. status=PUBLISHED |
 | `EDITED` | 발행본 전체 일괄 저장. `CREATED`와 같은 전체 내용 |

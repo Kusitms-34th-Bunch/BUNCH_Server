@@ -16,6 +16,7 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.ExternalIdentityRepository
+import com.bunch.member.domain.MemberConsentRepository
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.dto.WithdrawalCheckResponse
 import com.bunch.member.dto.WithdrawalOwnerBunch
@@ -40,6 +41,7 @@ class MemberWithdrawalService(
     private val exits: BunchMembershipExitService,
     private val deletions: BunchDeletionService,
     private val identities: ExternalIdentityRepository,
+    private val consents: MemberConsentRepository,
     private val socialComments: SocialCommentService,
     private val bundles: BundleService,
     private val pushDevices: PushDeviceService,
@@ -103,6 +105,7 @@ class MemberWithdrawalService(
         accessNotices.removeAllOf(memberId)
         actionRequests.deleteByMemberId(memberId)
         identities.deleteByMemberId(memberId)
+        consents.deleteByMemberId(memberId)
 
         // Deleting a bunch clears the persistence context, so the account is read again before it is changed.
         val member = members.findLockedById(memberId) ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)

@@ -54,11 +54,20 @@ class Photo(
     val createdAt: Instant = Instant.now(),
 
     @Column(name = "date_batch_id")
-    val dateBatchId: UUID? = null
+    val dateBatchId: UUID? = null,
+
+    @Column(name = "original_file_hash", length = 64)
+    val originalFileHash: String? = null,
+
+    @Column(name = "captured_utc_offset", length = 6)
+    val capturedUtcOffset: String? = null
 ) {
     init {
-        require(SHA256_HEX.matches(fileHash)) {
+        require(isSha256Hex(fileHash)) {
             "fileHash must be a lowercase SHA-256 hexadecimal value"
+        }
+        require(originalFileHash.let { it == null || isSha256Hex(it) }) {
+            "originalFileHash must be a lowercase SHA-256 hexadecimal value"
         }
         require(capturedTime == null || capturedDate != null) {
             "capturedTime requires capturedDate"
@@ -75,9 +84,15 @@ class Photo(
         require(dateBatchId == null || dateSource == DateSource.USER) {
             "only a photo the user dated has a date batch"
         }
+        require(capturedUtcOffset.let { it == null || UtcOffset.isValid(it) }) {
+            "capturedUtcOffset must be a UTC offset from -12:00 to +14:00"
+        }
     }
 
-    private companion object {
-        val SHA256_HEX = Regex("[0-9a-f]{64}")
+    companion object {
+        private val SHA256_HEX = Regex("[0-9a-f]{64}")
+
+        /** Whether the value is a SHA-256 in lowercase hexadecimal, the form of every photo hash. */
+        fun isSha256Hex(value: String): Boolean = SHA256_HEX.matches(value)
     }
 }

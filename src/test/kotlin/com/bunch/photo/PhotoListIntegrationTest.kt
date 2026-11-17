@@ -20,6 +20,7 @@ import java.util.UUID
 class PhotoListIntegrationTest : PhotoHttpTestSupport() {
     @AfterEach
     fun cleanPhotoListFixtures() {
+        deleteInsertedBundles()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-list/%'")
@@ -251,6 +252,29 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
     }
 
     private data class Page(val ids: List<Long>, val nextCursor: String?)
+
+    @Test
+    fun `marks the photos a draft bundle uses and no others`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val inDraft = photo(bunchId, "2026-10-19", "10:00:00")
+        val inPublished = photo(bunchId, "2026-10-19", "11:00:00")
+        val inBoth = photo(bunchId, "2026-10-19", "12:00:00")
+        val inTwoDrafts = photo(bunchId, "2026-10-19", "13:00:00")
+        val unused = photo(bunchId, "2026-10-19", "14:00:00")
+        insertBundleWith(bunchId, ownerId, "DRAFT", listOf(inDraft, inBoth, inTwoDrafts))
+        insertBundleWith(bunchId, ownerId, "DRAFT", listOf(inTwoDrafts))
+        insertBundleWith(bunchId, ownerId, "PUBLISHED", listOf(inPublished, inBoth))
+
+        val photos = list(ownerId, bunchId).andExpect(status().isOk).andReturn().data().path("photos")
+
+        assertThat(photos).hasSize(5)
+        assertThat(photos.usedInDraftBundleByPhotoId())
+            .containsEntry(inDraft, true)
+            .containsEntry(inBoth, true)
+            .containsEntry(inTwoDrafts, true)
+            .containsEntry(inPublished, false)
+            .containsEntry(unused, false)
+    }
 
     private fun page(memberId: Long, bunchId: Long, size: Int, cursor: String?): Page {
         val params = mutableMapOf("size" to size.toString())

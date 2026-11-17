@@ -46,18 +46,26 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   동의를 유지한 약관 화면 표시를 허용하고 재저장을 요구하지 않는다.
 - 별도 선택 동의는 분석 목적·회원 탈퇴 시까지 보관을 안내한다. 미동의 상태의 연도/성별
   제출은 400이며 미입력·미동의는 가입을 막지 않는다. 인구통계는 다른 사용자에게 비공개다.
-- Gender: FEMALE / MALE, 미선택은 null. 연도는 1950..(현재 서울 연도-14) 범위다.
+- Gender: FEMALE / MALE, 미선택은 null. 연도는 1930..(현재 서울 연도-14) 범위다(1.4.5). 프로필 수정도 같은 규칙을 쓴다.
   가입 완료는 필수 동의와 최종 닉네임 검증 후 프로필·상태·시각을 함께 저장한다.
   동일 회원의 가입 완료 재요청은 같은 프로필이면 기존 결과를 반환하며 다른 입력은 409다.
 
 ## 문자·이미지
+
+닉네임·번치 이름·소개를 저장할 때의 금칙어 검사와 이름 사용 가능성의 additive `status`는
+[공통 금칙어 검사 계약](profanity.md)을 따른다. 기존 `normalizedValue`·`available`, 형식·중복·
+권한 판단은 바꾸지 않으며 `available`은 `AVAILABLE`일 때만 true다. 최종 저장 거부는 HTTP 400
+`COMMON_003`/`error.prohibited_word`와 `detail.fields`를 사용하고 단어 원문은 반환하지 않는다.
 
 - 닉네임·번치 이름은 trim+NFC 후 1~12자, 한글·영문·숫자·ASCII 공백만 허용한다.
   NFC로 합쳐진 한글은 1자이며 남은 조합되지 않은 자모는 각각 1자(코드 포인트)로 센다.
   연속 자모를 하나의 grapheme로 합쳐 길이 제한을 우회하지 않는다.
   대소문자·내부 공백은 구분하며 조회·저장·요청 fingerprint에 같은 규칙을 쓴다.
   DB도 대소문자를 구분하는 유일성 제약을 둔다. 서버는 금지 문자를 임의 삭제하지 않는다.
-- 소개는 앞뒤 공백·빈 줄 제거 후 1~50개 grapheme. 이모지·내부 줄바꿈을 허용한다.
+- 소개는 `ProfileText.introduction`을 재사용해 앞뒤 공백·빈 줄 제거(trim) 후 1~50개 grapheme이며
+  공백·줄바꿈만 있으면 거부한다. 모든 문자·이모지·내부 줄바꿈을 허용한다.
+  소개 단계 「다음」에서 [사전 검증 API](#bunch-introduction-validation)를 호출하고,
+  최종 생성(2.2.10)에서도 이름과 소개의 형식·금칙어를 다시 검사한다.
 - CharacterType: TYPE_1 / TYPE_2 / TYPE_3 / TYPE_4. 생성 후 변경하지 않는다.
   이미지·분위기 이름은 앱 매핑이며 초기 Stage는 1이다. Stage·발행 개수는 저장하지 않는다.
 - 앱은 JPEG/PNG/HEIC/WebP를 선택받아 정사각형 JPEG로 변환한다. 서버 wire는 JPEG만 받는다.
@@ -125,13 +133,16 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/ws-token | 기존 access JWT·활성 세션·ACTIVE 회원 | 60초 WS 연결 토큰 token·expiresAt, no-store. [상세 계약](auth.md#auth-ws-token) |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
-| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
+| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction,demographics?{birthYear?,gender?}; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
+| GET /api/v1/members/me/additional-info | 없음 | consented, birthYear, gender ([상세](#member-additional-info)) |
+| PUT /api/v1/members/me/additional-info-consent | JSON agreed, version(동의할 때) | 처리 뒤 상태, GET과 같은 모양 ([상세](#member-additional-info)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] (현재 약관 버전 조회, 원문 없음) |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
-| GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available |
+| GET /api/v1/members/nickname-availability?nickname= | nickname | normalizedValue,available,status |
 | POST /api/v1/members/me/registration | multipart profile(JSON):nickname,birthYear?,gender?,demographicsConsentVersion?; photo? | memberId,signupStatus,nickname,imageUrl |
-| GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available |
+| GET /api/v1/bunches/name-availability?name= | name | normalizedValue,available,status |
+| POST /api/v1/bunches/introduction-validation | JSON introduction:String, 인증·가입 완료 필수 | null, 소개 형식·금칙어 사전 검증, DB 쓰기·Idempotency-Key 없음 ([상세](#bunch-introduction-validation)) |
 | POST /api/v1/bunches | JSON name,introduction,visibility,characterType + Idempotency-Key | id,name,characterType,imageUrl |
 | PUT /api/v1/bunches/{id}/profile-image | multipart photo | id,name,characterType,imageUrl |
 | DELETE /api/v1/bunches/{id}/profile-image | 없음 | 같은 번치 정보, imageUrl:null |
@@ -148,6 +159,52 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 
 온보딩 상태 조회는 `GET /api/v1/members/me/onboarding`만 제공한다. 기존
 `/api/v1/auth/session` 경로는 alias로 유지하지 않으며 인증된 요청도 404다.
+
+<a id="bunch-introduction-validation"></a>
+### 번치 소개 사전 검증 — 2.2.6, 2.2.8 (2026-11-17 승인)
+
+`POST /api/v1/bunches/introduction-validation`은 유효한 access JWT·활성 세션으로 인증한
+가입 완료(`signupStatus: COMPLETED`) 회원의 소개를 검사한다.
+`Content-Type: application/json`으로 필수 문자열 `{"introduction":"우리의 순간 📷\n함께 기록해요"}`를
+보낸다. `Idempotency-Key`를 요구하지 않으며 DB 쓰기·초안 저장·번치 생성은 하지 않는다.
+
+서버는 생성과 동일하게 앞뒤를 trim하고 빈 값·1~50 grapheme 여부를 검증한다.
+모든 문자·이모지·내부 줄바꿈을 허용하며, 통과한 소개를 공통 금칙어 검사기로 검사한다.
+성공은 HTTP 200이며 정규화된 입력이나 별도 검증 토큰을 반환하지 않는다.
+
+```json
+{"success":true,"data":null,"error":null}
+```
+
+| 실패 | HTTP / 오류 |
+| --- | --- |
+| 깨진 JSON·필수 introduction 문자열 누락/null·요청 형식 불일치 | 400 `COMMON_002 / error.invalid_json` (`INVALID_JSON`), 기존 JSON 처리 규칙 |
+| trim 후 빈 값·공백/줄바꿈만 입력·1~50 grapheme 길이 위반 | 400 `COMMON_001 / error.invalid_input` (`INVALID_INPUT`) |
+| 소개 금칙어 | 400 `COMMON_003 / error.prohibited_word`, `detail.fields:["introduction"]` |
+| 미인증·유효하지 않은 access JWT/세션 | 401 `AUTH_001 / error.unauthorized` |
+| 가입 미완료 | 403 `AUTH_015 / error.signup_incomplete` (`SIGNUP_INCOMPLETE`) |
+
+실패도 기존 envelope를 사용한다. 금칙어 응답은 아래와 같으며 적발 단어를 응답·로그에 남기지 않는다.
+
+```json
+{"success":false,"data":null,"error":{"code":"COMMON_003","message":"error.prohibited_word","detail":{"fields":["introduction"]}}}
+```
+
+프런트엔드는 2.2.6/2.2.8의 「다음」에 이 API 호출을 연결해야 한다. 다음을 누를 때의 최신
+소개를 보내고, 응답이 해당 요청과 정확히 같은 현재 최신 입력에 대한 성공일 때만 분위기 단계로
+이동한다. 이전 입력의 성공·실패 응답은 현재 입력의 이동·오류 표시에 적용하지 않는다.
+금칙어 응답이면 현재 단계에 머물며 빨간색 「사용할 수 없는 단어가 포함되어 있어요」를 표시하고,
+소개를 수정하면 문구를 지운다. 검사 중·네트워크/서버 오류·기타 검증 오류에는 이동하지 않고
+입력을 유지하며 재시도를 허용한다. 소개의 debounce·글자마다 실시간 검사는 요구하지 않는다.
+프런트엔드 API 호출·화면 동작은 연동이 필요하며 이 문서는 UI 구현 완료를 주장하지 않는다.
+
+사전 검증은 저장 승인이 아니다. 2.2.10 최종 생성은 사전 검증 우회·이후 입력 변경에도
+이름과 소개의 형식·금칙어를 다시 검사하며 기존 생성 멱등 재시도 계약은 유지한다.
+
+검증 기준: HTTP 200 null envelope, trim·grapheme 경계·모든 문자/내부 줄바꿈, JSON 오류와
+내용 오류 구분, introduction 필드 금칙어 오류·단어 비노출, 미인증·가입 미완료,
+DB 무변경·요청 키 없이 성공, 최종 생성 재검사를 확인한다. 최신 입력과 응답 일치·빨간 문구·
+수정 시 해제·검사 중/오류 시 이동 금지·재시도는 실제 iOS/WebView 수동 검증과 구분한다.
 
 <a id="member-profile"></a>
 ### 본인 프로필 조회 — 이슈 #11 (2026-10-18 추가)
@@ -191,7 +248,7 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 ### 본인 프로필 수정 — 이슈 #108
 
 기준은 마이 기능명세서 7.2.1~7.2.7이다. `PUT /api/v1/members/me/profile`은 multipart로
-`profile` JSON(`nickname`, `imageAction`)과 선택 `photo`를 받는다.
+`profile` JSON(`nickname`, `imageAction`, 선택 `demographics`)과 선택 `photo`를 받는다.
 `Idempotency-Key` 헤더는 받지 않는다(보내도 무시한다). 화면의 최종 상태를 보내며 성공하면
 `GET /members/me`와 같은 본인 프로필을 반환한다. 번치 소속이 없어도 수정할 수 있다.
 
@@ -199,11 +256,20 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 | --- | --- |
 | nickname | 가입과 같은 규칙(앞뒤 공백 제거, NFC, 1~12자, 한글·영문·숫자·공백). 다른 회원과 중복이면 409 `USER_002`. 본인의 현재 닉네임은 허용 |
 | imageAction | `KEEP`(유지)·`RESET`(기본 이미지)·`REPLACE`(photo 필수). KEEP/RESET에 photo가 있거나 REPLACE에 photo가 없거나 비어 있으면 400 |
+| demographics | 선택 객체 `{ birthYear, gender }`. 없으면(또는 `null`) 저장된 값을 바꾸지 않는다. 있으면 두 값을 모두 그 값으로 바꾸고, `null`인 값은 지운다. 추가 개인정보 동의 상태에서만 받는다 |
+| demographics.birthYear | 정수. 가입과 같은 규칙으로 1930~(올해−14)년(한국 시간)이고 벗어나면 400 `COMMON_001`. 숫자가 아닌 값은 400 `COMMON_002` |
+| demographics.gender | `FEMALE`·`MALE`·`null`. 다른 값은 400 `COMMON_002` |
 
-- 출생연도·성별은 마이페이지에서 보여주지 않고 고칠 수도 없다(7.2.1). 수정 API는 이 값을 받지 않으며
-  이전 앱이 `birthYear`·`gender`를 보내도 무시하고 저장된 값을 바꾸지 않는다. `GET /members/me` 응답에도
-  포함하지 않는다. 가입 때 입력한 값은 가입 API(`/me/registration`)로만 저장하고, 선택 동의 철회 요청은
-  문의 채널로 받아 운영자가 지운다(7.5.1 로직 3).
+- 출생연도·성별은 추가 개인정보 수집·이용에 동의한 사람만 고칠 수 있다(7.2.1, 7.2.6). 앱은 동의 상태를
+  [조회 API](#member-additional-info)로 읽어 영역을 보여줄 때만 `demographics`를 보낸다. 동의하지 않았거나 철회한
+  회원이 `demographics`를 보내면 값이 비어 있어도 403 `AUTH_002`로 거부하고 닉네임·사진도 바꾸지 않는다.
+  동의 상태는 회원 행을 잠근 안에서 읽으므로 다른 기기에서 철회한 직후의 저장도 거부된다(7.2.6 예외).
+- 값은 `demographics`로만 바뀐다. 이전 앱이 `birthYear`·`gender`를 최상위에 보내면 무시하고 저장된 값을
+  바꾸지 않는다. 응답은 이전과 같은 본인 프로필이며 출생연도·성별을 포함하지 않는다(현재 값은 조회 API로 읽는다).
+  가입 때 입력은 가입 API(`/me/registration`), 동의의 켜기·끄기와 철회 때의 삭제는
+  [추가 개인정보 동의 API](#member-additional-info)로 한다(7.4.5).
+- 출생연도 범위 검증은 가입과 프로필 수정이 한 곳(`BirthYearRule`)을 쓴다. 가입 API의 허용 범위는 1950년부터였으나
+  명세(1.4.5)에 맞춰 1930년부터로 넓혔고, 범위가 넓어지는 방향이라 기존 가입자에게 영향이 없다.
 - 사진 저장이 실패하면 어떤 값도 바꾸지 않고 전체 실패(503 `IMAGE_001`)로 처리한다(7.2.7).
   업로드는 트랜잭션 밖에서 하고, DB 반영에 실패하면 새 파일을 지운다. 이전 파일은 커밋 뒤에만 지운다.
 - 요청 키와 fingerprint는 저장하지 않는다. 요청이 값을 덮어쓰는 최종 상태라 같은 요청을 다시 받아도
@@ -214,10 +280,43 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 - 닉네임 스냅샷: 이미 만들어진 알림 문구는 바꾸지 않고, 멤버 목록·소셜 프로필처럼 회원을
   조회해 보여주는 곳은 새 닉네임을 보여준다(7.2.5).
 
-검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, 출생연도·성별 값을 보내도 저장된 값이 바뀌지
+검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, `demographics`의 변경·삭제·미전송 유지와 동의하지 않은·철회한 회원의 403, 범위 경계와 잘못된 값, 철회와 수정의 동시 요청, 최상위 `birthYear`·`gender`를 보내도 저장된 값이 바뀌지
 않음과 응답에 없음, imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 같은 요청 재시도의 같은 결과와
 이전 파일 정리, 가입 미완료·정지·탈퇴, 멤버 목록·기존 알림 문구와 HTTP 계약(파트 누락, 잘못된 JSON/enum, 401,
 요청 키 헤더를 보내도 정상 처리)을 확인한다.
+
+<a id="member-additional-info"></a>
+### 추가 개인정보 수집·이용 동의 — 이슈 #157
+
+기준은 마이 기능명세서 7.4.4, 7.4.5이다. 선택 동의 DEMOGRAPHICS(출생연도·성별)를 가입 뒤에도 켜고 끈다.
+두 API 모두 가입을 마친 활성 회원만 쓸 수 있고, `Idempotency-Key` 헤더는 받지 않는다.
+
+| 경로 | 요청 | data |
+| --- | --- | --- |
+| GET /api/v1/members/me/additional-info | 없음 | `consented`, `birthYear`, `gender` |
+| PUT /api/v1/members/me/additional-info-consent | JSON `agreed`(필수), `version`(동의할 때 필수) | 처리 뒤 상태. GET과 같은 모양 |
+
+- 동의 상태는 화면에 들어올 때마다 GET으로 읽는다(7.4.4 로직 1, 7.2.6 로직 4). 동의하지 않았거나 철회했으면
+  `consented=false`이고 `birthYear`·`gender`는 null이다.
+- `agreed=true`는 동의한다. `version`은 `GET /auth/terms`의 DEMOGRAPHICS 현재 버전과 같아야 하며 다르면 409
+  `AUTH_016`, 없거나 공백이면 400이다. 가입 때 동의하지 않은 사람도 여기서 동의할 수 있다(7.4.5 로직 3).
+- `agreed=false`는 철회한다. `version`은 필요하지 않고 보내도 무시한다. 철회하면 같은 트랜잭션에서
+  `members.birth_year`·`gender`를 지운다. 다시 동의해도 지운 값은 돌아오지 않는다(7.4.5 로직 2).
+- 요청은 바꾸려는 상태를 말한다. 이미 그 상태이면 아무것도 쓰지 않고 현재 상태를 돌려준다. 같은 요청을
+  두 번 받아도 한 번만 처리하며(7.4.5 로직 4) 가입한 적 없는 선택 동의의 철회도 성공이다.
+- 동의·철회마다 `member_consents`에 한 행을 남긴다(동의 여부 `agreed`, 버전, 일시. 7.4.5 로직 1, 1.3.4 로직 1).
+  현재 상태는 가장 최근 행의 `agreed`이며 버전은 보지 않는다. 철회 행의 버전은 철회한 동의의 버전이다.
+  필수 약관(SERVICE·PRIVACY·AGE_OVER_14)은 이전처럼 버전마다 한 행만 허용한다.
+- 회원 행을 잠근 뒤 처리해서 같은 회원의 동의·철회 요청이 겹쳐도 차례대로 처리된다.
+- 탈퇴하면 이력 행도 계정의 다른 삭제와 함께 지운다(기획 결정, 명세 7.6.4·7.6.1 반영 예정). 회원 행은 남기 때문에
+  이력은 탈퇴 처리가 직접 지운다. 출생연도·성별도 탈퇴 때 지워진다(7.6.4).
+- 오류: 400 `COMMON_001`(`agreed` 누락, 동의에서 `version` 누락), 400 `COMMON_002`(깨진 JSON·형식 불일치),
+  401 `AUTH_001`, 403 `AUTH_015`(가입 미완료), 409 `AUTH_016`(버전 불일치), 503 `AUTH_017`(약관 버전 미설정).
+- 스키마: `V45`가 `member_consents.agreed`를 추가하고(기존 행은 동의로 채움) 유일 제약을 필수 약관에만
+  적용하는 부분 인덱스로 바꾼다.
+
+검증 기준: 실제 PostgreSQL로 동의·철회·재동의의 이력과 값 삭제, 같은 요청의 반복과 동시 요청, 버전 불일치,
+가입 미완료·탈퇴 계정, 마이그레이션 전 행의 보존과 반복 적용, HTTP 계약(401, 400 두 종류, 409, 403)을 확인한다.
 
 <a id="bunch-members"></a>
 ### 번치 멤버 목록 조회 — 이슈 #43

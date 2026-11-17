@@ -5,6 +5,7 @@ import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.domain.ImageAsset
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.image.service.ImageAssetService
@@ -37,6 +38,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var bunchRepository: BunchRepository
     @Autowired private lateinit var membershipRepository: BunchMembershipRepository
     @Autowired private lateinit var assetRepository: ImageAssetRepository
+    @Autowired private lateinit var profanity: ProfanityFilter
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
     private lateinit var server: HttpServer
     private lateinit var imageBunches: BunchService
@@ -77,6 +79,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
             members,
             storage,
             ImageAssetService(assetRepository, storage, transactionManager),
+            profanity,
             transactionManager
         )
     }

@@ -22,6 +22,20 @@ data class BundleActivityData(val memberId: Long, val activity: BundleActivityTy
 
 data class BundleCommandRejectedData(val code: String)
 
+data class BundleCommentEventData(
+    val memberId: Long,
+    val content: String,
+    val version: Long,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val nickname: String? = null,
+    val imageUrl: String? = null,
+    val profileAvailable: Boolean = false,
+    val id: Long = 0,
+    val profanity: BundleProfanityState,
+    val publishBlockers: List<String>
+)
+
 data class BundleChangedEvent(
     val bunchId: Long,
     val bundleId: Long,

@@ -5,6 +5,8 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.NameAvailabilityStatus
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.*
 import com.bunch.member.dto.*
@@ -16,8 +18,6 @@ import org.springframework.web.multipart.MultipartFile
 import java.security.MessageDigest
 import java.sql.SQLException
 import java.time.Instant
-import java.time.Year
-import java.time.ZoneId
 
 @Service
 class RegistrationService(
@@ -26,6 +26,7 @@ class RegistrationService(
     private val terms: TermsService,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val profanity: ProfanityFilter,
     transactionManager: PlatformTransactionManager
 ) {
     private val transaction = TransactionTemplate(transactionManager)
@@ -36,16 +37,17 @@ class RegistrationService(
             .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
             .requireActive()
         val name = ProfileText.name(nickname)
-        return NameAvailability(name, !members.existsByNickname(name))
+        val status = when {
+            profanity.contains(name) -> NameAvailabilityStatus.PROHIBITED_WORD
+            members.existsByNickname(name) -> NameAvailabilityStatus.DUPLICATE
+            else -> NameAvailabilityStatus.AVAILABLE
+        }
+        return NameAvailability(name, status == NameAvailabilityStatus.AVAILABLE, status)
     }
 
     fun complete(memberId: Long, request: RegistrationRequest, photo: MultipartFile?): RegistrationResponse {
         val nickname = ProfileText.name(request.nickname)
-        val lastYear = Year.now(ZoneId.of("Asia/Seoul")).value - 14
-        if (
-            request.birthYear != null &&
-                request.birthYear !in 1950..lastYear
-        )
+        if (request.birthYear != null && !BirthYearRule.isValid(request.birthYear))
             invalid()
         if (
             request.demographicsConsentVersion == null &&
@@ -82,6 +84,7 @@ class RegistrationService(
                     throw BusinessException(ErrorCode.TERMS_VERSION_MISMATCH)
                 }
 
+                profanity.requireClean(mapOf("nickname" to nickname))
                 if (members.existsByNickname(nickname))
                     throw BusinessException(ErrorCode.NICKNAME_TAKEN)
                 uploaded = photo?.takeIf { !it.isEmpty }?.let {
@@ -92,6 +95,7 @@ class RegistrationService(
                     }
                 }
 
+                profanity.requireClean(mapOf("nickname" to nickname))
                 member.nickname = nickname
                 member.birthYear = request.birthYear
                 member.gender = request.gender
@@ -112,7 +116,8 @@ class RegistrationService(
                         MemberConsent(
                             memberId = memberId,
                             type = TermType.DEMOGRAPHICS,
-                            version = request.demographicsConsentVersion
+                            version = request.demographicsConsentVersion,
+                            agreed = true
                         )
                     )
                 }

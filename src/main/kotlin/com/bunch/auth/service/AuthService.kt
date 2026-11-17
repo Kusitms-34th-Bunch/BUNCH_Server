@@ -10,6 +10,7 @@ import com.bunch.global.security.TokenProvider
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.oidc.AuthProvider
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.member.domain.Member
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.service.SocialMemberRegistry
@@ -27,7 +28,8 @@ class AuthService(
     private val registry: SocialMemberRegistry,
     private val members: MemberRepository,
     verifiers: List<SocialTokenVerifier>,
-    private val pushDevices: PushDeviceService
+    private val pushDevices: PushDeviceService,
+    private val profanity: ProfanityFilter
 ) {
     private val verifiers = verifiers.associateBy { it.provider }
 
@@ -62,7 +64,10 @@ class AuthService(
 
     fun issueDevToken(nickname: String): AuthResponses.DevTokenResponse {
         val name = ProfileText.name(nickname)
-        val member = (members.findByNickname(name) ?: members.save(Member(nickname = name)))
+        val member = (members.findByNickname(name) ?: run {
+            profanity.requireClean(mapOf("nickname" to name))
+            members.save(Member(nickname = name))
+        })
             .requireActive()
         val sessionId = UUID.randomUUID().toString()
         val pair = tokenProvider.generateToken(member.id, member.role.name, sessionId)

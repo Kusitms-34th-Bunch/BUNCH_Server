@@ -12,6 +12,7 @@ interface BundleCommentRepository : JpaRepository<BundleComment, Long> {
     fun findByBundleIdAndMemberId(bundleId: Long, memberId: Long): BundleComment?
 
     @Modifying(flushAutomatically = true)
-    @Query("update BundleComment c set c.content = '' where c.memberId = :memberId and c.content <> ''")
+    @Query("update BundleComment c set c.content = '', c.hasProhibitedWord = false " +
+        "where c.memberId = :memberId and c.content <> ''")
     fun clearContentByMemberId(memberId: Long): Int
 }

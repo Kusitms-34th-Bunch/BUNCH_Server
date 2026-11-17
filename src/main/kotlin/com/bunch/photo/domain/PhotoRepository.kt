@@ -41,6 +41,8 @@ private const val UNDATED_ORDER = " order by p.id desc"
 interface PhotoRepository : JpaRepository<Photo, Long> {
     fun findByBunchIdAndFileHash(bunchId: Long, fileHash: String): Photo?
 
+    fun findByBunchIdAndOriginalFileHash(bunchId: Long, originalFileHash: String): Photo?
+
     fun countByBunchId(bunchId: Long): Long
 
     @Query(LIST_PHOTOS + AFTER_CURSOR + LIST_ORDER)
@@ -100,6 +102,14 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     )
     fun findUploaderProfiles(@Param("photoId") photoId: Long): List<PhotoUploaderProfile>
 
+    // Which of the photos a draft bundle uses, for the delete confirmation (3.3.5, 3.5.2). Only a draft counts: a
+    // published bundle keeps its own copy of the photo, so deleting from the photo box does not change it.
+    @Query(
+        "select distinct bp.photoId from BundlePhoto bp, Bundle b where bp.photoId in :photoIds " +
+            "and b.id = bp.bundleId and b.status = com.bunch.bundle.domain.BundleStatus.DRAFT"
+    )
+    fun findDraftBundlePhotoIds(@Param("photoIds") photoIds: Collection<Long>): List<Long>
+
     @Query("select p from Photo p where p.id in :ids order by p.id asc")
     fun findAllByIdInOrderByIdAsc(@Param("ids") ids: Collection<Long>): List<Photo>
 
@@ -129,6 +139,12 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
         @Param("date") date: LocalDate,
         @Param("batchId") batchId: UUID
     ): Int
+
+    // Fills the offset only while it is empty, so a known value is never replaced. The caller holds the photo lock and
+    // does not read the offset afterwards, so the persistence context needs no clearing.
+    @Modifying(flushAutomatically = true)
+    @Query("update Photo p set p.capturedUtcOffset = :offset where p.id = :id and p.capturedUtcOffset is null")
+    fun fillUtcOffset(@Param("id") id: Long, @Param("offset") offset: String): Int
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(

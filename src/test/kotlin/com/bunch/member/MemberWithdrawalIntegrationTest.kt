@@ -126,7 +126,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `nothing about the person remains but the account row and the consent history stay`() {
+    fun `nothing about the person remains but the account row`() {
         val memberId = member()
         val image = asset("profile")
         jdbc.update(
@@ -134,10 +134,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
                 "registration_fingerprint = ? WHERE id = ?",
             image.id, "a".repeat(64), memberId
         )
-        jdbc.update(
-            "INSERT INTO member_consents(member_id, type, version, agreed_at) VALUES (?, 'SERVICE', 'v1', now())",
-            memberId
-        )
+        consent(memberId, "SERVICE")
         linkIdentity(memberId)
 
         withdrawals.withdraw(memberId)
@@ -153,9 +150,26 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
             "nickname", "birth_year", "gender", "profile_image_asset_id", "registration_fingerprint"
         ).forEach { assertThat(row[it]).describedAs(it).isNull() }
         assertThat(identityCount(memberId)).isZero()
-        assertThat(count("member_consents WHERE member_id = $memberId")).isEqualTo(1)
+        assertThat(count("member_consents WHERE member_id = $memberId")).isZero()
         assertThat(assets.findById(image.id)).isEmpty
         verify(profileImages).delete(image.publicId)
+    }
+
+    @Test
+    fun `every consent of the member goes, the required terms and the whole history of the optional one`() {
+        val self = member()
+        val other = member()
+        listOf("SERVICE", "PRIVACY", "AGE_OVER_14").forEach { consent(self, it) }
+        consent(self, "DEMOGRAPHICS", agreed = true)
+        consent(self, "DEMOGRAPHICS", agreed = false)
+        consent(self, "DEMOGRAPHICS", agreed = true)
+        listOf("SERVICE", "PRIVACY", "AGE_OVER_14", "DEMOGRAPHICS").forEach { consent(other, it) }
+        val otherRows = consentIds(other)
+
+        withdrawals.withdraw(self)
+
+        assertThat(consentIds(self)).isEmpty()
+        assertThat(consentIds(other)).containsExactlyElementsOf(otherRows)
     }
 
     @Test
@@ -278,6 +292,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         linkIdentity(self)
         device(self)
         val session = session(self)
+        consent(self, "SERVICE")
         jdbc.execute(
             "CREATE FUNCTION withdrawal_test_reject_write() RETURNS trigger LANGUAGE plpgsql AS " +
                 "'BEGIN RAISE EXCEPTION ''injected withdrawal failure''; END'"
@@ -295,6 +310,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         assertThat(count("photo_uploaders WHERE photo_id = ${sharedPhoto.id}")).isEqualTo(1)
         assertThat(identityCount(self)).isEqualTo(1)
         assertThat(count("push_devices WHERE member_id = $self")).isEqualTo(1)
+        assertThat(count("member_consents WHERE member_id = $self")).isEqualTo(1)
         assertThat(sessions.isActive(session, self)).isTrue()
     }
 
@@ -494,6 +510,22 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         count("notifications WHERE recipient_member_id = $memberId")
 
     private fun identityCount(memberId: Long): Long = count("external_identity WHERE member_id = $memberId")
+
+    private fun consent(memberId: Long, type: String, version: String = "v1", agreed: Boolean = true) {
+        jdbc.update(
+            "INSERT INTO member_consents(member_id, type, version, agreed, agreed_at) VALUES (?, ?, ?, ?, now())",
+            memberId,
+            type,
+            version,
+            agreed
+        )
+    }
+
+    private fun consentIds(memberId: Long): List<Long> = jdbc.queryForList(
+        "SELECT id FROM member_consents WHERE member_id = ? ORDER BY id",
+        Long::class.java,
+        memberId
+    )
 
     private fun linkIdentity(memberId: Long): String {
         val subject = "withdrawal-test-${UUID.randomUUID()}"

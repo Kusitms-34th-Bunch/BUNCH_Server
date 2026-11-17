@@ -89,6 +89,10 @@ openssl rand 64 | openssl base64 -A
 - `TERMS_*`: 앱 약관 원문과 같은 버전. 가입·온보딩 배포 전 4개를 채운다.
 - `CLOUDINARY_*`: 사진 저장 설정. 사진 기능 배포 전에 채운다.
 - `BUNCH_INVITATION_BASE_URL`: 실제 공개 초대장 URL 접두사.
+- `PROFANITY_DICTIONARY_PATH`: 비워 두면 이미지에 번들된 사전을 사용한다. 외부 사전을 쓸 때는
+  아래 [금칙어 외부 사전](#profanity-dictionary)을 먼저 준비하고 `/app/profanity/dictionary.json`을 지정한다.
+- `PROFANITY_DICTIONARY_MOUNT`: 호스트 사전 디렉터리. 기본값은 `./profanity`이며 Compose가
+  `/app/profanity:ro`로 앱에 마운트한다.
 - `SPRING_PROFILES_ACTIVE=prod`: Swagger 기본 비활성화.
 
 약관·사진·초대 변수는 가입·온보딩 기능용이며 기존 인증 기반에서도 미리 보관할 수 있다.
@@ -101,6 +105,57 @@ docker compose up -d --wait postgres redis
 
 CI/CD는 `--no-deps app`으로 앱만 교체하므로 **첫 배포 전에 PostgreSQL·Redis를 위 명령으로 준비한다.**
 앱이 외부 OIDC 공개키와 Cloudinary에 접근할 수 있도록 DNS·외부 HTTPS 연결도 가능해야 한다.
+
+<a id="profanity-dictionary"></a>
+### 금칙어 외부 사전 (선택)
+
+금칙어의 공통 계약은 [금칙어 검사 Spec](../docs/specs/profanity.md), 번들 기본 목록의 출처와
+라이선스는 [`SOURCES.md`](../src/main/resources/profanity/SOURCES.md)를 따른다. 외부 사전은
+앱 컨테이너에 디렉터리 전체를 read-only로 마운트하고, 같은 디렉터리 안에서 파일을 원자적으로
+교체한다. 외부 경로를 설정하지 않으면 mount 디렉터리가 비어 있어도 앱은 번들 사전으로
+기동한다. CI는 `compose.yaml`만 서버에 복사하므로 기본 `./profanity` 디렉터리를 Docker가
+자동 생성해도 경로가 비어 있는 기본 기동을 막지 않는다.
+
+외부 사전을 선택할 때는 운영 서버에서 먼저 디렉터리를 만들고, 배포할 릴리스 checkout의
+체크인된 기준 사전 전체를 복사한다. 아래 `<server>`와 로컬 checkout 경로는 실제 값으로
+바꾼다.
+
+```bash
+ssh bunch@<server> 'mkdir -p ~/profanity'
+scp /path/to/checked-out/BUNCH_Server/src/main/resources/profanity/dictionary.json \
+  bunch@<server>:~/profanity/dictionary.json
+```
+
+그 다음 서버 `.env`에 다음을 설정한다. `PROFANITY_DICTIONARY_MOUNT`는 기본값을 쓰면 생략할
+수 있다. 지정한 JSON은 `base`, `additions`, `exclusions` 배열을 모두 포함하는 완전한 파일이어야
+하며, 번들 사전과 자동 병합하지 않는다. 외부 경로를 지정했는데 파일이 없거나 잘못되면
+앱 기동은 실패한다. 사전은 서버 기동 시 한 번 로딩하며 프로세스 수명 동안 불변이다.
+
+```dotenv
+PROFANITY_DICTIONARY_MOUNT=./profanity
+PROFANITY_DICTIONARY_PATH=/app/profanity/dictionary.json
+```
+
+새 사전은 임시 파일을 같은 디렉터리에 만든 뒤 `mv`로 교체하고 서버를 재시작해 반영한다.
+파일 내용만 바꾸었다면 다음 명령을 사용한다. 앱 업데이트는 필요 없다.
+
+```bash
+cd ~
+docker compose restart app
+```
+
+경로·마운트 등 `.env`를 바꾸었다면 restart만으로는 적용되지 않으므로 컨테이너를 재생성한다.
+
+```bash
+cd ~
+docker compose config --quiet
+docker compose up -d --no-deps --force-recreate app
+```
+
+핫 리로드·수동 리로드 API·금칙어 전용 스케줄러·초안 DB 스캔은 제공하지 않는다.
+외부 사전을 사용하지 않을 때는
+`PROFANITY_DICTIONARY_PATH=''`로 두거나 서버 `.env`에서 해당 변수를 생략하고,
+위 환경 변수 변경 절차로 앱 컨테이너를 재생성한다.
 
 ## 4. GitHub Actions 설정과 배포
 
@@ -152,6 +207,17 @@ main push의 검증 성공 후 다음 순서로 진행한다.
 5. 모니터링 플래그가 켜지면 `alloy loki prometheus grafana`를 pull하고
    `docker compose up -d --no-deps --force-recreate alloy loki prometheus grafana`로 함께 갱신한다.
    파일 프로비저닝을 읽도록 네 서비스를 재생성하며, 모니터링 단독 변경은 앱을 재시작하지 않는다.
+
+### Flyway 마이그레이션 롤아웃 순서
+
+2026-11-17 `dev`에는 PR #153의 V44와 PR #159의 V45가 통합됐다. 이번 금칙어
+스키마는 `V46__bundle_profanity.sql`과 사용하지 않는 재검사 인덱스를 삭제하는
+`V47__drop_bundle_profanity_recheck_index.sql`을 사용한다. 최종 릴리스에는 네 마이그레이션을
+함께 포함하고 Flyway가 V44 → V45 → V46 → V47 순서로 적용하도록 한다.
+
+Flyway의 기본 `outOfOrder=false`를 유지한다. 높은 버전을 먼저 적용하면 이후 배포에서 더 낮은
+버전이 자동 적용되지 않으므로, 선행 버전이 릴리스에 포함됐는지 확인한다.
+V46을 포함한 이미 적용된 마이그레이션 파일은 수정하지 않는다.
 
 PostgreSQL·Redis·cloudflared는 CI에서 갱신하거나 재시작하지 않는다.
 공통 Compose 변경도 이 세 서비스에 적용해야 한다면 별도 운영 작업으로 수행한다.

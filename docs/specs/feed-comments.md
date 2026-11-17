@@ -3,6 +3,10 @@
 FEED-05, NOTI-02 / #90. 선행 #87, PR #96. 공통 접근은 [feed-api](feed-api.md),
 정책 기준은 승인된 6.2.6~9와 2026-11-07 보완 결정이다.
 기존 `bundle_comments`는 참여자 코멘트이며 이 API와 무관하다.
+소셜 댓글·답글의 `content` 저장 시 금칙어 검사는 [공통 금칙어 검사 계약](profanity.md)을
+따른다. 기존 페이지·작성자·삭제·멱등 계약과 `COMMON_001` 등 오류는 유지하며, 위반은
+HTTP 400 `COMMON_003`/`error.prohibited_word`와 `detail.fields: ["content"]`로 거부한다.
+적발 단어는 반환하지 않는다.
 
 ## API
 
@@ -28,7 +32,7 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 삭제 자리는 content=삭제된 댓글입니다, author=작성자, 사진·회원ID·배지·날짜=null,
 쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다.
 
-주요 오류: 입력/커서 오류 COMMON_001(400), payload가 다른 멱등 키 REQUEST_001(409),
+주요 오류: 입력/커서 오류 COMMON_001(400), 금칙어 content `COMMON_003`(400), payload가 다른 멱등 키 REQUEST_001(409),
 삭제된 부모/2단계 답글 BUNDLE_002(409), 없는/숨긴/다른 번들의 댓글 RESOURCE_001(404),
 타인 삭제/자기 신고 AUTH_002(403). 인증·가입·번들 접근 오류는 공통 feed-api 계약을 따른다.
 

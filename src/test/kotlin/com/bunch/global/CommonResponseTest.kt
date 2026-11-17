@@ -35,6 +35,18 @@ class CommonResponseTest {
     }
 
     @Test
+    fun `profanity returns its own code and every field without matched words`() {
+        mvc.perform(get("/probe/profanity"))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.error.code").value("COMMON_003"))
+            .andExpect(jsonPath("$.error.message").value("error.prohibited_word"))
+            .andExpect(jsonPath("$.error.detail.fields[0]").value("name"))
+            .andExpect(jsonPath("$.error.detail.fields[1]").value("introduction"))
+            .andExpect(jsonPath("$.error.detail.words").doesNotExist())
+    }
+
+    @Test
     fun `invalid JSON and blank input use distinct common errors`() {
         mvc.perform(post("/probe").contentType(MediaType.APPLICATION_JSON).content("{"))
             .andExpect(status().isBadRequest)
@@ -62,6 +74,11 @@ class CommonResponseTest {
         fun input(@Valid @RequestBody input: ProbeRequest) = ApiResponse.ok(input)
         @GetMapping("/probe/business")
         fun business(): Unit = throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
+        @GetMapping("/probe/profanity")
+        fun profanity(): Unit = throw BusinessException(
+            ErrorCode.PROHIBITED_WORD,
+            mapOf("fields" to listOf("name", "introduction"))
+        )
         @GetMapping("/probe/unexpected")
         fun unexpected(): Unit = throw IllegalStateException("private-detail")
     }

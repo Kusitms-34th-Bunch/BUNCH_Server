@@ -39,7 +39,8 @@ GET /api/v1/bunches/{bunchId}/photos
         "thumbnailUrl": "https://res.cloudinary.com/demo/image/upload/c_fill,w_300,h_300/photos/a.jpg",
         "capturedDate": "2026-10-19",
         "capturedTime": "21:40:12",
-        "uploaderIds": [12, 15]
+        "uploaderIds": [12, 15],
+        "usedInDraftBundle": true
       }
     ],
     "nextCursor": "MjAyNi0xMC0xOXwyMTo0MDoxMnw1MDIx"
@@ -56,6 +57,7 @@ GET /api/v1/bunches/{bunchId}/photos
 | `photos[].capturedDate` | 촬영 날짜. 사용자가 조정한 사진은 조정한 날짜(3.1.3 로직 1). 앱이 날짜 섹션으로 묶는다 |
 | `photos[].capturedTime` | 촬영 시각 또는 `null`(시각 없이 날짜만 있는 사진) |
 | `photos[].uploaderIds` | 올린 멤버 ID 목록. 함께 올린 사진은 여러 명이며 올린 순서다. 칩의 선택 수를 앱이 계산한다(3.1.2 상세 5, 4.1.1) |
+| `photos[].usedInDraftBundle` | **작성 중인(초안) 번들에 들어 있는 사진이면 `true`.** 발행된 번들에만 쓰였거나 어느 번들에도 안 쓰였으면 `false`. 앱이 삭제 확인 창의 문구를 고르는 데 쓴다(3.3.5). 사진이 사라지면 서버가 초안에서도 빼므로 삭제 전에 따로 확인하는 API는 없다 |
 | `nextCursor` | 다음 페이지 시작 위치. 마지막 페이지면 `null` |
 
 위치 정보는 내려주지 않는다(3.2.2 로직 3). 필터 칩에 쓰는 멤버 목록(닉네임, 프로필 이미지)은 이 응답에 없고
@@ -123,4 +125,5 @@ GET /api/v1/bunches/{bunchId}/photos
 - 제외: 날짜 없는 사진, `READY`가 아닌 사진, 다른 번치의 사진.
 - 멤버 필터: 함께 올린 사진이 올린 멤버 모두에게 보임, 번치 멤버가 아닌 `memberId`는 400.
 - 응답: `totalCount`는 필터와 무관, `uploaderIds` 순서, 썸네일 URL, 정해진 항목만 포함.
+- `usedInDraftBundle`: 초안에 든 사진(두 초안에 든 사진 포함)은 `true`, 발행된 번들에만 쓰인 사진·안 쓰인 사진은 `false`.
 - 권한·입력: 비멤버·가입 미완료·없는 번치·토큰 없음, 잘못된 `cursor`·`size`.

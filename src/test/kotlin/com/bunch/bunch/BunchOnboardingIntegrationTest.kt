@@ -1,10 +1,12 @@
 package com.bunch.bunch
 
 import com.bunch.bunch.domain.*
+import com.bunch.global.profanity.NameAvailabilityStatus
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataAccessException
@@ -82,6 +84,37 @@ class BunchOnboardingIntegrationTest : BunchIntegrationSupport() {
         create(owner, "가  Name")
         assertThat(count("bunches")).isEqualTo(3)
         assertError(ErrorCode.INVALID_INPUT) { create(owner, "금지!") }
+    }
+
+    @Test
+    fun `prohibited creation fields are reported together and leave no rows`() {
+        val owner = member()
+        val error = catchThrowable {
+            bunches.create(
+                owner,
+                UUID.randomUUID(),
+                request("씨발").copy(introduction = "fuck")
+            )
+        }
+
+        assertThat(error).isInstanceOf(BusinessException::class.java)
+        assertThat((error as BusinessException).errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(error.detail).isEqualTo(mapOf("fields" to listOf("name", "introduction")))
+        assertThat(count("bunches")).isZero()
+        assertThat(count("bunch_memberships")).isZero()
+    }
+
+    @Test
+    fun `prohibited bunch name takes precedence over a duplicate`() {
+        val owner = member()
+        val bunch = create(owner, "기존 번치")
+        jdbc.update("UPDATE bunches SET name = ? WHERE id = ?", "fuck", bunch.id)
+
+        val availability = bunches.nameAvailability(owner, "fuck")
+
+        assertThat(availability.normalizedValue).isEqualTo("fuck")
+        assertThat(availability.available).isFalse()
+        assertThat(availability.status).isEqualTo(NameAvailabilityStatus.PROHIBITED_WORD)
     }
 
     @Test
