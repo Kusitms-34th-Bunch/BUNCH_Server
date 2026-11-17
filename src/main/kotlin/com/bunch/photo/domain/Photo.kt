@@ -57,7 +57,10 @@ class Photo(
     val dateBatchId: UUID? = null,
 
     @Column(name = "original_file_hash", length = 64)
-    val originalFileHash: String? = null
+    val originalFileHash: String? = null,
+
+    @Column(name = "captured_utc_offset", length = 6)
+    val capturedUtcOffset: String? = null
 ) {
     init {
         require(isSha256Hex(fileHash)) {
@@ -80,6 +83,9 @@ class Photo(
         }
         require(dateBatchId == null || dateSource == DateSource.USER) {
             "only a photo the user dated has a date batch"
+        }
+        require(capturedUtcOffset.let { it == null || UtcOffset.isValid(it) }) {
+            "capturedUtcOffset must be a UTC offset from -12:00 to +14:00"
         }
     }
 
