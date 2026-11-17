@@ -15,6 +15,8 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.ProfanityDictionary
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.notification.domain.Notification
@@ -31,11 +33,13 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
@@ -84,6 +88,9 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
 
     @MockitoBean
     private lateinit var images: ProfileImageStorage
+
+    @MockitoSpyBean
+    private lateinit var profanity: ProfanityFilter
 
     private val pushSessions = mutableListOf<Pair<String, Long>>()
 
@@ -210,6 +217,86 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
             )
         }
         org.mockito.Mockito.verifyNoInteractions(images)
+    }
+
+    @Test
+    fun `profile rejects all prohibited fields before photo upload`() {
+        val owner = member()
+        val bunch = create(owner, "안전한 번치")
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
+
+        val error = org.junit.jupiter.api.assertThrows<BusinessException> {
+            profiles.update(
+                owner,
+                bunch.id,
+                UUID.randomUUID(),
+                profile("씨발", "fuck", 0, imageAction = ProfileImageAction.REPLACE),
+                photo
+            )
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(error.detail).isEqualTo(mapOf("fields" to listOf("name", "introduction")))
+        org.mockito.Mockito.verifyNoInteractions(images)
+        val saved = bunchRepository.findById(bunch.id).orElseThrow()
+        assertThat(saved.name).isEqualTo("안전한 번치")
+        assertThat(saved.introduction).isEqualTo("함께 기록해요 📷")
+        assertThat(saved.profileVersion).isZero()
+        assertThat(jdbc.queryForObject(
+            "SELECT count(*) FROM bunch_action_requests WHERE bunch_id = ?",
+            Long::class.java,
+            bunch.id
+        )).isZero()
+    }
+
+    @Test
+    fun `profile final save rechecks profanity and compensates uploaded file`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val owner = member()
+        val bunch = create(owner, "원래 번치")
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
+        val uploaded = StoredImage("test-profile/${UUID.randomUUID()}", "https://images.example/profanity.jpg")
+        `when`(images.upload(photo)).thenAnswer {
+            dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+            uploaded
+        }
+
+        val error = org.junit.jupiter.api.assertThrows<BusinessException> {
+            profiles.update(
+                owner,
+                bunch.id,
+                UUID.randomUUID(),
+                profile("fuck", "안전한 소개", 0, imageAction = ProfileImageAction.REPLACE),
+                photo
+            )
+        }
+
+        assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().name).isEqualTo("원래 번치")
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isZero()
+        verify(images).delete(uploaded.publicId)
+    }
+
+    @Test
+    fun `successful profile replay survives a dictionary change`() {
+        val dictionaries = java.util.concurrent.atomic.AtomicReference(
+            ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
+        )
+        org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
+        val owner = member()
+        val bunch = create(owner, "재생 번치")
+        val key = UUID.randomUUID()
+        val request = profile("fuck", "재생 소개", 0)
+
+        val first = profiles.update(owner, bunch.id, key, request, null)
+        dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
+        val replay = profiles.update(owner, bunch.id, key, request, null)
+
+        assertThat(replay).isEqualTo(first)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(1)
     }
 
     @Test

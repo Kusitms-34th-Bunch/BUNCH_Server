@@ -6,6 +6,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.BirthYearRule
 import com.bunch.member.domain.MemberRepository
@@ -21,6 +22,7 @@ class MemberProfileService(
     private val members: MemberRepository,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val profanity: ProfanityFilter,
     private val additionalInfos: AdditionalInfoService,
     transactionManager: PlatformTransactionManager
 ) {
@@ -31,6 +33,7 @@ class MemberProfileService(
     fun update(memberId: Long, request: MemberProfileRequest, photo: MultipartFile?) {
         val input = normalize(request, photo)
         requireEditable(memberId)
+        profanity.requireClean(mapOf("nickname" to input.nickname))
 
         var uploaded: StoredImage? = null
         var attached = false
@@ -74,6 +77,7 @@ class MemberProfileService(
         // The consent is read under the member lock, so a withdrawal from another device is seen here (7.2.6).
         val demographics = input.demographics
         if (demographics != null && !additionalInfos.consenting(memberId)) fail(ErrorCode.FORBIDDEN)
+        profanity.requireClean(mapOf("nickname" to input.nickname))
         if (members.existsByNicknameAndIdNot(input.nickname, memberId)) fail(ErrorCode.NICKNAME_TAKEN)
 
         val previousAssetId = member.profileImageAsset?.id

@@ -5,6 +5,7 @@
 [피드 시트](https://docs.google.com/spreadsheets/d/1ScziF7WoYLHRiC_UYJBkKsi0jL6KKQJD2TNDzW1QGfU/edit?gid=294136194#gid=294136194)의
 E19:K20(6.2.11·6.2.12), E23:K23(6.2.15)에 따라 내용 저장과 공개 범위 설정을 분리한다.
 초안 공동 편집·최초 발행 조건은 [번들 계약](bundle.md)을 따른다.
+발행본 일괄 수정의 제목 금칙어 검사는 [공통 금칙어 검사 계약](profanity.md)을 따른다.
 
 ## 전체 저장
 
@@ -36,6 +37,9 @@ NFC·trim 후 1~40 grapheme, 날짜는 서울 기준 미래 날짜를 거부한�
 원본 Photo가 삭제된 기존 번들 사진도 ID·이미지 참조·추가자·시각·픽을 유지한다.
 새 사진은 같은 번치의 READY 사진이어야 한다. 기존 사진함 업로드 한도를 추가로 소비하지 않는다.
 참여 멤버와 멤버별 코멘트·픽은 입력 대상이 아니며 발행 후 변경할 수 없다.
+제출 제목에 금칙어가 있으면 기존 전체 저장의 원자성을 유지하면서 HTTP 400 `COMMON_003`/
+`error.prohibited_word`와 `detail.fields: ["title"]`로 거부한다. 참여자 코멘트와 소셜 댓글은
+이 경로의 입력 대상이 아니며 이 오류에 포함하지 않는다.
 `EditPublishedBundleRequest.visibility`는 제거한다. 구 클라이언트가 일괄 저장 JSON에
 `visibility`를 남겨도 기존 Jackson 미지 필드 처리대로 무시하며 공개 범위와 그 버전은
 변경하지 않는다. 클라이언트는 공개 범위 변경을 전용 경로로 전환해야 한다.

@@ -57,6 +57,12 @@ class Bundle(
     @Column(name = "title_version", nullable = false)
     var titleVersion: Long = 0,
 
+    @Column(name = "profanity_dictionary_version", length = 64)
+    var profanityDictionaryVersion: String? = null,
+
+    @Column(name = "title_has_prohibited_word", nullable = false)
+    var titleHasProhibitedWord: Boolean = false,
+
     @Column(name = "visibility_version", nullable = false)
     var visibilityVersion: Long = 0,
 

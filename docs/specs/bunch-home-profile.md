@@ -16,13 +16,15 @@
 | `GET /api/v1/bunches/{bunchId}/published-bundles/{bundleId}` | [BunchHomeController](../../src/main/kotlin/com/bunch/bunch/controller/BunchHomeController.kt) | 목록과 같은 접근 범위의 기존 public bundle detail이다. |
 | `PUT /api/v1/bunches/{bunchId}/last-used` | [BunchController](../../src/main/kotlin/com/bunch/bunch/controller/BunchController.kt) | 회원의 전역 current 전환. ACTIVE 소속을 명시적으로 최근 사용으로 만든다. |
 | `PUT /api/v1/bunches/{bunchId}/profile` | [BunchProfileController](../../src/main/kotlin/com/bunch/bunch/controller/BunchProfileController.kt) | OWNER만 이름·소개·공개 범위·이미지를 `KEEP/REPLACE/RESET`으로 원자 저장한다. `Idempotency-Key`와 `expectedProfileVersion`이 필수다. |
-| `GET /api/v1/bunches/name-availability` | [BunchController](../../src/main/kotlin/com/bunch/bunch/controller/BunchController.kt) | `excludeBunchId`는 본인 OWNER 소속만 허용하고 자기 이름만 제외한다. 저장 시 유일성 제약을 다시 검사한다. |
+| `GET /api/v1/bunches/name-availability` | [BunchController](../../src/main/kotlin/com/bunch/bunch/controller/BunchController.kt) | `excludeBunchId`는 본인 OWNER 소속만 허용하고 자기 이름만 제외한다. 기존 `normalizedValue`·`available`에 금칙어 상태를 additive로 제공하며, 저장 시 유일성 제약과 [금칙어 계약](profanity.md)을 다시 검사한다. |
 
 프로필 multipart의 `profile` part는 JSON이고 `photo`는 `REPLACE`에서만 필수다. `KEEP`와
 `RESET`에는 빈 파일 part도 허용하지 않는다. 이름은 기존 `ProfileText`의 trim+NFC/코드 포인트
 규칙, 소개는 기존 grapheme 규칙을 재사용한다. wire JPEG는 기존 저장소의 5 MiB·정사각형·
 최대 1024 규칙을 사용한다. 앱의 원본 선택 10,000,000 bytes 규칙은 [사진 기반 계약](photo-foundation.md)의
 소유 범위이며 서버 wire 제한과 혼동하지 않는다.
+이름·소개 저장의 금칙어 검사와 HTTP 400 `COMMON_003`/`detail.fields`는
+[공통 금칙어 검사 계약](profanity.md)을 따른다. 기존 형식·권한·중복 오류는 유지한다.
 
 ## 통합 조회와 현재 번치 계약
 
@@ -127,6 +129,7 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 - 새 asset 참조와 이전 asset 해제 예약은 프로필 변경, 알림, 성공 결과 기록과 같은 DB transaction에 속한다. 실패한 원격 파일은 보상 삭제한다.
 - 정규화된 입력과 `REPLACE` 이미지 bytes의 SHA-256을 `PROFILE` action request fingerprint로 저장한다. 성공 결과는 30일 재생하며 만료된 기록은 새 요청으로 정리한다.
 - 같은 값 저장은 성공하지만 `profileVersion`·알림을 증가시키지 않는다. 다른 입력을 같은 키로 재생하면 `REQUEST_001`, 오래된 버전이면 `BUNCH_004`다.
+- 금칙어 거부는 `COMMON_003`이며 적발 단어는 응답하지 않는다. 재시도·멱등·원자성 경계는 기존 계약을 유지한다.
 - 공개 범위 변경은 실제 방향에 따라 type 16 알림을 만든다. `PRIVATE → PUBLIC`에서는 대상 번치만 잠근 상태에서 현재 PENDING follow를 승인하고, #51의 `NotificationWriter.followApproved`를 통해 type 19 및 기존 승인 문구/중복키를 재사용한다. follower 번치 lock을 뒤늦게 획득하지 않는다.
 
 ## 홈·전환 읽기

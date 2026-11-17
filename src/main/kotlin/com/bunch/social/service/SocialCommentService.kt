@@ -5,6 +5,7 @@ import com.bunch.bundle.domain.BundleRepository
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.service.NotificationWriter
@@ -41,6 +42,7 @@ class SocialCommentService(
     private val notifications: NotificationWriter,
     private val entityManager: EntityManager,
     private val mapper: ObjectMapper,
+    private val profanity: ProfanityFilter,
     private val clock: Clock
 ) {
     @Transactional
@@ -79,6 +81,7 @@ class SocialCommentService(
         if (parent != null && (parent.parentId != null || parent.deletedAt != null)) {
             fail(ErrorCode.BUNDLE_STATE_CONFLICT)
         }
+        profanity.requireClean(mapOf("content" to content))
         val bunch = interaction.actor.bunch
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         val row = comments.saveAndFlush(

@@ -43,6 +43,9 @@ class BundleComment(
     @Column(nullable = false)
     var version: Long = 0,
 
+    @Column(name = "has_prohibited_word", nullable = false)
+    var hasProhibitedWord: Boolean = false,
+
     @Column(name = "created_at", nullable = false)
     val createdAt: Instant = Instant.now(),
 

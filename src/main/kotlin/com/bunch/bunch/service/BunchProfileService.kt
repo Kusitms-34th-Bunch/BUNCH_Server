@@ -19,6 +19,7 @@ import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ProfileImageStorage
 import com.bunch.global.image.StoredImage
+import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.service.ImageAssetService
 import com.bunch.member.domain.MemberRepository
 import com.bunch.notification.domain.Notification
@@ -54,6 +55,7 @@ class BunchProfileService(
     private val pushJobs: PushJobWriter,
     private val images: ProfileImageStorage,
     private val imageAssets: ImageAssetService,
+    private val profanity: ProfanityFilter,
     private val clock: Clock,
     transactionManager: PlatformTransactionManager
 ) {
@@ -101,6 +103,7 @@ class BunchProfileService(
                         mapOf("profileVersion" to context.bunch.profileVersion)
                     )
                 }
+                profanity.requireClean(input.fields())
                 if (bunches.existsByNameAndIdNot(input.name, bunchId)) fail(ErrorCode.BUNCH_NAME_TAKEN)
 
                 val previousAssetId = context.bunch.profileImageAsset?.id
@@ -242,6 +245,7 @@ class BunchProfileService(
                 mapOf("profileVersion" to context.bunch.profileVersion)
             )
         }
+        profanity.requireClean(input.fields())
         null
     }
 
@@ -328,7 +332,12 @@ class BunchProfileService(
         val imageAction: ProfileImageAction,
         val expectedProfileVersion: Long,
         val fingerprint: String
-    )
+    ) {
+        fun fields(): Map<String, String> = mapOf(
+            "name" to name,
+            "introduction" to introduction
+        )
+    }
 
     private data class TransactionResult(
         val response: BunchProfileResponse,

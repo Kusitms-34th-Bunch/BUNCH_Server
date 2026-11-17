@@ -107,6 +107,69 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `draft profanity saves reach both connections and reconnect restores flags until each field is cleared`() {
+        val fixture = fixture()
+        val owner = connect(fixture.owner)
+        val guest = connect(fixture.guest)
+        subscribe(owner, fixture)
+        subscribe(guest, fixture)
+
+        val title = putTitle(fixture, "씨.발", UUID.randomUUID().toString())
+        listOf(owner, guest).forEach { client ->
+            val event = client.json { it.path("type").asText() == "TITLE" }
+            assertThat(event.path("data").path("value").asText()).isEqualTo("씨.발")
+            assertThat(event.path("data").path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
+            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
+                .contains("TITLE_PROHIBITED_WORD")
+            assertThat(event.path("revision").asLong()).isEqualTo(title.path("revision").asLong())
+        }
+
+        val comment = bundles.comment(
+            actor(fixture.guest), fixture.bunchId, fixture.bundleId,
+            BundleTextRequest("F.U.C.K", 0, BundleStatus.DRAFT), UUID.randomUUID().toString()
+        )
+        listOf(owner, guest).forEach { client ->
+            val event = client.json { it.path("type").asText() == "COMMENT" }
+            assertThat(event.path("data").path("memberId").asLong()).isEqualTo(fixture.guest.memberId)
+            assertThat(event.path("data").path("content").asText()).isEqualTo("F.U.C.K")
+            assertThat(event.path("data").path("profanity").path("comments")
+                .single { it.path("memberId").asLong() == fixture.guest.memberId }
+                .path("hasProhibitedWord").asBoolean()).isTrue()
+            assertThat(event.path("data").path("publishBlockers").map { it.asText() })
+                .contains("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
+        }
+
+        guest.close()
+        val reconnected = connect(fixture.guest)
+        subscribe(reconnected, fixture)
+        val recovered = getSnapshot(fixture, fixture.guest)
+        assertThat(recovered.path("profanity").path("titleHasProhibitedWord").asBoolean()).isTrue()
+        assertThat(recovered.path("profanity").path("comments")
+            .single { it.path("memberId").asLong() == fixture.guest.memberId }
+            .path("hasProhibitedWord").asBoolean()).isTrue()
+
+        putTitle(fixture, "함께한 여행", UUID.randomUUID().toString(), title.path("titleVersion").asLong())
+        listOf(owner, reconnected).forEach { client ->
+            val state = client.json { it.path("type").asText() == "TITLE" }.path("data")
+            assertThat(state.path("profanity").path("titleHasProhibitedWord").asBoolean()).isFalse()
+            assertThat(state.path("publishBlockers").map { it.asText() })
+                .doesNotContain("TITLE_PROHIBITED_WORD").contains("COMMENTS_PROHIBITED_WORD")
+        }
+        bundles.comment(
+            actor(fixture.guest), fixture.bunchId, fixture.bundleId,
+            BundleTextRequest("즐거운 여행", comment.comments.single { it.memberId == fixture.guest.memberId }.version,
+                BundleStatus.DRAFT), UUID.randomUUID().toString()
+        )
+        listOf(owner, reconnected).forEach { client ->
+            val state = client.json { it.path("type").asText() == "COMMENT" }.path("data")
+            assertThat(state.path("profanity").path("comments").map { it.path("hasProhibitedWord").asBoolean() })
+                .doesNotContain(true)
+            assertThat(state.path("publishBlockers").map { it.asText() })
+                .doesNotContain("TITLE_PROHIBITED_WORD", "COMMENTS_PROHIBITED_WORD")
+        }
+    }
+
+    @Test
     fun `signed WS CONNECT and legacy access CONNECT share presence and committed REST events`() {
         val fixture = fixture()
         val owner = connect(fixture.owner)
