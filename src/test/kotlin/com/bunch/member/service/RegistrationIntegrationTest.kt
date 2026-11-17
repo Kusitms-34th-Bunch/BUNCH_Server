@@ -162,12 +162,22 @@ class RegistrationIntegrationTest @Autowired constructor(
     fun `birth year bounds are enforced independently of age attestation`() {
         val member = member()
         val latest = Year.now(ZoneId.of("Asia/Seoul")).value - 14
-        listOf(1949, latest + 1).forEach { year ->
+        listOf(1929, latest + 1).forEach { year ->
             assertThat(assertThrows<BusinessException> { registrations.complete(member.id, RegistrationRequest("연도", year, null, "v1"), null) }.errorCode)
                 .isEqualTo(ErrorCode.INVALID_INPUT)
         }
-        registrations.complete(member.id, RegistrationRequest("연도", 1950, null, "v1"), null)
-        assertThat(members.findById(member.id).get().birthYear).isEqualTo(1950)
+        registrations.complete(member.id, RegistrationRequest("연도", 1930, null, "v1"), null)
+        assertThat(members.findById(member.id).get().birthYear).isEqualTo(1930)
+    }
+
+    @Test
+    fun `the latest birth year is this year minus 14 in Korea`() {
+        val member = member()
+        val latest = Year.now(ZoneId.of("Asia/Seoul")).value - 14
+
+        registrations.complete(member.id, RegistrationRequest("막내", latest, null, "v1"), null)
+
+        assertThat(members.findById(member.id).get().birthYear).isEqualTo(latest)
     }
 
     @Test

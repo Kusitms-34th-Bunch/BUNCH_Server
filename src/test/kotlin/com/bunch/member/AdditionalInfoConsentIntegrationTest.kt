@@ -5,7 +5,6 @@ import com.bunch.global.exception.ErrorCode
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.Member
-import com.bunch.member.domain.MemberConsent
 import com.bunch.member.domain.MemberConsentRepository
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.domain.SignupStatus
@@ -57,7 +56,7 @@ class AdditionalInfoConsentIntegrationTest @Autowired constructor(
     @Test
     fun `agreeing at signup shows the consent and the values the member gave`() {
         val member = member(birthYear = 2003, gender = Gender.FEMALE)
-        consents.save(MemberConsent(memberId = member.id, type = TermType.DEMOGRAPHICS, version = "v1", agreed = true))
+        consents.agreeToDemographics(member.id)
 
         val state = additionalInfo.get(member.id)
 
@@ -157,7 +156,7 @@ class AdditionalInfoConsentIntegrationTest @Autowired constructor(
     @Test
     fun `a withdrawal needs no version and keeps the version that was agreed to`() {
         val member = member()
-        consents.save(MemberConsent(memberId = member.id, type = TermType.DEMOGRAPHICS, version = "v0", agreed = true))
+        consents.agreeToDemographics(member.id, version = "v0")
 
         additionalInfo.change(member.id, AdditionalInfoConsentRequest(false, "anything"))
 

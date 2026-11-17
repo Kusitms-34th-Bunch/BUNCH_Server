@@ -46,7 +46,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   동의를 유지한 약관 화면 표시를 허용하고 재저장을 요구하지 않는다.
 - 별도 선택 동의는 분석 목적·회원 탈퇴 시까지 보관을 안내한다. 미동의 상태의 연도/성별
   제출은 400이며 미입력·미동의는 가입을 막지 않는다. 인구통계는 다른 사용자에게 비공개다.
-- Gender: FEMALE / MALE, 미선택은 null. 연도는 1950..(현재 서울 연도-14) 범위다.
+- Gender: FEMALE / MALE, 미선택은 null. 연도는 1930..(현재 서울 연도-14) 범위다(1.4.5). 프로필 수정도 같은 규칙을 쓴다.
   가입 완료는 필수 동의와 최종 닉네임 검증 후 프로필·상태·시각을 함께 저장한다.
   동일 회원의 가입 완료 재요청은 같은 프로필이면 기존 결과를 반환하며 다른 입력은 409다.
 
@@ -130,7 +130,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/ws-token | 기존 access JWT·활성 세션·ACTIVE 회원 | 60초 WS 연결 토큰 token·expiresAt, no-store. [상세 계약](auth.md#auth-ws-token) |
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
-| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
+| PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction,demographics?{birthYear?,gender?}; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
 | GET /api/v1/members/me/additional-info | 없음 | consented, birthYear, gender ([상세](#member-additional-info)) |
 | PUT /api/v1/members/me/additional-info-consent | JSON agreed, version(동의할 때) | 처리 뒤 상태, GET과 같은 모양 ([상세](#member-additional-info)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
@@ -198,7 +198,7 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 ### 본인 프로필 수정 — 이슈 #108
 
 기준은 마이 기능명세서 7.2.1~7.2.7이다. `PUT /api/v1/members/me/profile`은 multipart로
-`profile` JSON(`nickname`, `imageAction`)과 선택 `photo`를 받는다.
+`profile` JSON(`nickname`, `imageAction`, 선택 `demographics`)과 선택 `photo`를 받는다.
 `Idempotency-Key` 헤더는 받지 않는다(보내도 무시한다). 화면의 최종 상태를 보내며 성공하면
 `GET /members/me`와 같은 본인 프로필을 반환한다. 번치 소속이 없어도 수정할 수 있다.
 
@@ -206,11 +206,20 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 | --- | --- |
 | nickname | 가입과 같은 규칙(앞뒤 공백 제거, NFC, 1~12자, 한글·영문·숫자·공백). 다른 회원과 중복이면 409 `USER_002`. 본인의 현재 닉네임은 허용 |
 | imageAction | `KEEP`(유지)·`RESET`(기본 이미지)·`REPLACE`(photo 필수). KEEP/RESET에 photo가 있거나 REPLACE에 photo가 없거나 비어 있으면 400 |
+| demographics | 선택 객체 `{ birthYear, gender }`. 없으면(또는 `null`) 저장된 값을 바꾸지 않는다. 있으면 두 값을 모두 그 값으로 바꾸고, `null`인 값은 지운다. 추가 개인정보 동의 상태에서만 받는다 |
+| demographics.birthYear | 정수. 가입과 같은 규칙으로 1930~(올해−14)년(한국 시간)이고 벗어나면 400 `COMMON_001`. 숫자가 아닌 값은 400 `COMMON_002` |
+| demographics.gender | `FEMALE`·`MALE`·`null`. 다른 값은 400 `COMMON_002` |
 
-- 출생연도·성별은 마이페이지에서 보여주지 않고 고칠 수도 없다(7.2.1). 수정 API는 이 값을 받지 않으며
-  이전 앱이 `birthYear`·`gender`를 보내도 무시하고 저장된 값을 바꾸지 않는다. `GET /members/me` 응답에도
-  포함하지 않는다. 가입 때 입력한 값은 가입 API(`/me/registration`)로만 저장하고, 선택 동의의 켜기·끄기와
-  철회 때의 삭제는 [추가 개인정보 동의 API](#member-additional-info)로 한다(7.4.5).
+- 출생연도·성별은 추가 개인정보 수집·이용에 동의한 사람만 고칠 수 있다(7.2.1, 7.2.6). 앱은 동의 상태를
+  [조회 API](#member-additional-info)로 읽어 영역을 보여줄 때만 `demographics`를 보낸다. 동의하지 않았거나 철회한
+  회원이 `demographics`를 보내면 값이 비어 있어도 403 `AUTH_002`로 거부하고 닉네임·사진도 바꾸지 않는다.
+  동의 상태는 회원 행을 잠근 안에서 읽으므로 다른 기기에서 철회한 직후의 저장도 거부된다(7.2.6 예외).
+- 값은 `demographics`로만 바뀐다. 이전 앱이 `birthYear`·`gender`를 최상위에 보내면 무시하고 저장된 값을
+  바꾸지 않는다. 응답은 이전과 같은 본인 프로필이며 출생연도·성별을 포함하지 않는다(현재 값은 조회 API로 읽는다).
+  가입 때 입력은 가입 API(`/me/registration`), 동의의 켜기·끄기와 철회 때의 삭제는
+  [추가 개인정보 동의 API](#member-additional-info)로 한다(7.4.5).
+- 출생연도 범위 검증은 가입과 프로필 수정이 한 곳(`BirthYearRule`)을 쓴다. 가입 API의 허용 범위는 1950년부터였으나
+  명세(1.4.5)에 맞춰 1930년부터로 넓혔고, 범위가 넓어지는 방향이라 기존 가입자에게 영향이 없다.
 - 사진 저장이 실패하면 어떤 값도 바꾸지 않고 전체 실패(503 `IMAGE_001`)로 처리한다(7.2.7).
   업로드는 트랜잭션 밖에서 하고, DB 반영에 실패하면 새 파일을 지운다. 이전 파일은 커밋 뒤에만 지운다.
 - 요청 키와 fingerprint는 저장하지 않는다. 요청이 값을 덮어쓰는 최종 상태라 같은 요청을 다시 받아도
@@ -221,7 +230,7 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 - 닉네임 스냅샷: 이미 만들어진 알림 문구는 바꾸지 않고, 멤버 목록·소셜 프로필처럼 회원을
   조회해 보여주는 곳은 새 닉네임을 보여준다(7.2.5).
 
-검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, 출생연도·성별 값을 보내도 저장된 값이 바뀌지
+검증 기준: 실제 PostgreSQL·Redis로 닉네임 규칙·중복·동시 경합, `demographics`의 변경·삭제·미전송 유지와 동의하지 않은·철회한 회원의 403, 범위 경계와 잘못된 값, 철회와 수정의 동시 요청, 최상위 `birthYear`·`gender`를 보내도 저장된 값이 바뀌지
 않음과 응답에 없음, imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 같은 요청 재시도의 같은 결과와
 이전 파일 정리, 가입 미완료·정지·탈퇴, 멤버 목록·기존 알림 문구와 HTTP 계약(파트 누락, 잘못된 JSON/enum, 401,
 요청 키 헤더를 보내도 정상 처리)을 확인한다.

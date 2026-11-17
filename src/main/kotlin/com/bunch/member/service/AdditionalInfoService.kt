@@ -28,8 +28,11 @@ class AdditionalInfoService(
         val member = members.findById(memberId)
             .orElseThrow { BusinessException(ErrorCode.USER_NOT_FOUND) }
             .requireCompleted()
-        return response(member, consented = latest(member.id)?.agreed == true)
+        return response(member, consented = consenting(member.id))
     }
+
+    // Whether the member agrees now. A caller that changes the demographics asks this inside its own transaction.
+    fun consenting(memberId: Long): Boolean = latest(memberId)?.agreed == true
 
     // The request names the state the member wants. A member who is already there changes nothing (7.4.5 rule 4).
     @Transactional

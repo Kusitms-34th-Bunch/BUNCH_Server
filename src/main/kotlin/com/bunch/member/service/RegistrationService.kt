@@ -18,8 +18,6 @@ import org.springframework.web.multipart.MultipartFile
 import java.security.MessageDigest
 import java.sql.SQLException
 import java.time.Instant
-import java.time.Year
-import java.time.ZoneId
 
 @Service
 class RegistrationService(
@@ -49,11 +47,7 @@ class RegistrationService(
 
     fun complete(memberId: Long, request: RegistrationRequest, photo: MultipartFile?): RegistrationResponse {
         val nickname = ProfileText.name(request.nickname)
-        val lastYear = Year.now(ZoneId.of("Asia/Seoul")).value - 14
-        if (
-            request.birthYear != null &&
-                request.birthYear !in 1950..lastYear
-        )
+        if (request.birthYear != null && !BirthYearRule.isValid(request.birthYear))
             invalid()
         if (
             request.demographicsConsentVersion == null &&
