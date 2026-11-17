@@ -7,6 +7,7 @@ import com.bunch.global.security.TokenProvider
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.member.domain.Gender
 import com.bunch.member.domain.Member
+import com.bunch.member.domain.MemberConsentRepository
 import com.bunch.member.domain.MemberRepository
 import com.bunch.member.domain.SignupStatus
 import org.assertj.core.api.Assertions.assertThat
@@ -36,6 +37,7 @@ import java.util.UUID
 class MemberProfileEditHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val members: MemberRepository,
+    private val consents: MemberConsentRepository,
     private val tokens: TokenProvider,
     private val sessions: RefreshTokenRepository,
     private val assets: ImageAssetRepository,
@@ -75,8 +77,9 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `birth year and gender are ignored in the request and not returned`() {
+    fun `a key from an older app at the top level is still ignored`() {
         val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
+        consents.agreeToDemographics(member.id)
 
         put(access, """{"nickname":"무시${hex()}","birthYear":2000,"gender":"FEMALE","imageAction":"KEEP"}""")
             .andExpect(status().isOk)
@@ -85,6 +88,70 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
         val saved = members.findById(member.id).get()
         assertThat(saved.birthYear).isEqualTo(1990)
         assertThat(saved.gender).isEqualTo(Gender.MALE)
+    }
+
+    @Test
+    fun `a consenting member changes the values and the response keeps the profile shape`() {
+        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
+        consents.agreeToDemographics(member.id)
+        val nickname = "연도${hex()}"
+
+        put(access, withDemographics(nickname, """{"birthYear":2003,"gender":"FEMALE"}"""))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.nickname").value(nickname))
+            .andExpect(jsonPath("$.data.birthYear").doesNotExist())
+            .andExpect(jsonPath("$.data.gender").doesNotExist())
+        val saved = members.findById(member.id).get()
+        assertThat(saved.birthYear).isEqualTo(2003)
+        assertThat(saved.gender).isEqualTo(Gender.FEMALE)
+    }
+
+    @Test
+    fun `demographics with empty values clear them and without the object or as null change nothing`() {
+        val (member, access) = account(birthYear = 1990, gender = Gender.MALE)
+        consents.agreeToDemographics(member.id)
+
+        put(access, withDemographics("그대로${hex()}", "null")).andExpect(status().isOk)
+        put(access, body("없음${hex()}", "KEEP")).andExpect(status().isOk)
+        assertThat(members.findById(member.id).get().birthYear).isEqualTo(1990)
+
+        put(access, withDemographics("지움${hex()}", """{"birthYear":null,"gender":null}"""))
+            .andExpect(status().isOk)
+        val saved = members.findById(member.id).get()
+        assertThat(saved.birthYear).isNull()
+        assertThat(saved.gender).isNull()
+    }
+
+    @Test
+    fun `a member who did not agree is forbidden and nothing is saved`() {
+        val (member, access) = account()
+        val before = members.findById(member.id).get().nickname
+
+        put(access, withDemographics("거부${hex()}", """{"birthYear":2003,"gender":"FEMALE"}"""))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.error.code").value("AUTH_002"))
+        val saved = members.findById(member.id).get()
+        assertThat(saved.nickname).isEqualTo(before)
+        assertThat(saved.birthYear).isNull()
+        assertThat(saved.gender).isNull()
+    }
+
+    @Test
+    fun `a wrong birth year is invalid input and an unknown gender or a text year is an invalid body`() {
+        val (member, access) = account(birthYear = 1990)
+        consents.agreeToDemographics(member.id)
+
+        listOf(
+            """{"birthYear":1929}""" to "COMMON_001",
+            """{"birthYear":20030}""" to "COMMON_001",
+            """{"gender":"OTHER"}""" to "COMMON_002",
+            """{"birthYear":"abcd"}""" to "COMMON_002"
+        ).forEach { (demographics, code) ->
+            put(access, withDemographics("틀림${hex()}", demographics))
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.error.code").value(code))
+        }
+        assertThat(members.findById(member.id).get().birthYear).isEqualTo(1990)
     }
 
     @Test
@@ -166,6 +233,11 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
     }
 
     private fun body(nickname: String, action: String): String = """{"nickname":"$nickname","imageAction":"$action"}"""
+
+    // [demographics] is the JSON of the object, or null.
+    private fun withDemographics(nickname: String, demographics: String): String =
+        """{"nickname":"$nickname","imageAction":"KEEP","demographics":$demographics}"""
+
 
     private fun account(
         birthYear: Int? = null,
