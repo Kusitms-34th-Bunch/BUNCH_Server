@@ -565,8 +565,9 @@ error.message = error.idempotency_conflict
 | `commentCount` | `Long` | 삭제 자리를 포함한 소셜 댓글·답글 수. comments 배열 크기와 다름 |
 
 초안 조회의 `profanity`와 `publishBlockers`는 현재 서버가 기동 시 한 번 로딩한 사전으로
-실제 제목·현재 참여자 코멘트에서 계산한다. 조회로 DB·revision·필드 버전·updatedAt·사용자
-활동을 변경하지 않는다. 실제 제목·코멘트·참여자 편집은 내용과 검사 상태를 함께 저장하고,
+실제 제목·현재 참여자 코멘트에서 계산한다. 금칙어 계산은 DB·revision·필드 버전·updatedAt·사용자
+활동을 변경하지 않으며, 기존 미초기화 제목 CRDT 복구는 유지한다.
+실제 제목·코멘트·참여자 편집은 내용과 검사 상태를 함께 저장하고,
 응답과 동일한 상태를 기존 `TITLE`·`COMMENT`·`PARTICIPANTS` 이벤트로 전달한다.
 
 `dateChips`는 지정 날짜가 null인 경우에만 같은 번들 사진의 현지 촬영일을 그대로
