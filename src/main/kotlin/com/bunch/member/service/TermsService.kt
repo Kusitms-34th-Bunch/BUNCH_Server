@@ -60,7 +60,8 @@ class TermsService(
                     MemberConsent(
                         memberId = memberId,
                         type = it.type,
-                        version = it.version
+                        version = it.version,
+                        agreed = true
                     )
                 )
             }

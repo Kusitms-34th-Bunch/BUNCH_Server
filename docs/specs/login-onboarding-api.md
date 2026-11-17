@@ -126,6 +126,8 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 | POST /api/v1/auth/logout | access Bearer | null, 현재 세션 삭제 |
 | GET /api/v1/members/me | 없음 | memberId, nickname, imageUrl, defaultBunch |
 | PUT /api/v1/members/me/profile | multipart profile(JSON):nickname,imageAction; photo? | `GET /members/me`와 같은 본인 프로필([상세](#member-profile-edit)) |
+| GET /api/v1/members/me/additional-info | 없음 | consented, birthYear, gender ([상세](#member-additional-info)) |
+| PUT /api/v1/members/me/additional-info-consent | JSON agreed, version(동의할 때) | 처리 뒤 상태, GET과 같은 모양 ([상세](#member-additional-info)) |
 | GET /api/v1/members/me/onboarding | 없음 | memberId, signupStatus, termsAccepted, defaultBunchId |
 | GET /api/v1/auth/terms | 없음 | terms: [{type,version,required}] (현재 약관 버전 조회, 원문 없음) |
 | POST /api/v1/auth/terms/agreements | agreements:[{type,version,agreed:true}] | null |
@@ -202,8 +204,8 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 
 - 출생연도·성별은 마이페이지에서 보여주지 않고 고칠 수도 없다(7.2.1). 수정 API는 이 값을 받지 않으며
   이전 앱이 `birthYear`·`gender`를 보내도 무시하고 저장된 값을 바꾸지 않는다. `GET /members/me` 응답에도
-  포함하지 않는다. 가입 때 입력한 값은 가입 API(`/me/registration`)로만 저장하고, 선택 동의 철회 요청은
-  문의 채널로 받아 운영자가 지운다(7.5.1 로직 3).
+  포함하지 않는다. 가입 때 입력한 값은 가입 API(`/me/registration`)로만 저장하고, 선택 동의의 켜기·끄기와
+  철회 때의 삭제는 [추가 개인정보 동의 API](#member-additional-info)로 한다(7.4.5).
 - 사진 저장이 실패하면 어떤 값도 바꾸지 않고 전체 실패(503 `IMAGE_001`)로 처리한다(7.2.7).
   업로드는 트랜잭션 밖에서 하고, DB 반영에 실패하면 새 파일을 지운다. 이전 파일은 커밋 뒤에만 지운다.
 - 요청 키와 fingerprint는 저장하지 않는다. 요청이 값을 덮어쓰는 최종 상태라 같은 요청을 다시 받아도
@@ -218,6 +220,38 @@ signupStatus 제외·가입 중/완료 상태의 null 필드·기본 번치 표�
 않음과 응답에 없음, imageAction 세 경우와 photo 불일치, 업로드 실패·DB 실패 시 롤백과 파일 정리, 같은 요청 재시도의 같은 결과와
 이전 파일 정리, 가입 미완료·정지·탈퇴, 멤버 목록·기존 알림 문구와 HTTP 계약(파트 누락, 잘못된 JSON/enum, 401,
 요청 키 헤더를 보내도 정상 처리)을 확인한다.
+
+<a id="member-additional-info"></a>
+### 추가 개인정보 수집·이용 동의 — 이슈 #157
+
+기준은 마이 기능명세서 7.4.4, 7.4.5이다. 선택 동의 DEMOGRAPHICS(출생연도·성별)를 가입 뒤에도 켜고 끈다.
+두 API 모두 가입을 마친 활성 회원만 쓸 수 있고, `Idempotency-Key` 헤더는 받지 않는다.
+
+| 경로 | 요청 | data |
+| --- | --- | --- |
+| GET /api/v1/members/me/additional-info | 없음 | `consented`, `birthYear`, `gender` |
+| PUT /api/v1/members/me/additional-info-consent | JSON `agreed`(필수), `version`(동의할 때 필수) | 처리 뒤 상태. GET과 같은 모양 |
+
+- 동의 상태는 화면에 들어올 때마다 GET으로 읽는다(7.4.4 로직 1, 7.2.6 로직 4). 동의하지 않았거나 철회했으면
+  `consented=false`이고 `birthYear`·`gender`는 null이다.
+- `agreed=true`는 동의한다. `version`은 `GET /auth/terms`의 DEMOGRAPHICS 현재 버전과 같아야 하며 다르면 409
+  `AUTH_016`, 없거나 공백이면 400이다. 가입 때 동의하지 않은 사람도 여기서 동의할 수 있다(7.4.5 로직 3).
+- `agreed=false`는 철회한다. `version`은 필요하지 않고 보내도 무시한다. 철회하면 같은 트랜잭션에서
+  `members.birth_year`·`gender`를 지운다. 다시 동의해도 지운 값은 돌아오지 않는다(7.4.5 로직 2).
+- 요청은 바꾸려는 상태를 말한다. 이미 그 상태이면 아무것도 쓰지 않고 현재 상태를 돌려준다. 같은 요청을
+  두 번 받아도 한 번만 처리하며(7.4.5 로직 4) 가입한 적 없는 선택 동의의 철회도 성공이다.
+- 동의·철회마다 `member_consents`에 한 행을 남긴다(동의 여부 `agreed`, 버전, 일시. 7.4.5 로직 1, 1.3.4 로직 1).
+  현재 상태는 가장 최근 행의 `agreed`이며 버전은 보지 않는다. 철회 행의 버전은 철회한 동의의 버전이다.
+  필수 약관(SERVICE·PRIVACY·AGE_OVER_14)은 이전처럼 버전마다 한 행만 허용한다.
+- 회원 행을 잠근 뒤 처리해서 같은 회원의 동의·철회 요청이 겹쳐도 차례대로 처리된다.
+- 탈퇴해도 이력 행은 지우지 않는다(회원 행이 남기 때문). 출생연도·성별은 탈퇴 때 지워진다(7.6.4).
+- 오류: 400 `COMMON_001`(`agreed` 누락, 동의에서 `version` 누락), 400 `COMMON_002`(깨진 JSON·형식 불일치),
+  401 `AUTH_001`, 403 `AUTH_015`(가입 미완료), 409 `AUTH_016`(버전 불일치), 503 `AUTH_017`(약관 버전 미설정).
+- 스키마: `V45`가 `member_consents.agreed`를 추가하고(기존 행은 동의로 채움) 유일 제약을 필수 약관에만
+  적용하는 부분 인덱스로 바꾼다.
+
+검증 기준: 실제 PostgreSQL로 동의·철회·재동의의 이력과 값 삭제, 같은 요청의 반복과 동시 요청, 버전 불일치,
+가입 미완료·탈퇴 계정, 마이그레이션 전 행의 보존과 반복 적용, HTTP 계약(401, 400 두 종류, 409, 403)을 확인한다.
 
 <a id="bunch-members"></a>
 ### 번치 멤버 목록 조회 — 이슈 #43
