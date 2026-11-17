@@ -118,6 +118,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val saved = putTitle(fixture, "씨발", UUID.randomUUID().toString())
         owner.json { it.path("type").asText() == "TITLE" }
         guest.json { it.path("type").asText() == "TITLE" }
+        // Compare persisted snapshots: PostgreSQL stores timestamps at microsecond precision.
+        val persistedBeforeRecheck = getSnapshot(fixture, fixture.guest)
         jdbc.update("UPDATE bundles SET title_has_prohibited_word=false,profanity_dictionary_version=NULL WHERE id=?",
             fixture.bundleId)
 
@@ -131,8 +133,8 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
                 .contains("TITLE_PROHIBITED_WORD")
         }
         val recovered = getSnapshot(fixture, fixture.guest)
-        assertThat(recovered.path("updatedAt")).isEqualTo(saved.path("updatedAt"))
-        assertThat(recovered.path("titleVersion")).isEqualTo(saved.path("titleVersion"))
+        assertThat(recovered.path("updatedAt")).isEqualTo(persistedBeforeRecheck.path("updatedAt"))
+        assertThat(recovered.path("titleVersion")).isEqualTo(persistedBeforeRecheck.path("titleVersion"))
     }
 
     @Test
