@@ -26,6 +26,7 @@ class GeneralBundleFinder(
     private val sections = GeneralActivitySections()
     private val balancer = GeneralSectionBalancer()
     private val bigSplitter = GeneralBigSplitter(settings)
+    private val facts = BundleFacts(settings, eligibility)
 
     fun find(
         day: DayPreparation.Ready,
@@ -54,8 +55,7 @@ class GeneralBundleFinder(
                                 start = part.section.start,
                                 end = part.section.end,
                                 rules = piece.rules + balanced.rules + part.rules,
-                                sections = inPiece,
-                                counter = counter
+                                sections = inPiece
                             )
                         } else {
                             notBundled += photos.map { it.photoId }
@@ -86,8 +86,7 @@ class GeneralBundleFinder(
             start = start,
             end = start,
             rules = listOf(NO_TIME),
-            sections = emptyList(),
-            counter = counter
+            sections = emptyList()
         )
         return GeneralResult(listOf(bundle), emptyList())
     }
@@ -103,40 +102,21 @@ class GeneralBundleFinder(
         start: Instant,
         end: Instant,
         rules: List<String>,
-        sections: List<TimedActivity>,
-        counter: GeneralCounter
-    ): RecoBundle {
-        val photoCount = counter.photos(photos)
-        val uploaderCount = counter.uploaders(photos).size
-        return RecoBundle(
-            dayKey = day.dayKey,
-            kind = BundleKind.GENERAL,
-            eventType = null,
-            establishedBy = null,
-            activity = activity,
-            subIndex = subIndex,
-            photos = photos.map { RecoBundle.BundlePhoto(it.photoId, PhotoRole.GENERAL) },
-            coverPhotoId = null,
-            startAt = start,
-            endAt = end,
-            photoCount = photoCount,
-            uploaderCount = uploaderCount,
-            hasGroupPhoto = photos.any {
-                eligibility.isUsable(it) && it.photo.analysis.people == PeopleCount.P3_PLUS
-            },
-            trace = RuleTrace(
-                dayKey = day.dayKey,
-                kind = BundleKind.GENERAL,
-                counts = RuleTrace.Counts(photoCount, uploaderCount),
-                configVersion = settings.configVersion,
-                general = RuleTrace.General(
-                    rules = rules,
-                    segments = sections.map { RuleTrace.ActivitySegment(it.activity, it.range) },
-                    activity = activity
-                )
-            )
+        sections: List<TimedActivity>
+    ): RecoBundle = facts.build(
+        day = day,
+        kind = BundleKind.GENERAL,
+        photos = photos,
+        roleOf = { PhotoRole.GENERAL },
+        activity = activity,
+        subIndex = subIndex,
+        span = TimeRange(start, end),
+        general = RuleTrace.General(
+            rules = rules,
+            segments = sections.map { RuleTrace.ActivitySegment(it.activity, it.range) },
+            activity = activity
         )
-    }
+    )
 
     companion object {
         const val NO_TIME = "no_time_whole_day"
