@@ -16,12 +16,6 @@ import kotlin.math.abs
  * morning starts at [dayStartHour], the afternoon at [afternoonStartHour] and the night at [nightStartHour], and the
  * night goes on to the start of the next day.
  *
- * The similarities of a burst and of the same composition come in two kinds because what a similarity is made of
- * changes its scale: the plain ones are for the cosine of two embeddings (the table), the ones of the fingerprint are
- * for [FingerprintSimilarity], the share of equal bits of two 64-bit fingerprints. Their first values are the same
- * numbers (0.90 is 6 different bits, 0.95 is 3) and are to be moved on real photos (14 V6). The gaps in time are the
- * same for both.
- *
  * Some values are used by later steps only: the limits of the list, the wait before a recalculation, the wait for the
  * AI. They are here so that all numbers are at one place.
  */
@@ -54,8 +48,6 @@ data class CombinationSettings(
     val burstMinSimilarity: Double = 0.90,
     val sameCompositionMaxGap: Duration = Duration.ofSeconds(120),
     val sameCompositionMinSimilarity: Double = 0.95,
-    val fingerprintBurstMinSimilarity: Double = 0.90,
-    val fingerprintSameCompositionMinSimilarity: Double = 0.95,
     val clockCorrectionMinPairs: Int = 2,
     val clockCorrectionMinMedian: Duration = Duration.ofMinutes(10),
     val representativenessWeight: Double = 0.4,
@@ -99,9 +91,7 @@ data class CombinationSettings(
                 activityMinConfidence,
                 sameSceneMinSimilarity,
                 burstMinSimilarity,
-                sameCompositionMinSimilarity,
-                fingerprintBurstMinSimilarity,
-                fingerprintSameCompositionMinSimilarity
+                sameCompositionMinSimilarity
             ).all { it in 0.0..1.0 }
         ) {
             "a confidence and a similarity are from 0 to 1"
