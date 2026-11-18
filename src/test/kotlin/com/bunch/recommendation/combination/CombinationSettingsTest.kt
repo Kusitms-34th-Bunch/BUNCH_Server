@@ -41,6 +41,7 @@ class CombinationSettingsTest {
         assertThat(settings.peopleSplitMinSide).isEqualTo(3)
         assertThat(settings.subBundleMax).isEqualTo(40)
         assertThat(settings.timeBuckets).isEqualTo(4)
+        assertThat(settings.cardMaxSize).isEqualTo(10)
         assertThat(settings.cardSizeSteps).containsExactly(
             CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 6),
             CombinationSettings.CardSizeStep(fromPhotos = 16, cardSize = 8),
@@ -162,6 +163,8 @@ class CombinationSettingsTest {
         assertThatThrownBy { CombinationSettings(fingerprintSameCompositionMinSimilarity = -0.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(cardMaxSize = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(cardSizeSteps = emptyList()) }
             .isInstanceOf(IllegalArgumentException::class.java)
