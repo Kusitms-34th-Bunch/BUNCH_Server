@@ -1,5 +1,6 @@
 package com.bunch.recommendation.domain.combination
 
+import com.bunch.global.image.ImageQualityCriteria
 import java.time.Duration
 import java.time.LocalTime
 import java.time.MonthDay
@@ -21,6 +22,9 @@ import kotlin.math.abs
  * for [FingerprintSimilarity], the share of equal bits of two 64-bit fingerprints. Their first values are the same
  * numbers (0.90 is 6 different bits, 0.95 is 3) and are to be moved on real photos (14 V6). The gaps in time are the
  * same for both.
+ *
+ * The numbers of the quality table (4-4) are [quality]. The photo box calculates the quality when a photo is uploaded,
+ * so the type of the numbers is in the shared image code and this class only holds them with the others (12).
  *
  * Some values are used by later steps only: the limits of the list, the wait before a recalculation, the wait for the
  * AI. They are here so that all numbers are at one place.
@@ -63,6 +67,7 @@ data class CombinationSettings(
     val diversityWeight: Double = 0.4,
     val aiPendingTimeout: Duration = Duration.ofMinutes(30),
     val defaultZone: ZoneId = ZoneId.of("Asia/Seoul"),
+    val quality: ImageQualityCriteria = ImageQualityCriteria(),
     val recalculationDebounce: Duration = Duration.ofMinutes(5),
     val listMax: Int = 20,
     val sameActivityGeneralMax: Int = 3,

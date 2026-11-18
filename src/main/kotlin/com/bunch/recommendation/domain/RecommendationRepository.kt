@@ -31,7 +31,7 @@ private const val COMBINATION_ROWS =
     "select p.id as photoId, p.capturedDate as capturedDate, p.capturedTime as capturedTime, " +
         "p.capturedUtcOffset as utcOffset, p.createdAt as createdAt, u.member.id as memberId, " +
         "u.uploadBatchId as uploadBatchId, p.dateBatchId as dateBatchId, f.fingerprint as imageFingerprint, " +
-        "r.source as source " +
+        "r.source as source, r.quality as quality, r.aiStatus as aiStatus " +
         "from PhotoUploader u join u.photo p left join PhotoImageFingerprint f on f.photoId = p.id " +
         "left join PhotoRecoFeature r on r.photoId = p.id " +
         "where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
