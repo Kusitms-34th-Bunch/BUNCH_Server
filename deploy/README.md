@@ -86,6 +86,9 @@ openssl rand 64 | openssl base64 -A
 
 - `JWT_SECRET`: 디코딩 후 64바이트 이상인 Base64 값. 재배포할 때 유지한다.
 - `APPLE_CLIENT_ID`, `GOOGLE_CLIENT_ID`, `KAKAO_NATIVE_APP_KEY`: 실제 앱의 인증 설정.
+- `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`: 회원 탈퇴 때 Apple 연동을 철회하는 Sign in with Apple 키.
+  Apple Developer에서 발급한 키(.p8)의 내용을 한 줄로 넣고 줄바꿈은 `\n`으로 쓴다.
+  비워 두면 Apple 회원의 탈퇴가 503으로 거절된다.
 - `TERMS_*`: 앱 약관 원문과 같은 버전. 가입·온보딩 배포 전 4개를 채운다.
 - `CLOUDINARY_*`: 사진 저장 설정. 사진 기능 배포 전에 채운다.
 - `BUNCH_INVITATION_BASE_URL`: 실제 공개 초대장 URL 접두사.

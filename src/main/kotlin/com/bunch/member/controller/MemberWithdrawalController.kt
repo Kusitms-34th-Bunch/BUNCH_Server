@@ -1,16 +1,23 @@
 package com.bunch.member.controller
 
 import com.bunch.global.common.ApiResponse
+import com.bunch.member.dto.WithdrawalRequest
+import com.bunch.member.service.MemberWithdrawalCoordinator
 import com.bunch.member.service.MemberWithdrawalService
+import jakarta.validation.Valid
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/members/me/withdrawal")
-class MemberWithdrawalController(private val withdrawals: MemberWithdrawalService) {
+class MemberWithdrawalController(
+    private val withdrawals: MemberWithdrawalService,
+    private val coordinator: MemberWithdrawalCoordinator
+) {
     @GetMapping("/check")
     fun check(
         @AuthenticationPrincipal memberId: String
@@ -18,9 +25,10 @@ class MemberWithdrawalController(private val withdrawals: MemberWithdrawalServic
 
     @PostMapping
     fun withdraw(
-        @AuthenticationPrincipal memberId: String
+        @AuthenticationPrincipal memberId: String,
+        @Valid @RequestBody(required = false) request: WithdrawalRequest?
     ): ApiResponse<Unit> {
-        withdrawals.withdraw(memberId.toLong())
+        coordinator.withdraw(memberId.toLong(), request?.appleAuthorizationCode)
         return ApiResponse.empty(Unit)
     }
 }
