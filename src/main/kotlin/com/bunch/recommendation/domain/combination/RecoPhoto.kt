@@ -63,6 +63,14 @@ data class RecoPhoto(
         }
 
     /**
+     * Whether the two photos are of one batch: they were uploaded together, or their dates were set together (photo box
+     * 4.2.7 rule 3).
+     */
+    fun sharesBatchWith(other: RecoPhoto): Boolean =
+        uploads.any { upload -> other.uploads.any { it.uploadBatchId == upload.uploadBatchId } } ||
+            (dateBatchId != null && dateBatchId == other.dateBatchId)
+
+    /**
      * One member who uploaded the photo, the batch of the upload (3.2.2 rule 3, 4.2.7 rule 3) and when this member
      * uploaded it. A photo several members uploaded has a time for each of them; of two members who share it, the one
      * with the earlier time uploaded it first (photo box 4.2.8 rule 3).
