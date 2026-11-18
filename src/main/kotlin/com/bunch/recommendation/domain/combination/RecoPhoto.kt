@@ -17,7 +17,10 @@ import java.util.UUID
  * uploaded first (8-5), and a photo without a time is put last in the order it was uploaded (8-6).
  *
  * [quality] is null while it is not calculated. [analysis] is [AiAnalysis.NONE] while [aiStatus] is not done, and
- * [embedding] is null when it is not made (5-4: such a photo is only joined to the same picture).
+ * [embedding] is null when it is not made. [fingerprint] is the 64-bit difference hash of the image that the upload
+ * stores (photo box 4.2.8 rule 1); it is null for a photo uploaded before it was stored or whose image could not be
+ * read. A photo that has neither an embedding nor a fingerprint cannot be told alike to another one, so it is only
+ * joined to the same picture (5-4).
  */
 data class RecoPhoto(
     val photoId: Long,
@@ -30,7 +33,8 @@ data class RecoPhoto(
     val quality: PhotoQuality?,
     val aiStatus: AiStatus,
     val analysis: AiAnalysis = AiAnalysis.NONE,
-    val embedding: Embedding? = null
+    val embedding: Embedding? = null,
+    val fingerprint: Long? = null
 ) {
     init {
         require(capturedTime == null || capturedDate != null) {
