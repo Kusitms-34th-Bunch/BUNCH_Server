@@ -37,13 +37,20 @@ internal object PreparationTestSupport {
         offset: ZoneOffset? = null,
         aiStatus: AiStatus = AiStatus.DONE,
         analysis: AiAnalysis = AiAnalysis.NONE,
-        batch: UUID? = null
+        batch: UUID? = null,
+        memberUploadedAt: Map<Long, Instant> = emptyMap()
     ): RecoPhoto = RecoPhoto(
         photoId = id,
         capturedDate = date?.let(LocalDate::parse),
         capturedTime = time?.let(LocalTime::parse),
         utcOffset = offset,
-        uploads = members.map { RecoPhoto.Upload(it, batch ?: UUID.nameUUIDFromBytes("batch-$id-$it".toByteArray())) },
+        uploads = members.map {
+            RecoPhoto.Upload(
+                memberId = it,
+                uploadBatchId = batch ?: UUID.nameUUIDFromBytes("batch-$id-$it".toByteArray()),
+                uploadedAt = memberUploadedAt[it] ?: Instant.parse("2026-10-20T00:00:00Z").plusSeconds(id)
+            )
+        },
         uploadedAt = Instant.parse("2026-10-20T00:00:00Z").plusSeconds(id),
         source = SourceType.CAMERA,
         quality = PhotoQuality.GOOD,

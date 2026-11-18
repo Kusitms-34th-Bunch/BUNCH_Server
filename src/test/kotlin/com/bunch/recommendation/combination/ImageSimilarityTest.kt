@@ -74,7 +74,9 @@ class ImageSimilarityTest {
         capturedDate = null,
         capturedTime = null,
         utcOffset = null,
-        uploads = listOf(RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID())),
+        uploads = listOf(
+            RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID(), uploadedAt = Instant.EPOCH)
+        ),
         uploadedAt = Instant.parse("2026-10-20T00:00:00Z"),
         source = SourceType.CAMERA,
         quality = null,

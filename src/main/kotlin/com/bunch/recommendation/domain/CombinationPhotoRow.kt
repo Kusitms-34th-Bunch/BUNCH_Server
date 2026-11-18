@@ -24,6 +24,9 @@ interface CombinationPhotoRow {
     /** When the photo was first stored. */
     val createdAt: Instant
     val memberId: Long
+
+    /** When this member uploaded the photo (not when the photo was first stored, which is [createdAt]). */
+    val memberUploadedAt: Instant
     val uploadBatchId: UUID
 
     /** The batch of the photos that were given a date in one request, or null (4.2.7 rule 3). */
