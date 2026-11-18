@@ -1,5 +1,7 @@
 package com.bunch.recommendation.domain
 
+import com.bunch.global.image.ImageQualityGrade
+import com.bunch.photo.domain.PhotoAiStatus
 import com.bunch.photo.domain.PhotoSourceType
 import java.time.Instant
 import java.time.LocalDate
@@ -32,4 +34,10 @@ interface CombinationPhotoRow {
 
     /** The original type the app told when the photo was uploaded, or null when it did not tell. */
     val source: PhotoSourceType?
+
+    /** The quality calculated when the photo was uploaded, or null when it was not (4-4). */
+    val quality: ImageQualityGrade?
+
+    /** How far the AI analysis is, or null when it was never asked for (4-3). */
+    val aiStatus: PhotoAiStatus?
 }

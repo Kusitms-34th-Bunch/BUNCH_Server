@@ -2,6 +2,7 @@ package com.bunch.recommendation
 
 import com.bunch.recommendation.domain.combination.AiAnalysis
 import com.bunch.recommendation.domain.combination.AiStatus
+import com.bunch.recommendation.domain.combination.PhotoQuality
 import com.bunch.recommendation.domain.combination.SourceType
 import com.bunch.recommendation.domain.combination.TimeState
 import com.bunch.recommendation.service.RecoPhotoInputBuilder
@@ -48,6 +49,51 @@ class RecoPhotoInputIntegrationTest : RecommendationIntegrationSupport() {
         insertPhoto(bunchId, "2026-10-19", "13:30:00", uploaders = listOf(ownerId))
 
         assertThat(inputs.build(bunchId).single().aiStatus).isEqualTo(AiStatus.FAILED)
+    }
+
+    @Test
+    fun `the quality calculated at the upload is the quality of the photo and none is none`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val good = insertPhoto(bunchId, "2026-10-19", "13:30:00", uploaders = listOf(ownerId))
+        val normal = insertPhoto(bunchId, "2026-10-19", "13:40:00", uploaders = listOf(ownerId))
+        val low = insertPhoto(bunchId, "2026-10-19", "13:50:00", uploaders = listOf(ownerId))
+        val rowWithoutQuality = insertPhoto(bunchId, "2026-10-19", "14:00:00", uploaders = listOf(ownerId))
+        val noRow = insertPhoto(bunchId, "2026-10-19", "14:10:00", uploaders = listOf(ownerId))
+        setFeature(good, quality = "GOOD")
+        setFeature(normal, quality = "NORMAL")
+        setFeature(low, quality = "LOW")
+        setFeature(rowWithoutQuality)
+
+        val photos = inputs.build(bunchId).associateBy { it.photoId }
+
+        assertThat(photos.getValue(good).quality).isEqualTo(PhotoQuality.GOOD)
+        assertThat(photos.getValue(normal).quality).isEqualTo(PhotoQuality.NORMAL)
+        assertThat(photos.getValue(low).quality).isEqualTo(PhotoQuality.LOW)
+        assertThat(photos.getValue(rowWithoutQuality).quality).isNull()
+        assertThat(photos.getValue(noRow).quality).isNull()
+    }
+
+    @Test
+    fun `a photo never sent to the analysis is a failed one and a photo with a state keeps it`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val never = insertPhoto(bunchId, "2026-10-19", "13:30:00", uploaders = listOf(ownerId))
+        val rowOnly = insertPhoto(bunchId, "2026-10-19", "13:40:00", uploaders = listOf(ownerId))
+        val pending = insertPhoto(bunchId, "2026-10-19", "13:50:00", uploaders = listOf(ownerId))
+        val done = insertPhoto(bunchId, "2026-10-19", "14:00:00", uploaders = listOf(ownerId))
+        val failed = insertPhoto(bunchId, "2026-10-19", "14:10:00", uploaders = listOf(ownerId))
+        setFeature(rowOnly)
+        setFeature(pending, aiStatus = "PENDING")
+        setFeature(done, aiStatus = "DONE")
+        setFeature(failed, aiStatus = "FAILED")
+
+        val photos = inputs.build(bunchId).associateBy { it.photoId }
+
+        assertThat(photos.getValue(never).aiStatus).isEqualTo(AiStatus.FAILED)
+        assertThat(photos.getValue(rowOnly).aiStatus).isEqualTo(AiStatus.FAILED)
+        assertThat(photos.getValue(pending).aiStatus).isEqualTo(AiStatus.PENDING)
+        assertThat(photos.getValue(done).aiStatus).isEqualTo(AiStatus.DONE)
+        assertThat(photos.getValue(failed).aiStatus).isEqualTo(AiStatus.FAILED)
+        assertThat(photos.getValue(done).analysis).isEqualTo(AiAnalysis.NONE)
     }
 
     @Test
@@ -201,6 +247,15 @@ class RecoPhotoInputIntegrationTest : RecommendationIntegrationSupport() {
 
     private fun setOffset(photoId: Long, offset: String) {
         jdbc.update("UPDATE photos SET captured_utc_offset = ? WHERE id = ?", offset, photoId)
+    }
+
+    private fun setFeature(photoId: Long, quality: String? = null, aiStatus: String? = null) {
+        jdbc.update(
+            "INSERT INTO photo_reco_feature (photo_id, quality, ai_status) VALUES (?, ?, ?)",
+            photoId,
+            quality,
+            aiStatus
+        )
     }
 
     private fun setSource(photoId: Long, source: String) {

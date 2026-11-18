@@ -1,9 +1,12 @@
 package com.bunch.recommendation.service
 
+import com.bunch.global.image.ImageQualityGrade
+import com.bunch.photo.domain.PhotoAiStatus
 import com.bunch.photo.domain.PhotoSourceType
 import com.bunch.recommendation.domain.CombinationPhotoRow
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.combination.AiStatus
+import com.bunch.recommendation.domain.combination.PhotoQuality
 import com.bunch.recommendation.domain.combination.RecoPhoto
 import com.bunch.recommendation.domain.combination.SourceType
 import org.springframework.stereotype.Service
@@ -17,9 +20,10 @@ import java.time.ZoneOffset
  * one may give it a date (5-3). The photos come in the order of their numbers, so the same bunch gives the same input
  * every time.
  *
- * What the AI and the quality calculation will tell is not known yet, so it stays empty: no quality, no analysis and
- * no embedding. The photo is given the status of a failed analysis (4-3): it has no clue, its activity is unknown, and
- * it does not hold the day back as a pending photo would (5-6).
+ * The quality is the one calculated when the photo was uploaded; a photo without it has none (it is not low, 3-1). What
+ * the AI will tell is not known yet, so the analysis and the embedding stay empty. A photo that was never sent to the
+ * analysis is given the status of a failed one (4-3): it has no clue, its activity is unknown, and it does not hold the
+ * day back as a pending photo would (5-6). A photo with a status is read as it is.
  */
 @Service
 class RecoPhotoInputBuilder(
@@ -39,11 +43,23 @@ class RecoPhotoInputBuilder(
             uploads = rows.map { RecoPhoto.Upload(memberId = it.memberId, uploadBatchId = it.uploadBatchId) },
             uploadedAt = row.createdAt,
             source = sourceOf(row),
-            quality = null,
-            aiStatus = AiStatus.FAILED,
+            quality = row.quality?.let(::qualityOf),
+            aiStatus = row.aiStatus?.let(::aiStatusOf) ?: AiStatus.FAILED,
             fingerprint = row.imageFingerprint,
             dateBatchId = row.dateBatchId
         )
+    }
+
+    private fun qualityOf(grade: ImageQualityGrade): PhotoQuality = when (grade) {
+        ImageQualityGrade.GOOD -> PhotoQuality.GOOD
+        ImageQualityGrade.NORMAL -> PhotoQuality.NORMAL
+        ImageQualityGrade.LOW -> PhotoQuality.LOW
+    }
+
+    private fun aiStatusOf(status: PhotoAiStatus): AiStatus = when (status) {
+        PhotoAiStatus.PENDING -> AiStatus.PENDING
+        PhotoAiStatus.DONE -> AiStatus.DONE
+        PhotoAiStatus.FAILED -> AiStatus.FAILED
     }
 
     // The original type the app told. A photo uploaded before the app told it is read by the rule of 4-4: a photo is a
