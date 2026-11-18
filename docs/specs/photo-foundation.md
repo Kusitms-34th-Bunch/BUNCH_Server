@@ -71,17 +71,22 @@ PostgreSQL의 `captured_time TIME`은 `time(6)` 정밀도 계약이다. 앱 입�
 ### PhotoRecoFeature
 
 추천 번들이 쓰는 사진의 특성이다(추천 번들 조합 명세 4-5). 사진당 1행이고 키는 `photo_id`이며,
-Photo가 지워지면 DB가 함께 지운다(`photo_image_fingerprints`와 같은 보조 테이블 방식). 지금은 원본 유형만 있고,
-AI 분석·품질 컬럼은 그것을 계산하는 이슈에서 추가한다.
+Photo가 지워지면 DB가 함께 지운다(`photo_image_fingerprints`와 같은 보조 테이블 방식). 원본 유형, 품질, AI 분석 상태가 있고
+AI 분석의 모델 버전·응답 원문·분석 시각 컬럼은 자리만 있다(V48, 분석을 만드는 이슈가 채운다).
 
 | 필드 | 타입·제약 |
 | --- | --- |
 | `photoId` | `Long`, PK, `photos.id` 참조 |
 | `source` | 선택 `CAMERA`, `SCREENSHOT`, `SAVED`, varchar(16). 비어 있으면 원본 유형을 모른다 |
+| `quality` | 선택 `GOOD`, `NORMAL`, `LOW`, varchar(8). 비어 있으면 품질을 계산하지 못했다 |
+| `aiStatus` | 선택 `PENDING`, `DONE`, `FAILED`, varchar(16). 비어 있으면 분석을 요청한 적이 없다 |
+| `ai_model_version`, `ai_raw`, `analyzed_at` | 선택. 엔티티가 아직 갖지 않는다(분석을 만들 때 매핑한다) |
 
 - 새 사진은 항상 행을 만든다. 값은 업로드 요청의 `sourceType`에서 온다(`SAVED_IMAGE`는 `SAVED`로 바꾸고 `UNKNOWN`은 비운다).
 - 이 테이블을 만들기 전에 올라온 사진은 행이 없다. 행이 없는 것은 값이 비어 있는 것과 같다.
 - 합쳐지거나 다시 올라온 사진은 `source`가 비어 있을 때만 새 값으로 채운다(행이 없으면 값이 있을 때 만든다). 있는 값은 바꾸지 않는다.
+- `quality`는 새 사진을 저장할 때 한 번 계산해 채운다(`ImageQuality`). 이미지를 읽을 수 없으면 비우고 업로드는 성공한다. 같은 사진이 합쳐질 때는 다시
+  계산하지 않고, 있는 값은 바꾸지 않는다. 기준은 조합명세 4-4 표이고 `CombinationSettings.quality`에 있다.
 
 ### PhotoUploader
 

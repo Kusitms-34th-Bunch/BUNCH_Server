@@ -25,6 +25,18 @@ private const val ROW_ORDER = "order by p.id asc, u.id asc"
 private const val MATERIAL_ROWS =
     DATED_ROWS + "and not exists (select 1 from BundlePhoto b where b.photoId = p.id) " + ROW_ORDER
 
+// The input of the recommended bundle combination: every READY photo of the bunch that no bundle uses, with or without
+// a date, and one row for each of its uploaders. The photos of a draft or a published bundle are left out (3-1).
+private const val COMBINATION_ROWS =
+    "select p.id as photoId, p.capturedDate as capturedDate, p.capturedTime as capturedTime, " +
+        "p.capturedUtcOffset as utcOffset, p.createdAt as createdAt, u.member.id as memberId, " +
+        "u.uploadBatchId as uploadBatchId, p.dateBatchId as dateBatchId, f.fingerprint as imageFingerprint, " +
+        "r.source as source, r.quality as quality, r.aiStatus as aiStatus " +
+        "from PhotoUploader u join u.photo p left join PhotoImageFingerprint f on f.photoId = p.id " +
+        "left join PhotoRecoFeature r on r.photoId = p.id " +
+        "where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
+        "and not exists (select 1 from BundlePhoto b where b.photoId = p.id) " + ROW_ORDER
+
 /**
  * Everything the recommended bundles read and write in one place. A candidate is saved with the entity manager, as
  * the photo box does for its own entities, so the other tables do not need a repository of their own.
@@ -35,6 +47,9 @@ interface RecommendationRepository : Repository<Photo, Long> {
 
     @Query(DATED_ROWS + ROW_ORDER)
     fun findDatedRows(@Param("bunchId") bunchId: Long): List<MaterialPhotoRow>
+
+    @Query(COMBINATION_ROWS)
+    fun findCombinationRows(@Param("bunchId") bunchId: Long): List<CombinationPhotoRow>
 
     @Query("select p.id as photoId, p.createdAt as createdAt from Photo p where p.id in :photoIds")
     fun findAddedAt(@Param("photoIds") photoIds: Collection<Long>): List<PhotoAddedRow>

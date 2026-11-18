@@ -8,6 +8,8 @@ import com.bunch.bunch.domain.MembershipRole
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 import com.bunch.global.image.ImageFingerprint
+import com.bunch.global.image.ImageQuality
+import com.bunch.global.image.ImageQualityGrade
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.global.image.PhotoImageUrls
@@ -70,6 +72,7 @@ class PhotoService(
     private val imageAssets: ImageAssetService,
     private val imageAssetRepository: ImageAssetRepository,
     private val storage: PhotoImageStorage,
+    private val imageQuality: ImageQuality,
     private val events: ApplicationEventPublisher,
     private val entityManager: EntityManager,
     private val deletionCallbacks: ObjectProvider<PhotoFinalDeletionCallback>,
@@ -147,9 +150,12 @@ class PhotoService(
         if (shared != null) return shared
 
         val fingerprint = checked ?: ImageFingerprint.of(image.bytes)
+        // Like the fingerprint, the quality is only a feature of a new photo: an image that cannot be read gives none,
+        // and the upload still succeeds.
+        val quality = imageQuality.of(image)
         val file = storage.upload(image)
         val result = try {
-            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint) }!!
+            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint, quality) }!!
         } catch (ex: Exception) {
             discardUnlessSaved(file)
             throw ex
@@ -170,7 +176,8 @@ class PhotoService(
         command: PhotoUploadCommand,
         hash: String,
         file: StoredImage,
-        fingerprint: Long?
+        fingerprint: Long?,
+        quality: ImageQualityGrade?
     ): PhotoUploadResult {
         val locked = lockForUpload(command)
         val same = findSamePhoto(command, hash, fingerprint)
@@ -193,6 +200,7 @@ class PhotoService(
         )
         // Every new photo gets its row, so the features that come later have a place to be filled in (4-5).
         recoFeatures.fillSource(photo.id, command.sourceType?.name)
+        quality?.let { recoFeatures.fillQuality(photo.id, it.name) }
         fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
         locked.membership.recordActivity()

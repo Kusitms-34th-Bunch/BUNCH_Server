@@ -1,5 +1,6 @@
 package com.bunch.recommendation.service
 
+import com.bunch.global.image.ImageQuality
 import com.bunch.recommendation.domain.BuiltInSpecialDays
 import com.bunch.recommendation.domain.BuiltInTitleSentences
 import com.bunch.recommendation.domain.CandidateExpiry
@@ -11,6 +12,7 @@ import com.bunch.recommendation.domain.SpecialDayCalendar
 import com.bunch.recommendation.domain.TitleContextBuilder
 import com.bunch.recommendation.domain.TitleGenerator
 import com.bunch.recommendation.domain.TitleSentenceSource
+import com.bunch.recommendation.domain.combination.CombinationSettings
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 
@@ -53,4 +55,12 @@ class RecommendationConfig {
         calendar: SpecialDayCalendar,
         settings: RecommendationSettings
     ): TitleGenerator = TitleGenerator(sentences, calendar, settings)
+
+    // The numbers of the new combination (specification 12). The photo box calculates the quality of a photo with the
+    // ones of the quality table, so they are made once here, where all the numbers are.
+    @Bean
+    fun combinationSettings(): CombinationSettings = CombinationSettings()
+
+    @Bean
+    fun imageQuality(settings: CombinationSettings): ImageQuality = ImageQuality(settings.quality)
 }

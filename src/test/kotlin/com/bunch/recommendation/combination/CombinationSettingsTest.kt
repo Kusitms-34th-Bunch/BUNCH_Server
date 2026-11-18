@@ -1,5 +1,6 @@
 package com.bunch.recommendation.combination
 
+import com.bunch.global.image.ImageQualityCriteria
 import com.bunch.recommendation.domain.combination.CombinationSettings
 import com.bunch.recommendation.domain.combination.DayPart
 import com.bunch.recommendation.domain.combination.Pace
@@ -78,6 +79,16 @@ class CombinationSettingsTest {
 
         assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
         assertThat(changed.burstMinSimilarity).isEqualTo(0.90)
+    }
+
+    @Test
+    fun `the numbers of the quality table are held with the others`() {
+        assertThat(settings.quality).isEqualTo(ImageQualityCriteria())
+
+        val changed = CombinationSettings(quality = ImageQualityCriteria(lowShortSideBelow = 600))
+
+        assertThat(changed.quality.lowShortSideBelow).isEqualTo(600)
+        assertThat(changed.quality.goodShortSideFrom).isEqualTo(1080)
     }
 
     @Test
