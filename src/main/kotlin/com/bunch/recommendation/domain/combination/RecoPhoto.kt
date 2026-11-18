@@ -21,6 +21,11 @@ import java.util.UUID
  * stores (photo box 4.2.8 rule 1); it is null for a photo uploaded before it was stored or whose image could not be
  * read. A photo that has neither an embedding nor a fingerprint cannot be told alike to another one, so it is only
  * joined to the same picture (5-4).
+ *
+ * [dateBatchId] is the batch of the photos whose dates the user set in one request; only a photo the user dated has
+ * one. Photos of the same batch of an upload ([Upload.uploadBatchId]) or of the same date batch belong together
+ * (photo box 4.2.7 rule 3). Whether two photos belong together is asked by the steps that use it; this value only
+ * carries the batch.
  */
 data class RecoPhoto(
     val photoId: Long,
@@ -34,11 +39,15 @@ data class RecoPhoto(
     val aiStatus: AiStatus,
     val analysis: AiAnalysis = AiAnalysis.NONE,
     val embedding: Embedding? = null,
-    val fingerprint: Long? = null
+    val fingerprint: Long? = null,
+    val dateBatchId: UUID? = null
 ) {
     init {
         require(capturedTime == null || capturedDate != null) {
             "capturedTime requires capturedDate"
+        }
+        require(dateBatchId == null || capturedDate != null) {
+            "a date batch requires capturedDate"
         }
         require(uploads.isNotEmpty()) {
             "a photo has at least one upload"

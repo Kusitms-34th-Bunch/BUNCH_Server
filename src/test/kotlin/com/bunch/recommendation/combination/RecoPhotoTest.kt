@@ -65,11 +65,22 @@ class RecoPhotoTest {
             .isEqualTo(-42L)
     }
 
+    @Test
+    fun `a date batch is kept for a photo with a date and refused for a photo without one`() {
+        val batch = UUID.randomUUID()
+
+        assertThat(photo(LocalDate.of(2026, 10, 19), null, dateBatchId = batch).dateBatchId).isEqualTo(batch)
+        assertThat(photo(LocalDate.of(2026, 10, 19), null).dateBatchId).isNull()
+        assertThatThrownBy { photo(null, null, dateBatchId = batch) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private fun photo(
         date: LocalDate?,
         time: LocalTime?,
         uploads: List<RecoPhoto.Upload> = listOf(upload),
-        fingerprint: Long? = null
+        fingerprint: Long? = null,
+        dateBatchId: UUID? = null
     ) = RecoPhoto(
         photoId = 1L,
         capturedDate = date,
@@ -80,6 +91,7 @@ class RecoPhotoTest {
         source = SourceType.CAMERA,
         quality = PhotoQuality.GOOD,
         aiStatus = AiStatus.DONE,
-        fingerprint = fingerprint
+        fingerprint = fingerprint,
+        dateBatchId = dateBatchId
     )
 }
