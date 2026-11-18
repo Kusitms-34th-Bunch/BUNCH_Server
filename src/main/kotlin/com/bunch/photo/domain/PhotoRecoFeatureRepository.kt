@@ -17,4 +17,15 @@ interface PhotoRecoFeatureRepository : JpaRepository<PhotoRecoFeature, Long> {
         nativeQuery = true
     )
     fun fillSource(@Param("photoId") photoId: Long, @Param("source") source: String?): Int
+
+    // The same for the quality: the row is created when the photo has none, and a quality that is known is never
+    // replaced.
+    @Modifying(flushAutomatically = true)
+    @Query(
+        """INSERT INTO photo_reco_feature (photo_id, quality) VALUES (:photoId, CAST(:quality AS VARCHAR))
+            ON CONFLICT (photo_id) DO UPDATE SET quality = EXCLUDED.quality
+            WHERE photo_reco_feature.quality IS NULL""",
+        nativeQuery = true
+    )
+    fun fillQuality(@Param("photoId") photoId: Long, @Param("quality") quality: String): Int
 }
