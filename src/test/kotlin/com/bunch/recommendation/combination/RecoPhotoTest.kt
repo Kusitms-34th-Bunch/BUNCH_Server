@@ -58,10 +58,18 @@ class RecoPhotoTest {
         assertThat(photo.embedding).isNull()
     }
 
+    @Test
+    fun `the image fingerprint is missing until it is given and is kept as given`() {
+        assertThat(photo(LocalDate.of(2026, 10, 19), LocalTime.NOON).fingerprint).isNull()
+        assertThat(photo(LocalDate.of(2026, 10, 19), LocalTime.NOON, fingerprint = -42L).fingerprint)
+            .isEqualTo(-42L)
+    }
+
     private fun photo(
         date: LocalDate?,
         time: LocalTime?,
-        uploads: List<RecoPhoto.Upload> = listOf(upload)
+        uploads: List<RecoPhoto.Upload> = listOf(upload),
+        fingerprint: Long? = null
     ) = RecoPhoto(
         photoId = 1L,
         capturedDate = date,
@@ -71,6 +79,7 @@ class RecoPhotoTest {
         uploadedAt = Instant.parse("2026-10-20T00:00:00Z"),
         source = SourceType.CAMERA,
         quality = PhotoQuality.GOOD,
-        aiStatus = AiStatus.DONE
+        aiStatus = AiStatus.DONE,
+        fingerprint = fingerprint
     )
 }

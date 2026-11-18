@@ -70,6 +70,17 @@ class CombinationSettingsTest {
     }
 
     @Test
+    fun `the similarities of the fingerprint start at the numbers of the table and are kept apart from them`() {
+        assertThat(settings.fingerprintBurstMinSimilarity).isEqualTo(0.90)
+        assertThat(settings.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
+
+        val changed = CombinationSettings(fingerprintBurstMinSimilarity = 0.85)
+
+        assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
+        assertThat(changed.burstMinSimilarity).isEqualTo(0.90)
+    }
+
+    @Test
     fun `the clock correction, the waits, the list and the windows are the ones of the table`() {
         assertThat(settings.clockCorrectionMinPairs).isEqualTo(2)
         assertThat(settings.clockCorrectionMinMedian).isEqualTo(Duration.ofMinutes(10))
@@ -134,6 +145,10 @@ class CombinationSettingsTest {
         assertThatThrownBy { CombinationSettings(memberMaxRatio = 0.0) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(clueMinConfidence = 1.1) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(fingerprintBurstMinSimilarity = 1.1) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(fingerprintSameCompositionMinSimilarity = -0.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)
