@@ -27,8 +27,8 @@
 
 | 메서드·경로 | 요청 | 성공 data |
 | --- | --- | --- |
-| `GET /members/me/withdrawal/check` | 없음 | `{ownerBunches:[{bunchId,name,imageUrl,myMembershipId,membershipVersion}]}` |
-| `POST /members/me/withdrawal` | 없음(`Idempotency-Key` 없음) | `null` |
+| `GET /members/me/withdrawal/check` | 없음 | `{ownerBunches:[{bunchId,name,imageUrl,myMembershipId,membershipVersion}], provider}` |
+| `POST /members/me/withdrawal` | 선택 `{appleAuthorizationCode}`(`Idempotency-Key` 없음) | `null` |
 
 - **확인(7.6.2):** 다른 멤버가 있는 번치 중 내가 메인 관리자인 번치만 준다. 공동 관리자 번치와 나 혼자인 번치는
   넘길 대상이 없으므로 제외한다. 「다음」을 누를 때마다 서버에서 다시 읽는다. 기존 `GET /bunches`에는 번치 멤버 수가
@@ -60,6 +60,47 @@
 잠금 순서는 회원 → 번치 ID 오름차순 → 번들·사진 순서다. 좋아요는 번치 단위(6.2.6)라 지우지 않는다. 탈퇴를 다른 멤버에게
 알리지 않는다(5.8.1). 실패하면 계정은 그대로이고(전체 롤백) 앱은 7.6.4의 오류 토스트를 보인다. 요청 중 앱이 종료되어도
 서버는 끝까지 처리한다.
+
+## Apple 연동 철회(이슈 #174)
+
+App Store 심사 가이드라인 5.1.1(v)은 Sign in with Apple을 지원하는 앱이 계정을 삭제할 때 Sign in with Apple REST API로
+사용자 토큰을 철회하라고 한다. 온보딩 1.2.4가 "탈퇴 명세에서 정의한다"고 미룬 부분이며 마이 7.6.4에는 정의가 없어
+아래와 같이 정한다. 서버에는 Apple 토큰이 없으므로(로그인은 `idToken`·`nonce`만 확인한다) 앱이 탈퇴 때 Apple 인증 창을
+한 번 더 띄워 받은 인가 코드(`authorizationCode`)를 보낸다. 로그인 API와 저장소는 바꾸지 않는다.
+
+- **확인 API:** `provider`(`APPLE`·`GOOGLE`·`KAKAO`, 연결이 없으면 `null`)를 함께 준다. 앱은 이 값이 `APPLE`일 때만 Apple
+  인증 창을 띄운다.
+- **탈퇴 요청:** 본문은 선택이며 Apple 회원만 `appleAuthorizationCode`를 보낸다. 다른 회원이 보내면 무시한다. 본문이 없는
+  기존 호출은 그대로 동작한다.
+- **순서:** ① 관리자 번치가 남았는지 읽기 전용으로 확인(남았으면 Apple을 부르지 않고 409 `USER_005`) → ② Apple 회원이면
+  코드로 Apple에 토큰을 받아 철회 → ③ 기존 탈퇴 트랜잭션. Apple 호출은 번치 잠금을 쥔 트랜잭션 밖에서 한다.
+- **철회:** 코드를 토큰으로 교환하고, 응답의 id token `sub`가 이 회원의 Apple 식별자와 같은지 확인한 뒤 refresh token을
+  철회한다(refresh token이 없으면 access token). 다른 Apple 계정의 코드는 거절한다. 연결 3초·응답 10초 제한이며 코드·비밀·
+  Apple의 응답은 로그에 남기지 않는다.
+- **실패하면 탈퇴하지 않는다**(7.6.4 "처리 실패 → 계정은 그대로, 다시 시도"와 같은 취급).
+
+| 상황 | 응답 | 계정 |
+| --- | --- | --- |
+| Apple 회원이 코드 없이(빈 값 포함) 요청 | 400 `USER_006` | 그대로 |
+| 철회 실패(Apple 오류·시간 초과·응답 형식 오류·다른 Apple 계정의 코드·키 미설정) | 503 `USER_007` | 그대로 |
+| 관리자 번치가 남음 | 409 `USER_005` | 그대로 |
+
+인가 코드는 한 번만 쓸 수 있으므로 503 뒤 재시도는 앱이 Apple 인증 창에서 새 코드를 받아 다시 요청해야 한다.
+
+설정은 `auth.apple.team-id`·`key-id`·`private-key`(Sign in with Apple 키의 PKCS#8 PEM, 한 줄이면 줄바꿈을 `\n`으로)와
+Apple 주소 `token-uri`·`revoke-uri`(기본은 Apple 운영 주소, 테스트에서 바꾼다)다. 값이 비어 있으면 앱은 뜨고 Apple 회원의
+탈퇴만 503으로 거절한다. 클라이언트 비밀(JWT, ES256, 유효 5분)은 호출마다 만들며 저장하지 않는다.
+
+확정 대기(답이 오면 아래만 고친다):
+
+| 항목 | 지금 가정 | 답이 다르면 |
+| --- | --- | --- |
+| 탈퇴 때 Apple 인증 창 단계 추가(기획) | 추가한다(앱은 가능하다고 답함) | 로그인 때 토큰을 저장하는 방식으로 바꿔야 해서 범위가 커진다 |
+| `provider`를 확인 API에 담는 위치(앱) | `GET /members/me/withdrawal/check` | `GET /members/me`에 추가 |
+| 인증 창 취소(기획) | 코드가 없으면 400으로 탈퇴하지 않는다 | `MemberWithdrawalCoordinator`에서 철회를 건너뛰고 진행 |
+| 앱의 Apple 로그인 식별자 | 앱 번들 ID(`auth.apple.client-id`) | 철회용 `client_id`를 설정으로 따로 둔다 |
+| Apple API 형식 | 교환 `POST /auth/token`, 철회 `POST /auth/revoke`, 비밀은 ES256 JWT | `AppleTokenRevoker`·`AppleClientSecret`만 고친다. **Apple 공식 문서 원문 대조 전이다** |
+| 서버 알림 수신(Services ID) | 이 이슈에서 만들지 않는다 | 한국 개발자가 새 Services ID를 등록하면 별도 이슈 |
 
 ## 탈퇴 뒤 표시와 집계
 
@@ -95,3 +136,8 @@
 중단과 번치 목록·상태 불변, 혼자인 번치 삭제, 권한을 넘긴 뒤 탈퇴, 중간 실패 시 전체 롤백과 세션 유지, 모든 기기 세션 삭제,
 기기·설정·알림·공지 정리와 타인 데이터 보존, 사진·초안·번들 코멘트·소셜 댓글 처리와 집계 유지, 동시 요청, 미가입·탈퇴
 계정의 거절, 탈퇴 계정의 프로필 수정·푸시 알림 설정 API 거절을 확인한다.
+
+Apple 철회는 로컬 모의 서버로 확인한다. 클라이언트 비밀(ES256 헤더 `kid`, `iss`·`sub`·`aud`·만료, 한 줄 키), 교환과 철회의
+요청 형식, refresh token이 없을 때 access token, 다른 Apple 계정의 코드·Apple의 오류 응답·토큰 누락·키 미설정의 실패, 확인
+API의 `provider`, Apple 회원의 정상 탈퇴·코드 없음 400·철회 실패 503과 계정 유지, 관리자 번치가 남으면 Apple을 부르지 않음,
+Apple 회원이 아닌 회원은 Apple을 부르지 않음을 본다. 실제 Apple과의 통신은 키 발급과 앱 연동 뒤 기기에서 따로 확인한다.
