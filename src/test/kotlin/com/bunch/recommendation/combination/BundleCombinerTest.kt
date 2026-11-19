@@ -12,6 +12,7 @@ import com.bunch.recommendation.combination.EventTestSupport.friends
 import com.bunch.recommendation.combination.PreparationTestSupport.scene
 import com.bunch.recommendation.domain.combination.ActivityCode.MEAL
 import com.bunch.recommendation.domain.combination.AiStatus
+import com.bunch.recommendation.domain.combination.BundleCombiner
 import com.bunch.recommendation.domain.combination.BundleKind
 import com.bunch.recommendation.domain.combination.DayCombination
 import com.bunch.recommendation.domain.combination.EstablishedBy
@@ -24,6 +25,7 @@ import com.bunch.recommendation.domain.combination.RecoPhoto
 import com.bunch.recommendation.domain.combination.SensitiveClueCode
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -208,6 +210,58 @@ class BundleCombinerTest {
         assertThat(holiday.eventType).isEqualTo(EventType.HOLIDAY)
         assertThat(holiday.establishedBy).isEqualTo(EstablishedBy.DATE_BOOST)
         assertThat(bundles(ordinary).filter { it.kind == BundleKind.EVENT }).isEmpty()
+    }
+
+    // --- the titles (9) ---
+
+    @Test
+    fun `E1 the title of a birthday is the date and the name of the event`() {
+        assertThat(bundles(birthday()).single().title).isEqualTo("10월 19일 생일 파티")
+    }
+
+    @Test
+    fun `E6 the event and the dinner each have a title, in the order of the time`() {
+        val graduation = listOf(clued(1, "14:00", 1, GRAD_CAP, person = true)) + friends(10, "14:10", 5)
+
+        val result = bundles(graduation + meals(100, "18:00", 8))
+
+        assertThat(result.map { it.title }).containsExactly("10월 19일 졸업", "10월 19일 밤 식사")
+    }
+
+    @Test
+    fun `an event that stood by the date has the part of the day and no name of the event`() {
+        val chuseok = listOf(clued(1, "12:00", 1, HANBOK_GROUP_PHOTO, person = true, date = "2026-09-25")) +
+            friends(10, "12:10", 6, date = "2026-09-25")
+
+        assertThat(bundles(chuseok).single().title).isEqualTo("9월 25일 오후")
+    }
+
+    @Test
+    fun `every bundle has a title and none is blank`() {
+        val result = bundles(birthday() + meals(1, "10:00", 8) + meals(201, "15:00", 8))
+
+        assertThat(result).hasSize(3)
+        assertThat(result.map { it.title }).doesNotContainNull().allSatisfy { assertThat(it).isNotBlank() }
+    }
+
+    @Test
+    fun `the year is in the title when the day is not of the year of the clock`() {
+        val past = birthday(date = "2025-10-19")
+
+        assertThat(bundles(past).single().title).isEqualTo("2025년 10월 19일 생일 파티")
+    }
+
+    @Test
+    fun `the clock is the only thing that changes a title`() {
+        val photos = birthday() + meals(1, "10:00", 8)
+        val later = Clock.fixed(Instant.parse("2027-02-01T00:00:00Z"), ZoneOffset.UTC)
+
+        val now = bundles(photos).map { it.title }
+        val nextYear = (BundleCombiner(clock = later).combine(photos).days.single() as DayCombination.Bundled)
+            .bundles.map { it.title }
+
+        assertThat(now).containsExactly("10월 19일 오전 식사", "10월 19일 생일 파티")
+        assertThat(nextYear).containsExactly("2026년 10월 19일 오전 식사", "2026년 10월 19일 생일 파티")
     }
 
     // --- the trace and the order (11, 1 principle 5) ---

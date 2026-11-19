@@ -20,7 +20,10 @@ import com.bunch.recommendation.domain.combination.RecoBundle
 import com.bunch.recommendation.domain.combination.RecoPhoto
 import com.bunch.recommendation.domain.combination.SensitiveClueCode
 import com.bunch.recommendation.domain.combination.SourceType
+import java.time.Clock
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -90,7 +93,14 @@ internal object CombinerTestSupport {
         )
     }
 
-    fun combine(photos: List<RecoPhoto>): CombinationResult = BundleCombiner().combine(photos)
+    /** The day the titles are made on: the year of a title is shown when it is not this year, so it is fixed. */
+    val TODAY: LocalDate = LocalDate.parse("2026-11-19")
+    val CLOCK: Clock = Clock.fixed(
+        TODAY.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant(),
+        ZoneId.of("Asia/Seoul")
+    )
+
+    fun combine(photos: List<RecoPhoto>): CombinationResult = BundleCombiner(clock = CLOCK).combine(photos)
 
     fun bundles(photos: List<RecoPhoto>): List<RecoBundle> =
         (combine(photos).days.single() as DayCombination.Bundled).bundles
