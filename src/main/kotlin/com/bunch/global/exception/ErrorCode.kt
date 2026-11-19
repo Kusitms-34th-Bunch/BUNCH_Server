@@ -26,6 +26,8 @@ enum class ErrorCode(
     NICKNAME_TAKEN("USER_002", "error.nickname_taken", 409),
     REGISTRATION_CONFLICT("USER_003", "error.registration_conflict", 409),
     MEMBER_WITHDRAWAL_OWNER_REQUIRED("USER_005", "error.member_withdrawal_owner_required", 409),
+    APPLE_AUTHORIZATION_CODE_REQUIRED("USER_006", "error.apple_authorization_code_required", 400),
+    APPLE_REVOKE_FAILED("USER_007", "error.apple_revoke_failed", 503),
     PROFILE_IMAGE_FAILED("IMAGE_001", "error.profile_image_failed", 503),
     PHOTO_IMAGE_STORAGE_FAILED("PHOTO_007", "error.photo_image_storage_failed", 503),
     BUNCH_NAME_TAKEN("BUNCH_001", "error.bunch_name_taken", 409),
