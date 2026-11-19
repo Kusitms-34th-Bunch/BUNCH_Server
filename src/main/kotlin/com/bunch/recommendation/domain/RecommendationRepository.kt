@@ -55,6 +55,10 @@ interface RecommendationRepository : Repository<Photo, Long> {
     @Query("select p.id as photoId, p.createdAt as createdAt from Photo p where p.id in :photoIds")
     fun findAddedAt(@Param("photoIds") photoIds: Collection<Long>): List<PhotoAddedRow>
 
+    // The address of the stored image of a photo, or null when the photo is gone (the AI analysis, 4-2).
+    @Query("select a.url from Photo p join p.imageAsset a where p.id = :photoId")
+    fun findImageUrl(@Param("photoId") photoId: Long): String?
+
     @Query("select m.id as memberId, m.nickname as nickname from Member m where m.id in :memberIds")
     fun findNicknames(@Param("memberIds") memberIds: Collection<Long>): List<MemberNicknameRow>
 

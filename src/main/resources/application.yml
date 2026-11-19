@@ -70,6 +70,10 @@ cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
   api-key: ${CLOUDINARY_API_KEY:}
   api-secret: ${CLOUDINARY_API_SECRET:}
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:}
+  model: ${ANTHROPIC_MODEL:claude-haiku-5-5}
+  effort: ${ANTHROPIC_EFFORT:low}
 bunch:
   bundle:
     stage-thresholds: ${BUNCH_BUNDLE_STAGE_THRESHOLDS:0,2,6,10}
