@@ -10,6 +10,11 @@ interface ExternalIdentityRepository : JpaRepository<ExternalIdentity, Long> {
     @EntityGraph(attributePaths = ["member"])
     fun findByProviderAndProviderSubject(provider: AuthProvider, providerSubject: String): ExternalIdentity?
 
+    fun findByMemberIdAndProvider(memberId: Long, provider: AuthProvider): ExternalIdentity?
+
+    @Query("select identity.provider from ExternalIdentity identity where identity.member.id = :memberId")
+    fun findProvidersByMemberId(memberId: Long): List<AuthProvider>
+
     @Modifying(flushAutomatically = true)
     @Query("delete from ExternalIdentity identity where identity.member.id = :memberId")
     fun deleteByMemberId(memberId: Long): Int
