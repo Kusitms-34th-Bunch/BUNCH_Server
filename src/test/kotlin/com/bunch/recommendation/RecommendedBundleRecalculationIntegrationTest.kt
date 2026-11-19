@@ -402,7 +402,67 @@ class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationS
         assertThat(bundles.findByBunchId(bunchId)).isEmpty()
     }
 
+    // --- the photos a draft took from a recommended bundle (4.2.9 rule 5) ---
+
+    @Test
+    fun `a bundle of only the photos that were used by a recommended bundle is not saved`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoIds = lunch(bunchId, ownerId)
+        markUsed(bunchId, photoIds)
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId)).isEmpty()
+        assertThat(queuedDays(bunchId)).isEmpty()
+    }
+
+    @Test
+    fun `a photo that is not among the used ones brings the bundle back`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoIds = lunch(bunchId, ownerId)
+        markUsed(bunchId, photoIds)
+        val fresh = insertPhoto(bunchId, "2026-10-19", "11:20", uploaders = listOf(ownerId))
+        features.markDone(fresh, "test-model", answer, Instant.now())
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId).single().photoCount).isEqualTo(9)
+    }
+
+    @Test
+    fun `a bundle with one photo that is not used is saved, the rule is any and not all`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoIds = lunch(bunchId, ownerId)
+        markUsed(bunchId, photoIds.drop(1))
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId)).hasSize(1)
+    }
+
+    @Test
+    fun `the used photos of another bunch change nothing`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val (otherOwner, otherBunch) = bunchWithOwner()
+        lunch(bunchId, ownerId)
+        markUsed(otherBunch, listOf(insertPhoto(otherBunch, "2026-10-19", "12:00", uploaders = listOf(otherOwner))))
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId)).hasSize(1)
+    }
+
     // --- helpers ---
+
+    private fun markUsed(bunchId: Long, photoIds: List<Long>) {
+        photoIds.forEach {
+            jdbc.update("INSERT INTO recommendation_used_photos (photo_id, bunch_id) VALUES (?, ?)", it, bunchId)
+        }
+    }
 
     private fun addedDaysAgo(photoIds: List<Long>, days: Long) {
         jdbc.update(

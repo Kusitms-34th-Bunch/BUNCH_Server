@@ -27,9 +27,8 @@ import com.bunch.recommendation.domain.UsedCandidate
 import com.bunch.recommendation.dto.RecommendedBundleCard
 import com.bunch.recommendation.dto.RecommendedBundleDetailResponse
 import com.bunch.recommendation.dto.RecommendedBundleListResponse
-import com.bunch.recommendation.dto.RecommendedBundlePhoto
-import com.bunch.recommendation.dto.RecommendedUploader
 import jakarta.persistence.EntityManager
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -49,7 +48,13 @@ class RecommendationService(
     private val expiry: CandidateExpiry,
     private val titleGenerator: TitleGenerator,
     private val titleContexts: TitleContextBuilder,
-    private val accessNotices: BunchAccessNoticeService
+    private val accessNotices: BunchAccessNoticeService,
+    private val parts: RecommendedCardParts,
+    private val newBundles: RecommendedBundleReader,
+    private val newApplication: RecommendedBundleApplication,
+    // While the new combination is off, which is the default, the sheet and the draft use the old recommended bundles.
+    @Value("\${reco.combination.enabled:false}")
+    private val combinationEnabled: Boolean
 ) {
     /** The photos of a bunch a recommended bundle can be made of, one sample per photo. */
     @Transactional(readOnly = true)
@@ -64,11 +69,13 @@ class RecommendationService(
     @Transactional(readOnly = true)
     fun bundleCards(userId: Long, bunchId: Long): RecommendedBundleListResponse {
         accessNotices.requireMemberOrAccessNotice(userId, bunchId)
+        if (combinationEnabled) return newBundles.cards(bunchId)
+
         val candidates = recommendations.findOrderedCandidates(bunchId)
         if (candidates.isEmpty()) return RecommendedBundleListResponse(emptyList())
 
         val photosOf = recommendations.findCardPhotoRows(candidates.map { it.id }).groupBy { it.candidateId }
-        val uploadersOf = uploadersOf(photosOf.values.flatten().map { it.photoId })
+        val uploadersOf = parts.uploadersOf(photosOf.values.flatten().map { it.photoId })
         val cards = candidates.mapNotNull { candidate ->
             val photos = photosOf[candidate.id] ?: return@mapNotNull null
             RecommendedBundleCard(
@@ -77,7 +84,7 @@ class RecommendationService(
                 startDate = candidate.startDate,
                 endDate = candidate.endDate,
                 photoCount = photos.size,
-                uploaders = chipsOf(photos.map { uploadersOf[it.photoId].orEmpty() }),
+                uploaders = parts.chipsOf(photos.map { uploadersOf[it.photoId].orEmpty() }),
                 coverImageUrl = PhotoImageUrls.full(photos.first().imageUrl)
             )
         }
@@ -92,22 +99,15 @@ class RecommendationService(
     @Transactional(readOnly = true)
     fun bundlePhotos(userId: Long, bunchId: Long, candidateId: Long): RecommendedBundleDetailResponse {
         accessNotices.requireMemberOrAccessNotice(userId, bunchId)
+        if (combinationEnabled) return newBundles.photos(bunchId, candidateId)
+
         val candidate = recommendations.findCandidate(bunchId, candidateId)
             ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
         val rows = recommendations.findCardPhotoRows(listOf(candidateId))
         if (rows.isEmpty()) throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
 
-        val uploadersOf = uploadersOf(rows.map { it.photoId })
-        val photos = rows.map { row ->
-            RecommendedBundlePhoto(
-                photoId = row.photoId,
-                thumbnailUrl = PhotoImageUrls.thumbnail(row.imageUrl),
-                imageUrl = PhotoImageUrls.full(row.imageUrl),
-                capturedDate = row.capturedDate,
-                capturedTime = row.capturedTime,
-                uploaders = uploadersOf[row.photoId].orEmpty()
-            )
-        }
+        val uploadersOf = parts.uploadersOf(rows.map { it.photoId })
+        val photos = rows.map { parts.photoOf(it, uploadersOf[it.photoId].orEmpty()) }
         return RecommendedBundleDetailResponse(candidate.id, candidate.title, photos)
     }
 
@@ -148,6 +148,8 @@ class RecommendationService(
      */
     @Transactional(propagation = Propagation.MANDATORY)
     fun useCandidate(bunchId: Long, candidateId: Long): UsedCandidate? {
+        if (combinationEnabled) return newApplication.use(bunchId, candidateId)
+
         val candidate = recommendations.findCandidate(bunchId, candidateId) ?: return null
         recommendations.markCandidatePhotosUsed(bunchId, candidate.id)
         recommendations.deleteCandidates(listOf(candidate.id))
@@ -237,21 +239,6 @@ class RecommendationService(
         val now = Instant.now()
 
         return clusters.filter { !expiry.isExpired(latestAdded(it, addedAt), now) }
-    }
-
-    private fun uploadersOf(photoIds: List<Long>): Map<Long, List<RecommendedUploader>> =
-        recommendations.findUploaderProfiles(photoIds.distinct())
-            .groupBy({ it.photoId }, { RecommendedUploader(it.memberId, it.nickname, it.imageUrl) })
-
-    // The members of a card, the one who uploaded the most photos of it first and the lower member number first when
-    // they uploaded as many. A photo several members uploaded counts for each of them. The specification does not say
-    // in which order the chips go; this is the order the nicknames of a title are put in.
-    private fun chipsOf(uploadersOfPhotos: List<List<RecommendedUploader>>): List<RecommendedUploader> {
-        val uploaders = uploadersOfPhotos.flatten()
-        val photoCounts = uploaders.groupingBy { it.memberId }.eachCount()
-        val mostPhotosFirst = compareByDescending<RecommendedUploader> { photoCounts.getValue(it.memberId) }
-
-        return uploaders.distinctBy { it.memberId }.sortedWith(mostPhotosFirst.thenBy { it.memberId })
     }
 
     private fun toSamples(rows: List<MaterialPhotoRow>): List<PhotoSample> =

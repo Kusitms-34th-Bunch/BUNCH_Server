@@ -16,6 +16,7 @@ import com.bunch.recommendation.domain.combination.BundleCombiner
 import com.bunch.recommendation.domain.combination.BundleExpiry
 import com.bunch.recommendation.domain.combination.BundleVisibility
 import com.bunch.recommendation.domain.combination.CombinationSettings
+import com.bunch.recommendation.domain.combination.RecommendedListRules
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.time.Clock
@@ -73,6 +74,9 @@ class RecommendationConfig {
 
     @Bean
     fun bundleExpiry(settings: CombinationSettings): BundleExpiry = BundleExpiry(settings)
+
+    @Bean
+    fun recommendedListRules(settings: CombinationSettings): RecommendedListRules = RecommendedListRules(settings)
 
     // The combination of the photos of a bunch into recommended bundles (specification 2). The clock is not used here:
     // it is only read when a day is named, and a test may have replaced it with one that answers nothing yet.

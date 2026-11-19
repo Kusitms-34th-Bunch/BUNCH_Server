@@ -1,6 +1,7 @@
 package com.bunch.recommendation.service
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.combination.BundleCombiner
 import com.bunch.recommendation.domain.combination.BundleExpiry
@@ -23,6 +24,9 @@ import java.time.Instant
  * ([RecommendedBundleStore]). The days that were due are taken out of the queue afterwards, except the ones whose time
  * was moved later while this ran: a change came, and it waits for its own quiet time.
  *
+ * A bundle of only the photos of a recommended bundle that a draft was made from is not saved either (4.2.9 rule 5,
+ * [RecommendedBundleApplication]): the photos the draft did not take wait for a photo that is not among them.
+ *
  * A bundle whose last photo was added more than 30 days ago is not saved (4.2.9 rule 4, [BundleExpiry]): the saved
  * bundles of the bunch are replaced by what is left, so the expired ones are deleted here too, and the daily expiry
  * ([RecommendedBundleExpiration]) deletes the ones of the bunches that are not calculated.
@@ -36,6 +40,7 @@ import java.time.Instant
 @Service
 class RecommendedBundleRecalculation(
     private val bunches: BunchRepository,
+    private val recommendations: RecommendationRepository,
     private val queue: RecommendedBundleQueueRepository,
     private val inputs: RecoPhotoInputBuilder,
     private val combiner: BundleCombiner,
@@ -53,8 +58,10 @@ class RecommendedBundleRecalculation(
 
         val photos = inputs.build(bunchId)
         val addedAt = photos.associate { it.photoId to it.uploadedAt }
+        val used = recommendations.findUsedPhotoIds(bunchId).toSet()
         val result = combiner.combine(photos)
-        val outcome = store.replace(bunchId, withoutExpired(result, addedAt, now), now, addedAt)
+        val shown = withoutExpired(withoutUsed(result, used), addedAt, now)
+        val outcome = store.replace(bunchId, shown, now, addedAt)
 
         queue.deleteDue(bunchId, due, now)
         waitForAnalysis(bunchId, result, photos, now)
@@ -70,14 +77,18 @@ class RecommendedBundleRecalculation(
         result: CombinationResult,
         addedAt: Map<Long, Instant>,
         now: Instant
-    ): CombinationResult =
-        result.copy(
-            days = result.days.map { day ->
-                if (day is DayCombination.Bundled) {
-                    day.copy(bundles = day.bundles.filterNot { isExpired(it, addedAt, now) })
-                } else {
-                    day
-                }
+    ): CombinationResult = result.keepBundles { !isExpired(it, addedAt, now) }
+
+    // The photos of a recommended bundle a draft was made from are not recommended again (4.1.3 rule 5). A bundle of
+    // only those photos is not made again, and one with a photo that was added since is (4.2.9 rule 5). This is the
+    // rule of the old recommended bundles as well: a bundle stays when any of its photos is not used.
+    private fun withoutUsed(result: CombinationResult, used: Set<Long>): CombinationResult =
+        if (used.isEmpty()) result else result.keepBundles { bundle -> bundle.photos.any { it.photoId !in used } }
+
+    private fun CombinationResult.keepBundles(keep: (RecoBundle) -> Boolean): CombinationResult =
+        copy(
+            days = days.map { day ->
+                if (day is DayCombination.Bundled) day.copy(bundles = day.bundles.filter(keep)) else day
             }
         )
 

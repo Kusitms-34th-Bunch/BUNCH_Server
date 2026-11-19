@@ -92,6 +92,39 @@ interface RecommendationRepository : Repository<Photo, Long> {
     )
     fun findCardPhotoRows(@Param("candidateIds") candidateIds: Collection<Long>): List<CardPhotoRow>
 
+    // The same for the recommended bundles of the new combination (`candidateId` is the number of the bundle): the
+    // photos of the card in the order of their places, without a photo that was deleted (the database deletes its row)
+    // or whose date was cleared (the next calculation takes it out).
+    @Query(
+        "select bp.bundleId as candidateId, p.id as photoId, a.url as imageUrl, p.capturedDate as capturedDate, " +
+            "p.capturedTime as capturedTime from RecommendedBundlePhoto bp join Photo p on p.id = bp.photoId " +
+            "join p.imageAsset a where bp.bundleId in :bundleIds and bp.cardPosition is not null " +
+            "and p.capturedDate is not null and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
+            "order by bp.bundleId asc, bp.cardPosition asc"
+    )
+    fun findRecommendedCardPhotoRows(@Param("bundleIds") bundleIds: Collection<Long>): List<CardPhotoRow>
+
+    // The first and the last day of the dated photos of each bundle, all of its photos and not only the card's. The
+    // card shows an end day only when the bundle was taken over midnight.
+    @Query(
+        "select bp.bundleId as bundleId, min(p.capturedDate) as startDate, max(p.capturedDate) as endDate " +
+            "from RecommendedBundlePhoto bp join Photo p on p.id = bp.photoId " +
+            "where bp.bundleId in :bundleIds and p.capturedDate is not null group by bp.bundleId"
+    )
+    fun findRecommendedDateRanges(@Param("bundleIds") bundleIds: Collection<Long>): List<DateRangeRow>
+
+    // The photos of a recommended bundle a draft is made from are not recommended again until a photo that is not
+    // among them is added (4.2.9 rule 5). All the photos of the bundle are noted, like all the photos of an old
+    // candidate, so the photos the card did not show are not recommended again by themselves either.
+    @Modifying
+    @Query(
+        value = """INSERT INTO recommendation_used_photos (photo_id, bunch_id)
+        SELECT bp.photo_id, :bunchId FROM recommended_bundle_photos bp WHERE bp.bundle_id = :bundleId
+        ON CONFLICT (photo_id) DO NOTHING""",
+        nativeQuery = true
+    )
+    fun markRecommendedBundlePhotosUsed(@Param("bunchId") bunchId: Long, @Param("bundleId") bundleId: Long)
+
     // The badge shows the member as they are now, so the nickname and profile image are read from the member.
     @Query(
         "select u.photo.id as photoId, m.id as memberId, m.nickname as nickname, a.url as imageUrl " +
@@ -217,6 +250,13 @@ interface RecommendationRepository : Repository<Photo, Long> {
         val imageUrl: String
         val capturedDate: LocalDate
         val capturedTime: LocalTime?
+    }
+
+    /** The days a recommended bundle of the new combination reaches over (the first and the last of its photos). */
+    interface DateRangeRow {
+        val bundleId: Long
+        val startDate: LocalDate
+        val endDate: LocalDate
     }
 
     /** A member who uploaded a photo, as the badge shows them. */

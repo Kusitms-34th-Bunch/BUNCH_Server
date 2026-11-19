@@ -1,7 +1,11 @@
 package com.bunch.recommendation
 
 import com.bunch.bundle.domain.BundleEventType
+import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleChangedEvent
+import com.bunch.bundle.dto.CreateBundleRequest
+import com.bunch.bundle.service.BundleService
+import com.bunch.global.exception.ErrorCode
 import com.bunch.photo.service.PhotoChangedEvent
 import com.bunch.recommendation.analysis.PhotoAnalysisFakesConfig
 import com.bunch.recommendation.analysis.ScriptedPhotoAnalyzer
@@ -18,11 +22,15 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.annotation.Import
+import org.springframework.http.HttpHeaders.AUTHORIZATION
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * The new recommended bundles are off by default (`reco.combination.enabled`): the recommended bundles that are shown
@@ -36,6 +44,9 @@ import java.time.LocalDate
 class RecommendedBundleSwitchedOffIntegrationTest : RecommendationIntegrationSupport() {
     @Autowired
     private lateinit var events: ApplicationEventPublisher
+
+    @Autowired
+    private lateinit var drafts: BundleService
 
     @Autowired
     private lateinit var transactions: PlatformTransactionManager
@@ -119,6 +130,60 @@ class RecommendedBundleSwitchedOffIntegrationTest : RecommendationIntegrationSup
 
         assertThat(removed).isZero()
         assertThat(count("recommended_bundles", "bunch_id = $bunchId")).isEqualTo(1)
+    }
+
+    @Test
+    fun `the sheet is the old one, a bundle of the new combination is not on it and is not found`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoId = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
+        val id = insertNewBundle(bunchId, photoId)
+
+        val sheet = "/api/v1/bunches/$bunchId/recommended-bundles"
+        val list = mvc.perform(get(sheet).header(AUTHORIZATION, bearer(ownerId)))
+            .andExpect(status().isOk).andReturn().data()
+        mvc.perform(get("$sheet/$id").header(AUTHORIZATION, bearer(ownerId)))
+            .expectError(ErrorCode.RESOURCE_NOT_FOUND)
+
+        assertThat(list.path("bundles")).isEmpty()
+    }
+
+    @Test
+    fun `a draft does not take a bundle of the new combination`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val partner = joined(ownerId, bunchId)
+        val photoId = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
+        val id = insertNewBundle(bunchId, photoId)
+
+        val draft = drafts.create(
+            BundleActor(ownerId, "session"),
+            bunchId,
+            UUID.randomUUID(),
+            CreateBundleRequest(listOf(photoId), id, participantMemberIds = listOf(partner))
+        )
+
+        assertThat(draft.title).isEmpty()
+        assertThat(count("recommended_bundles", "id = $id")).isEqualTo(1)
+        assertThat(count("recommendation_used_photos", "bunch_id = $bunchId")).isZero()
+    }
+
+    private fun insertNewBundle(bunchId: Long, photoId: Long): Long {
+        val id = jdbc.queryForObject(
+            """INSERT INTO recommended_bundles (bunch_id, day_key, stable_key, kind, activity, title, start_at, end_at,
+                photo_count, uploader_count, has_group_photo, rule_trace, visible_from, last_photo_added_at,
+                created_at, updated_at)
+                VALUES (?, DATE '2026-10-19', ?, 'GENERAL', 'MEAL', 'New', now(), now(), 1, 1, false, '{}',
+                now() - interval '1 hour', now(), now(), now()) RETURNING id""",
+            Long::class.java,
+            bunchId,
+            UUID.randomUUID().toString().replace("-", "")
+        )!!
+        jdbc.update(
+            "INSERT INTO recommended_bundle_photos (bundle_id, photo_id, role, card_position) " +
+                "VALUES (?, ?, 'GENERAL', 1)",
+            id,
+            photoId
+        )
+        return id
     }
 
     private fun publish(event: Any) {
