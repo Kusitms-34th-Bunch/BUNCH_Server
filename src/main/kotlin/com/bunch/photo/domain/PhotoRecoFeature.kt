@@ -14,8 +14,9 @@ import jakarta.persistence.Table
  * no [source], has no known original type. A photo without a [quality] was uploaded before the quality could be
  * calculated, or its image could not be read. A photo without an [aiStatus] was never sent to the analysis.
  *
- * The model, the answer and the time of the analysis are columns of the table too, but nothing reads them yet, so the
- * entity does not hold them until the analysis is made.
+ * The model, the answer and the time of the analysis are columns of the table too. They are written and read with their
+ * own statements ([PhotoRecoFeatureRepository]), because the answer is JSON that is kept as the text the model gave, so
+ * the entity does not hold them.
  */
 @Entity
 @Table(name = "photo_reco_feature")
