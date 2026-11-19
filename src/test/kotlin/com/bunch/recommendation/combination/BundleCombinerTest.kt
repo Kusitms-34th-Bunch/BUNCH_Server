@@ -252,6 +252,31 @@ class BundleCombinerTest {
     }
 
     @Test
+    fun `the year of a title is the year in the zone of the settings, not the zone of the clock`() {
+        // 16:00 UTC on the 31st of December is already the 1st of January in Seoul.
+        val clock = Clock.fixed(Instant.parse("2026-12-31T16:00:00Z"), ZoneOffset.UTC)
+        val lastYear = birthday(date = "2026-12-30")
+        val thisYear = birthday(date = "2027-01-01")
+
+        val titles = { photos: List<RecoPhoto> ->
+            (BundleCombiner(clock = clock).combine(photos).days.single() as DayCombination.Bundled)
+                .bundles.single().title
+        }
+
+        assertThat(titles(lastYear)).isEqualTo("2026년 12월 30일 생일 파티")
+        assertThat(titles(thisYear)).isEqualTo("1월 1일 생일 파티")
+    }
+
+    @Test
+    fun `a clock is not read before a day is named`() {
+        val clock = org.mockito.Mockito.mock(Clock::class.java)
+
+        BundleCombiner(clock = clock)
+
+        org.mockito.Mockito.verifyNoInteractions(clock)
+    }
+
+    @Test
     fun `the clock is the only thing that changes a title`() {
         val photos = birthday() + meals(1, "10:00", 8)
         val later = Clock.fixed(Instant.parse("2027-02-01T00:00:00Z"), ZoneOffset.UTC)

@@ -6,6 +6,8 @@ import com.bunch.photo.domain.PhotoRecoFeatureRepository
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.analysis.PhotoAnalysisFailure
 import com.bunch.recommendation.domain.analysis.PhotoAnalyzer
+import com.bunch.recommendation.service.RecommendedBundleRecalcTrigger
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
@@ -25,8 +27,11 @@ class PhotoAnalysisService(
     private val jobs: AsyncJobService,
     private val images: PhotoAnalysisImageLoader,
     private val analyzer: PhotoAnalyzer,
-    private val clock: Clock
+    private val clock: Clock,
+    private val recalculation: RecommendedBundleRecalcTrigger
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     /** Returns false when the photo is already analyzed or already waiting in the queue. */
     @Transactional
     fun request(photoId: Long): Boolean {
@@ -54,6 +59,22 @@ class PhotoAnalysisService(
         } catch (failure: PhotoAnalysisFailure) {
             if (failure.reason.retryable) throw failure
             features.markFailed(photoId, clock.instant())
+        }
+        tellRecalculation(photoId)
+    }
+
+    // The day of the photo is calculated again, with what the analysis gave or without it (10-1). The analysis is done
+    // whether this works or not, so a note that is lost does not fail the job: the day is calculated at the next change
+    // of the bunch, or when the photo would have waited as long as it may.
+    private fun tellRecalculation(photoId: Long) {
+        try {
+            recalculation.noteAnalyzed(photoId)
+        } catch (ex: RuntimeException) {
+            logger.warn(
+                "Recalculation after an analysis could not be noted: photoId={}, error={}",
+                photoId,
+                ex.javaClass.simpleName
+            )
         }
     }
 

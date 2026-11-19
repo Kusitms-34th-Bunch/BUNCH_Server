@@ -76,6 +76,7 @@ data class CombinationSettings(
     val recalculationDebounce: Duration = Duration.ofMinutes(5),
     val listMax: Int = 20,
     val sameActivityGeneralMax: Int = 3,
+    val expireDays: Int = 30,
     val yearEndWindows: List<MonthDayWindow> = listOf(
         MonthDayWindow(MonthDay.of(12, 24), MonthDay.of(12, 25)),
         MonthDayWindow(MonthDay.of(12, 31), MonthDay.of(1, 1))
@@ -89,6 +90,9 @@ data class CombinationSettings(
         }
         require(nightStartHour <= 23) {
             "the night starts on the day it belongs to"
+        }
+        require(expireDays >= 1) {
+            "a recommended bundle is shown for at least one day"
         }
         require(minPhotos >= 1 && minUploaders >= 1 && peopleSplitMinSide >= 1 && subBundleMax >= minPhotos) {
             "the sizes of a bundle are at least one and a part is not below the minimum"
