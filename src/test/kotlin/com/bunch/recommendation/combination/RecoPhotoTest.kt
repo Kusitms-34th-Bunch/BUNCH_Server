@@ -16,7 +16,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 class RecoPhotoTest {
-    private val upload = RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID())
+    private val upload = RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID(), uploadedAt = Instant.EPOCH)
 
     @Test
     fun `a photo with a date and a time is full, with a date only it is date only, with none it is unknown`() {
@@ -39,7 +39,7 @@ class RecoPhotoTest {
 
     @Test
     fun `a photo several members uploaded together keeps all of them`() {
-        val second = RecoPhoto.Upload(memberId = 2L, uploadBatchId = UUID.randomUUID())
+        val second = RecoPhoto.Upload(memberId = 2L, uploadBatchId = UUID.randomUUID(), uploadedAt = Instant.EPOCH)
 
         val photo = photo(LocalDate.of(2026, 10, 19), null, uploads = listOf(upload, second))
 

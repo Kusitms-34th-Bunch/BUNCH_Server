@@ -26,6 +26,10 @@ import kotlin.math.abs
  * The numbers of the quality table (4-4) are [quality]. The photo box calculates the quality when a photo is uploaded,
  * so the type of the numbers is in the shared image code and this class only holds them with the others (12).
  *
+ * The card holds at most [cardMaxSize] photos: a bundle with that many or fewer pictures puts all of them on the card,
+ * and a bigger one has that many chosen (photo box 4.2.8). [cardSizeSteps] is the table of the combination
+ * specification (8-1) and is not used, because the photo box specification decides the size of the card.
+ *
  * Some values are used by later steps only: the limits of the list, the wait before a recalculation, the wait for the
  * AI. They are here so that all numbers are at one place.
  */
@@ -40,6 +44,7 @@ data class CombinationSettings(
     val minUploaders: Int = 2,
     val peopleSplitMinSide: Int = 3,
     val subBundleMax: Int = 40,
+    val cardMaxSize: Int = 10,
     val cardSizeSteps: List<CardSizeStep> = listOf(
         CardSizeStep(fromPhotos = 6, cardSize = 6),
         CardSizeStep(fromPhotos = 16, cardSize = 8),
@@ -87,6 +92,9 @@ data class CombinationSettings(
         }
         require(minPhotos >= 1 && minUploaders >= 1 && peopleSplitMinSide >= 1 && subBundleMax >= minPhotos) {
             "the sizes of a bundle are at least one and a part is not below the minimum"
+        }
+        require(cardMaxSize >= minPhotos) {
+            "a card holds at least as many photos as the smallest bundle"
         }
         require(cardSizeSteps.isNotEmpty()) {
             "there is at least one card size"

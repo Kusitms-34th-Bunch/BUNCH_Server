@@ -40,7 +40,13 @@ class RecoPhotoInputBuilder(
             capturedDate = row.capturedDate,
             capturedTime = row.capturedTime,
             utcOffset = row.utcOffset?.let(ZoneOffset::of),
-            uploads = rows.map { RecoPhoto.Upload(memberId = it.memberId, uploadBatchId = it.uploadBatchId) },
+            uploads = rows.map {
+                RecoPhoto.Upload(
+                    memberId = it.memberId,
+                    uploadBatchId = it.uploadBatchId,
+                    uploadedAt = it.memberUploadedAt
+                )
+            },
             uploadedAt = row.createdAt,
             source = sourceOf(row),
             quality = row.quality?.let(::qualityOf),

@@ -106,6 +106,15 @@ class RecoPhotoInputIntegrationTest : RecommendationIntegrationSupport() {
 
         assertThat(photo.uploads.map { it.memberId }).containsExactly(ownerId, other)
         assertThat(photo.uploads.map { it.uploadBatchId }.toSet()).hasSize(2)
+        photo.uploads.forEach { upload ->
+            val stored = jdbc.queryForObject(
+                "SELECT uploaded_at FROM photo_uploaders WHERE photo_id = ? AND member_id = ?",
+                java.sql.Timestamp::class.java,
+                photo.photoId,
+                upload.memberId
+            )!!
+            assertThat(upload.uploadedAt).isEqualTo(stored.toInstant())
+        }
     }
 
     @Test
