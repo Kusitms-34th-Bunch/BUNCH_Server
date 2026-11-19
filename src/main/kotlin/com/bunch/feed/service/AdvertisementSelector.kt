@@ -1,6 +1,7 @@
 package com.bunch.feed.service
 
 import org.springframework.stereotype.Component
+import java.util.Random
 import java.util.random.RandomGenerator
 
 @Component
@@ -10,7 +11,7 @@ class AdvertisementSelector {
         candidates: List<Long>,
         slots: Int,
         lastAdId: Long?,
-        random: RandomGenerator = RandomGenerator.getDefault()
+        random: RandomGenerator = Random()
     ): List<Long?> {
         require(slots >= 0)
         require(candidates.distinct().size == candidates.size)
