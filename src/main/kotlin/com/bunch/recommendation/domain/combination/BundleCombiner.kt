@@ -15,8 +15,9 @@ import java.time.LocalDate
  * general bundles, with the clue photos of the events that were not bundles known to them (7, [GeneralBundleFinder]);
  * the photos with a date only are given to a bundle (7-9, [DateOnlyAttacher]); the card is chosen for each bundle
  * (8, [CardSelector]); and the bundles of the day are named (9, [BundleNamer]). The holidays of the events come from
- * [calendar]. The year of a title is shown when it is not the year of the day of [clock], which is the only place the
- * time of the clock is read.
+ * [calendar]. The year of a title is shown when it is not the year of today, which is the day of the time of [clock] in
+ * the zone of the settings (the zone of the clock itself does not matter). That is the only place the clock is read,
+ * and it is read when a day is named, never when the combiner is made.
  *
  * The bundles of a day are in the order of the time they start, the events and the general bundles together; the order
  * of the list that is shown is for the step that shows it (10-5). Nothing is saved or asked of the AI here, and the
@@ -58,6 +59,6 @@ class BundleCombiner(
         val sorted = attacher.attach(day, bundles)
             .map { cards.select(it, day, if (it.kind == BundleKind.GENERAL) clues else emptySet()) }
             .sortedWith(compareBy({ it.startAt }, { bundle -> bundle.photos.minOf { it.photoId } }))
-        return namer.name(sorted, day, LocalDate.now(clock))
+        return namer.name(sorted, day, LocalDate.ofInstant(clock.instant(), settings.defaultZone))
     }
 }

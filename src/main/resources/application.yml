@@ -70,6 +70,11 @@ cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
   api-key: ${CLOUDINARY_API_KEY:}
   api-secret: ${CLOUDINARY_API_SECRET:}
+# The new recommended bundles (docs/specs/reco-bundle-combination.md). Off by default: while it is off nothing is put in
+# the queue and nothing is calculated or kept, because the recommended bundles that are shown are still the old ones.
+reco:
+  combination:
+    enabled: ${RECO_COMBINATION_ENABLED:false}
 anthropic:
   api-key: ${ANTHROPIC_API_KEY:}
   model: ${ANTHROPIC_MODEL:claude-haiku-5-5}
