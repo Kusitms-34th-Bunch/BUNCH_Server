@@ -111,7 +111,8 @@ class BunchPublicService(
             locations = places,
             likeCount = social.likeCount,
             likedByCurrentBunch = social.likedByCurrentBunch,
-            commentCount = commentCount
+            commentCount = commentCount,
+            visibility = bundle.visibility
         )
     }
 

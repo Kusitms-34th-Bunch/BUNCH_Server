@@ -103,6 +103,8 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
   `PublicBundleCard`/`PublicBundleDetail` 및 paginated page 형태를 재사용한다. `INTERNAL`은
   대상 번치의 모든 `PUBLISHED`를, `EXTERNAL`은 접근 가능한 `PUBLIC` `PUBLISHED`만
   `publishedAt DESC, id DESC`로 선택한다. 내부·외부 모두 이 경로와 같은 DTO·페이지를 사용한다.
+  목록 카드에는 상세와 같은 `visibility`(PUBLIC/PRIVATE)가 포함되어, 앱이 내부 그리드에서
+  비공개 번들을 구분해 표시할 수 있다.
 - Draft/editor API와 `GET /api/v1/bunches/{bunchId}/bundles?status=DRAFT&page&size` 목록은
   이 통합 읽기 계약으로 바꾸지 않는다. 기존 경로, paginated page 형식, 현재 소속·참여·역할
   검사와 편집 권한을 그대로 유지한다.

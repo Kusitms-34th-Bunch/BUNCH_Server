@@ -207,8 +207,9 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(result.path("items").single().path("id").asLong()).isEqualTo(last)
         assertThat(result.path("items").single().fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
             "id", "bunchId", "title", "coverImageUrl", "date", "location", "publishedAt",
-            "locations", "likeCount", "likedByCurrentBunch", "commentCount"
+            "locations", "likeCount", "likedByCurrentBunch", "commentCount", "visibility"
         )
+        assertThat(result.path("items").single().path("visibility").asText()).isEqualTo("PUBLIC")
         val detail = data(read(viewerOwner, target, "published-bundles/$last", target))
         assertThat(detail.path("photos").single().path("id").asLong()).isEqualTo(photoId)
         assertThat(detail.path("photos").single().fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
@@ -227,6 +228,8 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
         assertThat(internalPage.path("totalElements").asLong()).isEqualTo(3)
         assertThat(internalPage.path("items").map { it.path("id").asLong() })
             .containsExactly(privateId, last, first)
+        assertThat(internalPage.path("items").map { it.path("visibility").asText() })
+            .containsExactly("PRIVATE", "PUBLIC", "PUBLIC")
         val internalDetail = data(read(owner, target, "published-bundles/$privateId"))
         assertThat(internalDetail.path("id").asLong()).isEqualTo(privateId)
         read(viewerOwner, target, "published-bundles/$privateId", viewer).error(ErrorCode.RESOURCE_NOT_FOUND)
