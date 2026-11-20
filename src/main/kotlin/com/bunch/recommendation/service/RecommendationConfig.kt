@@ -1,5 +1,6 @@
 package com.bunch.recommendation.service
 
+import com.bunch.global.image.ImageQuality
 import com.bunch.recommendation.domain.BuiltInSpecialDays
 import com.bunch.recommendation.domain.BuiltInTitleSentences
 import com.bunch.recommendation.domain.CandidateExpiry
@@ -11,8 +12,13 @@ import com.bunch.recommendation.domain.SpecialDayCalendar
 import com.bunch.recommendation.domain.TitleContextBuilder
 import com.bunch.recommendation.domain.TitleGenerator
 import com.bunch.recommendation.domain.TitleSentenceSource
+import com.bunch.recommendation.domain.combination.BundleCombiner
+import com.bunch.recommendation.domain.combination.BundleExpiry
+import com.bunch.recommendation.domain.combination.BundleVisibility
+import com.bunch.recommendation.domain.combination.CombinationSettings
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import java.time.Clock
 
 /**
  * Creates the calculation classes of the recommended bundles. They have no Spring annotation, so they stay plain
@@ -53,4 +59,27 @@ class RecommendationConfig {
         calendar: SpecialDayCalendar,
         settings: RecommendationSettings
     ): TitleGenerator = TitleGenerator(sentences, calendar, settings)
+
+    // The numbers of the new combination (specification 12). The photo box calculates the quality of a photo with the
+    // ones of the quality table, so they are made once here, where all the numbers are.
+    @Bean
+    fun combinationSettings(): CombinationSettings = CombinationSettings()
+
+    @Bean
+    fun imageQuality(settings: CombinationSettings): ImageQuality = ImageQuality(settings.quality)
+
+    @Bean
+    fun bundleVisibility(settings: CombinationSettings): BundleVisibility = BundleVisibility(settings)
+
+    @Bean
+    fun bundleExpiry(settings: CombinationSettings): BundleExpiry = BundleExpiry(settings)
+
+    // The combination of the photos of a bunch into recommended bundles (specification 2). The clock is not used here:
+    // it is only read when a day is named, and a test may have replaced it with one that answers nothing yet.
+    @Bean
+    fun bundleCombiner(
+        settings: CombinationSettings,
+        calendar: SpecialDayCalendar,
+        clock: Clock
+    ): BundleCombiner = BundleCombiner(settings, calendar, clock = clock)
 }

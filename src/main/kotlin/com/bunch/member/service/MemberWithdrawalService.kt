@@ -62,7 +62,19 @@ class MemberWithdrawalService(
             .requireCompleted()
         val owned = memberships.findAllByMemberIdAndStatusOrderByBunchId(memberId)
             .filter { it.role == MembershipRole.OWNER && hasOtherMembers(it.bunch.id) }
-        return WithdrawalCheckResponse(owned.map { it.toOwnerBunch() })
+        return WithdrawalCheckResponse(
+            owned.map { it.toOwnerBunch() },
+            identities.findProvidersByMemberId(memberId).firstOrNull()
+        )
+    }
+
+    // The same judgment as the check, for the withdrawal to run before it touches anything outside the database.
+    @Transactional(readOnly = true)
+    fun requireNoOwnerBunches(memberId: Long) {
+        val owned = check(memberId).ownerBunches
+        if (owned.isNotEmpty()) {
+            throw BusinessException(ErrorCode.MEMBER_WITHDRAWAL_OWNER_REQUIRED, mapOf("bunches" to owned))
+        }
     }
 
     // 7.6.4: one transaction, so a failure anywhere leaves the account as it was. Sessions go after the commit.

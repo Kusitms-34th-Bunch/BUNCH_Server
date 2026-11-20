@@ -4,8 +4,11 @@ import java.time.Instant
 import java.time.LocalDate
 
 /**
- * One recommended bundle the combination makes (recommended bundle specification 4-5). The title, the stable key and
- * the time it is shown are not here: they come with the issues that name and keep a bundle.
+ * One recommended bundle the combination makes (recommended bundle specification 4-5). The stable key and the time it
+ * is shown are not here: they come with the issue that keeps a bundle.
+ *
+ * The [title] is given at the end of the combination (9-1, [BundleNamer]); it is null while the bundle is not named
+ * yet, and every bundle the combination gives back has one.
  *
  * [photos] are all photos of the bundle, with the place on the card of those that are on it (1 is the cover).
  * [photoCount] is the number of pictures, a group of copies counted once, not the size of [photos] (3-1).
@@ -26,7 +29,8 @@ data class RecoBundle(
     val photoCount: Int,
     val uploaderCount: Int,
     val hasGroupPhoto: Boolean,
-    val trace: RuleTrace
+    val trace: RuleTrace,
+    val title: String? = null
 ) {
     init {
         when (kind) {
@@ -53,6 +57,9 @@ data class RecoBundle(
         }
         require(coverPhotoId == null || photos.any { it.photoId == coverPhotoId }) {
             "the cover is a photo of the bundle"
+        }
+        require(title == null || title.isNotBlank()) {
+            "a title is not blank"
         }
     }
 

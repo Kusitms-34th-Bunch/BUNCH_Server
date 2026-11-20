@@ -48,6 +48,11 @@ jwt:
 auth:
   apple:
     client-id: ${APPLE_CLIENT_ID}
+    team-id: ${APPLE_TEAM_ID:}
+    key-id: ${APPLE_KEY_ID:}
+    private-key: ${APPLE_PRIVATE_KEY:}
+    token-uri: ${APPLE_TOKEN_URI:https://appleid.apple.com/auth/token}
+    revoke-uri: ${APPLE_REVOKE_URI:https://appleid.apple.com/auth/revoke}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
   kakao:
@@ -65,6 +70,15 @@ cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
   api-key: ${CLOUDINARY_API_KEY:}
   api-secret: ${CLOUDINARY_API_SECRET:}
+# The new recommended bundles (docs/specs/reco-bundle-combination.md). Off by default: while it is off nothing is put in
+# the queue and nothing is calculated or kept, because the recommended bundles that are shown are still the old ones.
+reco:
+  combination:
+    enabled: ${RECO_COMBINATION_ENABLED:false}
+anthropic:
+  api-key: ${ANTHROPIC_API_KEY:}
+  model: ${ANTHROPIC_MODEL:claude-haiku-5-5}
+  effort: ${ANTHROPIC_EFFORT:low}
 bunch:
   bundle:
     stage-thresholds: ${BUNCH_BUNDLE_STAGE_THRESHOLDS:0,2,6,10}

@@ -17,7 +17,15 @@ import java.util.UUID
  * uploaded first (8-5), and a photo without a time is put last in the order it was uploaded (8-6).
  *
  * [quality] is null while it is not calculated. [analysis] is [AiAnalysis.NONE] while [aiStatus] is not done, and
- * [embedding] is null when it is not made (5-4: such a photo is only joined to the same picture).
+ * [embedding] is null when it is not made. [fingerprint] is the 64-bit difference hash of the image that the upload
+ * stores (photo box 4.2.8 rule 1); it is null for a photo uploaded before it was stored or whose image could not be
+ * read. A photo that has neither an embedding nor a fingerprint cannot be told alike to another one, so it is only
+ * joined to the same picture (5-4).
+ *
+ * [dateBatchId] is the batch of the photos whose dates the user set in one request; only a photo the user dated has
+ * one. Photos of the same batch of an upload ([Upload.uploadBatchId]) or of the same date batch belong together
+ * (photo box 4.2.7 rule 3). Whether two photos belong together is asked by the steps that use it; this value only
+ * carries the batch.
  */
 data class RecoPhoto(
     val photoId: Long,
@@ -30,11 +38,16 @@ data class RecoPhoto(
     val quality: PhotoQuality?,
     val aiStatus: AiStatus,
     val analysis: AiAnalysis = AiAnalysis.NONE,
-    val embedding: Embedding? = null
+    val embedding: Embedding? = null,
+    val fingerprint: Long? = null,
+    val dateBatchId: UUID? = null
 ) {
     init {
         require(capturedTime == null || capturedDate != null) {
             "capturedTime requires capturedDate"
+        }
+        require(dateBatchId == null || capturedDate != null) {
+            "a date batch requires capturedDate"
         }
         require(uploads.isNotEmpty()) {
             "a photo has at least one upload"
@@ -49,9 +62,22 @@ data class RecoPhoto(
             else -> TimeState.FULL
         }
 
-    /** One member who uploaded the photo and the batch of the upload (3.2.2 rule 3, 4.2.7 rule 3). */
+    /**
+     * Whether the two photos are of one batch: they were uploaded together, or their dates were set together (photo box
+     * 4.2.7 rule 3).
+     */
+    fun sharesBatchWith(other: RecoPhoto): Boolean =
+        uploads.any { upload -> other.uploads.any { it.uploadBatchId == upload.uploadBatchId } } ||
+            (dateBatchId != null && dateBatchId == other.dateBatchId)
+
+    /**
+     * One member who uploaded the photo, the batch of the upload (3.2.2 rule 3, 4.2.7 rule 3) and when this member
+     * uploaded it. A photo several members uploaded has a time for each of them; of two members who share it, the one
+     * with the earlier time uploaded it first (photo box 4.2.8 rule 3).
+     */
     data class Upload(
         val memberId: Long,
-        val uploadBatchId: UUID
+        val uploadBatchId: UUID,
+        val uploadedAt: Instant
     )
 }

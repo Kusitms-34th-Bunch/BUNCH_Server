@@ -1,5 +1,6 @@
 package com.bunch.recommendation.combination
 
+import com.bunch.global.image.ImageQualityCriteria
 import com.bunch.recommendation.domain.combination.CombinationSettings
 import com.bunch.recommendation.domain.combination.DayPart
 import com.bunch.recommendation.domain.combination.Pace
@@ -40,6 +41,7 @@ class CombinationSettingsTest {
         assertThat(settings.peopleSplitMinSide).isEqualTo(3)
         assertThat(settings.subBundleMax).isEqualTo(40)
         assertThat(settings.timeBuckets).isEqualTo(4)
+        assertThat(settings.cardMaxSize).isEqualTo(10)
         assertThat(settings.cardSizeSteps).containsExactly(
             CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 6),
             CombinationSettings.CardSizeStep(fromPhotos = 16, cardSize = 8),
@@ -67,6 +69,27 @@ class CombinationSettingsTest {
         assertThat(settings.burstMinSimilarity).isEqualTo(0.90)
         assertThat(settings.sameCompositionMaxGap).isEqualTo(Duration.ofSeconds(120))
         assertThat(settings.sameCompositionMinSimilarity).isEqualTo(0.95)
+    }
+
+    @Test
+    fun `the similarities of the fingerprint start at the numbers of the table and are kept apart from them`() {
+        assertThat(settings.fingerprintBurstMinSimilarity).isEqualTo(0.90)
+        assertThat(settings.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
+
+        val changed = CombinationSettings(fingerprintBurstMinSimilarity = 0.85)
+
+        assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
+        assertThat(changed.burstMinSimilarity).isEqualTo(0.90)
+    }
+
+    @Test
+    fun `the numbers of the quality table are held with the others`() {
+        assertThat(settings.quality).isEqualTo(ImageQualityCriteria())
+
+        val changed = CombinationSettings(quality = ImageQualityCriteria(lowShortSideBelow = 600))
+
+        assertThat(changed.quality.lowShortSideBelow).isEqualTo(600)
+        assertThat(changed.quality.goodShortSideFrom).isEqualTo(1080)
     }
 
     @Test
@@ -135,7 +158,13 @@ class CombinationSettingsTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(clueMinConfidence = 1.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(fingerprintBurstMinSimilarity = 1.1) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(fingerprintSameCompositionMinSimilarity = -0.1) }
+            .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(cardMaxSize = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(cardSizeSteps = emptyList()) }
             .isInstanceOf(IllegalArgumentException::class.java)

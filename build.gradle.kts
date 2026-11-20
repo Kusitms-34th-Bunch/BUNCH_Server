@@ -22,6 +22,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.3")
+    implementation("com.anthropic:anthropic-java:3.3.0")
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
     implementation("org.apache.commons:commons-lang3:3.14.0")
     implementation("commons-codec:commons-codec:1.16.0")

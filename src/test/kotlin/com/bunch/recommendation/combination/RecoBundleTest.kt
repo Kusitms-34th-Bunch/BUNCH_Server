@@ -84,6 +84,15 @@ class RecoBundleTest {
     }
 
     @Test
+    fun `a bundle has no title until it is named, and a title is not blank`() {
+        assertThat(bundle().title).isNull()
+        assertThat(bundle().copy(title = "10월 19일 밤 식사").title).isEqualTo("10월 19일 밤 식사")
+        listOf("", " ", "\n").forEach { blank ->
+            assertThatThrownBy { bundle().copy(title = blank) }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+    }
+
+    @Test
     fun `the counts are not negative`() {
         assertThatThrownBy { bundle(photoCount = -1) }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { bundle(uploaderCount = -1) }.isInstanceOf(IllegalArgumentException::class.java)

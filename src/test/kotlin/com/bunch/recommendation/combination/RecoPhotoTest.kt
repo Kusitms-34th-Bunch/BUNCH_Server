@@ -16,7 +16,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 class RecoPhotoTest {
-    private val upload = RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID())
+    private val upload = RecoPhoto.Upload(memberId = 1L, uploadBatchId = UUID.randomUUID(), uploadedAt = Instant.EPOCH)
 
     @Test
     fun `a photo with a date and a time is full, with a date only it is date only, with none it is unknown`() {
@@ -39,7 +39,7 @@ class RecoPhotoTest {
 
     @Test
     fun `a photo several members uploaded together keeps all of them`() {
-        val second = RecoPhoto.Upload(memberId = 2L, uploadBatchId = UUID.randomUUID())
+        val second = RecoPhoto.Upload(memberId = 2L, uploadBatchId = UUID.randomUUID(), uploadedAt = Instant.EPOCH)
 
         val photo = photo(LocalDate.of(2026, 10, 19), null, uploads = listOf(upload, second))
 
@@ -58,10 +58,29 @@ class RecoPhotoTest {
         assertThat(photo.embedding).isNull()
     }
 
+    @Test
+    fun `the image fingerprint is missing until it is given and is kept as given`() {
+        assertThat(photo(LocalDate.of(2026, 10, 19), LocalTime.NOON).fingerprint).isNull()
+        assertThat(photo(LocalDate.of(2026, 10, 19), LocalTime.NOON, fingerprint = -42L).fingerprint)
+            .isEqualTo(-42L)
+    }
+
+    @Test
+    fun `a date batch is kept for a photo with a date and refused for a photo without one`() {
+        val batch = UUID.randomUUID()
+
+        assertThat(photo(LocalDate.of(2026, 10, 19), null, dateBatchId = batch).dateBatchId).isEqualTo(batch)
+        assertThat(photo(LocalDate.of(2026, 10, 19), null).dateBatchId).isNull()
+        assertThatThrownBy { photo(null, null, dateBatchId = batch) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private fun photo(
         date: LocalDate?,
         time: LocalTime?,
-        uploads: List<RecoPhoto.Upload> = listOf(upload)
+        uploads: List<RecoPhoto.Upload> = listOf(upload),
+        fingerprint: Long? = null,
+        dateBatchId: UUID? = null
     ) = RecoPhoto(
         photoId = 1L,
         capturedDate = date,
@@ -71,6 +90,8 @@ class RecoPhotoTest {
         uploadedAt = Instant.parse("2026-10-20T00:00:00Z"),
         source = SourceType.CAMERA,
         quality = PhotoQuality.GOOD,
-        aiStatus = AiStatus.DONE
+        aiStatus = AiStatus.DONE,
+        fingerprint = fingerprint,
+        dateBatchId = dateBatchId
     )
 }

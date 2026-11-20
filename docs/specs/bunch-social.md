@@ -109,6 +109,8 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 초안 수정 권한은 반환하지 않는다.
 
 PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`다.
+카드에는 `visibility`(PUBLIC/PRIVATE)도 포함한다. 발행본에 저장된 공개/비공개 값이며 상세와 같은 값이다.
+외부 조회는 PUBLIC 발행본만 반환하므로 외부 응답의 값은 항상 PUBLIC이다.
 페이지는 `{items,page,size,totalElements,hasNext}`이며 `publishedAt DESC,id DESC`로 조회한다.
 현재 내부 번들 모델에는 위치 저장이 없어 location은 null이며 EXIF 좌표를 추정해서 반환하지 않는다.
 기존 nullable 필드(`bunch.imageUrl`, `coverImageUrl`, `date`, `location`, `publishedAt`,

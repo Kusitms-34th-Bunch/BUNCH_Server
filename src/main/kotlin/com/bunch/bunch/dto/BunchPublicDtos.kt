@@ -21,7 +21,8 @@ data class BunchPublicBundleCard(
     val locations: List<BundleLocationResponse> = emptyList(),
     val likeCount: Long = 0,
     val likedByCurrentBunch: Boolean = false,
-    val commentCount: Long = 0
+    val commentCount: Long = 0,
+    val visibility: Visibility? = null
 )
 
 data class BunchPublicBundlePhoto @JvmOverloads constructor(
