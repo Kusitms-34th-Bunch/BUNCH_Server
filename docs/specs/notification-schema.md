@@ -38,8 +38,9 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 
 ### type과 target 호환성
 
-아래 21개 값은 wire/DB 호환성을 유지한다. 현재 실제 inbox 행을 생성하는 값은 `1~7`, `9~13`, `16~19`다.
-`8`, `20`, `21`은 별도 후보/피드 생산자가 없어 저장 호환성만 유지한다. `MEMBER_REMOVED`와 `BUNCH_DELETED`는 실제 이탈·삭제에서 inbox 없이 detached push job으로 저장한다.
+아래 21개 값은 wire/DB 호환성을 유지한다. 현재 실제 inbox 행을 생성하는 값은 `1~7`, `10~13`, `16~19`다.
+`8`, `20`, `21`은 별도 후보/피드 생산자가 없어 저장 호환성만 유지한다. `9`(`CHARACTER_GROWN`)는 뭉치 성장 알림을 더 이상
+만들지 않으므로(#195) 저장 호환성만 유지하고, 이미 저장된 행은 V51로 삭제했다. 값 자체는 뭉치 단계와 함께 정리한다. `MEMBER_REMOVED`와 `BUNCH_DELETED`는 실제 이탈·삭제에서 inbox 없이 detached push job으로 저장한다.
 
 | 번호 | type | 번호 | type | 번호 | type |
 | --- | --- | --- | --- | --- | --- |
