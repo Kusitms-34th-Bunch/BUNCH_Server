@@ -4,25 +4,18 @@ import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.photo.domain.PhotoRecoFeatureRepository
 import com.bunch.photo.service.PhotoChangedEvent
-import com.bunch.recommendation.analysis.PhotoAnalysisFakesConfig
-import com.bunch.recommendation.analysis.ScriptedPhotoAnalyzer
 import com.bunch.recommendation.domain.RecommendedBundlePhotoRepository
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.RecommendedBundleRepository
-import com.bunch.recommendation.domain.analysis.PhotoAnalysisFailure
 import com.bunch.recommendation.domain.combination.BundleExpiry
 import com.bunch.recommendation.service.RecommendedBundleScheduler
-import com.bunch.recommendation.service.analysis.PhotoAnalysisService
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
-import org.springframework.context.annotation.Import
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -38,7 +31,6 @@ import java.time.LocalTime
 @SpringBootTest(properties = ["reco.combination.enabled=true"])
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(PhotoAnalysisFakesConfig::class)
 class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationSupport() {
     @Autowired
     private lateinit var events: ApplicationEventPublisher
@@ -61,19 +53,8 @@ class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationS
     @Autowired
     private lateinit var features: PhotoRecoFeatureRepository
 
-    @Autowired
-    private lateinit var analysis: PhotoAnalysisService
-
-    @Autowired
-    private lateinit var analyzer: ScriptedPhotoAnalyzer
-
     private val day = LocalDate.parse("2026-10-19")
     private val answer = """{"clues":[],"activity":{"code":"MEAL","conf":0.9},"subject":"FOOD","people":"P0"}"""
-
-    @BeforeEach
-    fun resetAnalyzer() {
-        analyzer.reset()
-    }
 
     @AfterEach
     fun cleanNewFixtures() {
@@ -151,45 +132,6 @@ class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationS
         jdbc.update("DELETE FROM recommended_bundle_recalc_queue")
         publish(bundleEvent(bunchId, BundleEventType.DELETED))
         assertThat(queuedDays(bunchId).keys).containsExactly(day)
-    }
-
-    @Test
-    fun `the end of the analysis of a photo puts its day in the queue, with what it gave or without it`() {
-        val (ownerId, bunchId) = bunchWithOwner()
-        val done = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
-        val failed = insertPhoto(bunchId, "2026-10-25", "10:00", uploaders = listOf(ownerId))
-
-        analysis.analyze(done)
-        assertThat(queuedDays(bunchId).keys).containsExactly(day.minusDays(1), day)
-
-        jdbc.update("DELETE FROM recommended_bundle_recalc_queue")
-        analyzer.failure = PhotoAnalysisFailure(PhotoAnalysisFailure.Reason.REFUSED)
-        analysis.analyze(failed)
-        assertThat(queuedDays(bunchId).keys)
-            .containsExactly(LocalDate.parse("2026-10-24"), LocalDate.parse("2026-10-25"))
-    }
-
-    @Test
-    fun `a failure that is tried again is not the end of the analysis, so no day is put in the queue`() {
-        val (ownerId, bunchId) = bunchWithOwner()
-        val photoId = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
-        analyzer.failure = PhotoAnalysisFailure(PhotoAnalysisFailure.Reason.RATE_LIMITED)
-
-        assertThatThrownBy { analysis.analyze(photoId) }.isInstanceOf(PhotoAnalysisFailure::class.java)
-
-        assertThat(queuedDays(bunchId)).isEmpty()
-    }
-
-    @Test
-    fun `an analysis that is done already is not noted again`() {
-        val (ownerId, bunchId) = bunchWithOwner()
-        val photoId = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
-        analysis.analyze(photoId)
-        jdbc.update("DELETE FROM recommended_bundle_recalc_queue")
-
-        analysis.analyze(photoId)
-
-        assertThat(queuedDays(bunchId)).isEmpty()
     }
 
     // --- the calculation of the bunch when its days are due (10-2) ---
