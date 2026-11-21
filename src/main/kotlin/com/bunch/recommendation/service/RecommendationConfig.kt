@@ -79,7 +79,6 @@ class RecommendationConfig {
     @Bean
     fun bundleCombiner(
         settings: CombinationSettings,
-        calendar: SpecialDayCalendar,
         clock: Clock
-    ): BundleCombiner = BundleCombiner(settings, calendar, clock = clock)
+    ): BundleCombiner = BundleCombiner(settings, clock = clock)
 }

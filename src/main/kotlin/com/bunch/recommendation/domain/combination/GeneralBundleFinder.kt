@@ -3,12 +3,12 @@ package com.bunch.recommendation.domain.combination
 import java.time.Instant
 
 /**
- * The general bundles of a day (recommended bundle specification 7). It takes a day that is ready and the events of the
- * day, and makes bundles of the photos no event took, in this order: the day is cut at the range of the events (7-2),
- * each chunk into segments (7-3), the pieces are cut where the members or the time and the activity change (7-4), the
- * pieces become sections of one activity (7-5), sections too small to stand are joined (7-6), and a section over the
- * limit is cut into sub bundles (7-7). A part is a bundle when it is enough and its main activity is known (7-8); the
- * others are not saved and stay in the photo box.
+ * The general bundles of a day (recommended bundle specification 7). It takes a day that is ready and makes bundles of
+ * its photos, in this order: the photos of the day are one chunk (7-1), the chunk is cut into segments (7-3), the
+ * pieces are cut where the members or the time and the activity change (7-4), the pieces become sections of one
+ * activity (7-5), sections too small to stand are joined (7-6), and a section over the limit is cut into sub bundles
+ * (7-7). A part is a bundle when it is enough and its main activity is known (7-8); the others are not saved and stay
+ * in the photo box. There are no event bundles, so every photo of the day is a photo of a general bundle.
  *
  * A photo with a date only is given to a bundle by the step after this one (7-9), so it is not in the result. The
  * exception is a day on which no photo has a time: the photo box specification (4.2.7) takes the day as one group of
@@ -28,16 +28,13 @@ class GeneralBundleFinder(
     private val bigSplitter = GeneralBigSplitter(settings)
     private val facts = BundleFacts(settings, eligibility)
 
-    fun find(
-        day: DayPreparation.Ready,
-        events: EventResult = EventResult(confirmed = emptyList(), failed = emptyList())
-    ): GeneralResult {
+    fun find(day: DayPreparation.Ready): GeneralResult {
         val counter = GeneralCounter(eligibility, day.duplicateGroups)
         if (day.photos.none { it.instant != null }) return wholeDay(day, counter)
 
         val bundles = mutableListOf<RecoBundle>()
         val notBundled = mutableListOf<Long>()
-        for (chunk in chunker.chunks(day, events)) {
+        for (chunk in chunker.chunks(day)) {
             val segments = segmenter.segment(chunk.photos, counter)
             for (piece in splitter.split(segments, listOf(chunk.origin), counter)) {
                 val balanced = balancer.balance(sections.build(piece.segments), counter)

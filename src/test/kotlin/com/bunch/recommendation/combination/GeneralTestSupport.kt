@@ -6,7 +6,6 @@ import com.bunch.recommendation.domain.combination.ActivityCode
 import com.bunch.recommendation.domain.combination.AiAnalysis
 import com.bunch.recommendation.domain.combination.BundleEligibility
 import com.bunch.recommendation.domain.combination.DayPreparation
-import com.bunch.recommendation.domain.combination.EventResult
 import com.bunch.recommendation.domain.combination.GeneralActivitySections
 import com.bunch.recommendation.domain.combination.GeneralBundleFinder
 import com.bunch.recommendation.domain.combination.GeneralCounter
@@ -69,8 +68,7 @@ internal object GeneralTestSupport {
     /** The sections of the photos of a day, as the fifth rule makes them out of the segments. */
     fun sections(photos: List<RecoPhoto>): List<GeneralSection> = GeneralActivitySections().build(segments(photos))
 
-    fun find(photos: List<RecoPhoto>, events: EventResult = EventResult(emptyList(), emptyList())): GeneralResult =
-        GeneralBundleFinder().find(day(photos), events)
+    fun find(photos: List<RecoPhoto>): GeneralResult = GeneralBundleFinder().find(day(photos))
 
     fun ids(photos: List<RecoPhoto>): List<Long> = photos.map { it.photoId }
 }
