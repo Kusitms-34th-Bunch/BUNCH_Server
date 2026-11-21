@@ -70,7 +70,7 @@ class FeedService(
         var hasNext = false
         if (start.segment == FeedSegment.FOLLOWING) {
             val rows = query.following(
-                userId, viewer.currentBunchId, start.anchorTime, since, followedIds,
+                viewer.currentBunchId, start.anchorTime, since, followedIds,
                 start.lastTime, start.lastId, start.lastTime != null, PageRequest.of(0, size + 1)
             )
             val taken = rows.take(size)
@@ -92,7 +92,7 @@ class FeedService(
             val remaining = size - selected.size
             // Even at an exact section/page boundary, probe PUBLIC before deciding hasNext.
             val rows = query.publicBundles(
-                userId, viewer.currentBunchId, start.anchorTime, since, followedIds,
+                viewer.currentBunchId, start.anchorTime, since, followedIds,
                 next.lastTime, next.lastId, next.lastTime != null, PageRequest.of(0, remaining + 1)
             )
             val taken = rows.take(remaining)

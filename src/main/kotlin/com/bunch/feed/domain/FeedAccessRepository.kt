@@ -26,7 +26,6 @@ interface FeedAccessRepository : Repository<Bundle, Long> {
     @Query("select bundle.id from Bundle bundle, Bunch bunch where bunch.id = bundle.bunchId " +
         "and bundle.id in :bundleIds and " + PUBLISHED_ACCESS + " and (:forFeed = false or " + FEED_EXCLUSIONS + ")")
     fun visibleBundleIds(
-        memberId: Long,
         currentBunchId: Long?,
         bundleIds: Collection<Long>,
         forFeed: Boolean
@@ -65,9 +64,7 @@ interface FeedAccessRepository : Repository<Bundle, Long> {
         """
 
         const val FEED_EXCLUSIONS = """
-            not exists (select membership.id from BunchMembership membership where
-                membership.member.id = :memberId and membership.bunch.id = bunch.id
-                and membership.status = com.bunch.bunch.domain.MembershipStatus.ACTIVE)
+            (:currentBunchId is null or bunch.id <> :currentBunchId)
         """
     }
 }
