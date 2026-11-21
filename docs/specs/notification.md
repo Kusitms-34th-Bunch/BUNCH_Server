@@ -5,6 +5,8 @@
 > 기기 등록·개인 푸시·APNs는 [푸시 계약](push.md)을 따른다. 업무 producer 연결 상태와 APNs의 실제 기기 표시를 구분한다.
 
 승인된 5.12.1~5.12.3의 문구·수신자·이동 정책을 이 문서에서 소유한다.
+2026-11-22 사용자 결정(#207)에 따라 신고 결과를 신고자에게 알리지 않으며, 검토·삭제 조치도
+inbox·푸시를 생성하지 않는다. 신고에 따른 접근 제한 없이 [신고 계약](feed-reports.md)·[공통 접근](feed-api.md)을 따른다.
 
 - [알림 inbox API](notification-api.md): 목록·읽음·모두 읽음·open의 입출력.
 - [알림 inbox 저장 계약](notification-schema.md): notifications, 활동 합산, V13 상태와 트랜잭션 경계.
@@ -109,7 +111,7 @@ worker는 실제 실행 직전에 참여 상태·코멘트·초안 상태·현�
 - 14는 실제 내보내기 transaction이 AccessNotice를 기록한 뒤 detached push job을 함께 저장한다. 앱 inbox 행은 만들지 않는다.
 - 15는 실제 번치 삭제 transaction이 삭제 전 확보한 수신자·AccessNotice로 detached push job을 함께 저장한다. 앱 inbox 행은 만들지 않는다.
 - 16은 실제 프로필 공개 범위 변경 transaction이 방향별 inbox 행과 현재 기기 job을 저장한다.
-- 20은 `SocialCommentService`가 개인 댓글·답글 등록과 같은 트랜잭션에서 저장한다. 참여자·원댓글 작성자의 수신 자격, 같은 번치 예외, 본인·중복 제외와 삭제·숨김 후 이동/전송 재검사는 [댓글 계약](feed-comments.md)을 따른다. 답글도 댓글 푸시 설정을 사용한다.
+- 20은 `SocialCommentService`가 개인 댓글·답글 등록과 같은 트랜잭션에서 저장한다. 참여자·원댓글 작성자의 수신 자격, 같은 번치 예외, 본인·중복 제외와 삭제 후 이동/전송 재검사는 [댓글 계약](feed-comments.md)·[알림 API](notification-api.md)를 따른다. 신고만으로 이동·전송을 막지 않으며 답글도 댓글 푸시 설정을 사용한다.
 - 21은 `SocialLikeService`가 번치·번들 최초 좋아요와 같은 트랜잭션에서 저장한다. 취소 후 재등록은 재알림하지 않는다. [좋아요 계약](feed-likes.md)을 따른다.
 - 8(후보)은 enum/DB CHECK/target 저장 호환성만 유지하며 producer는 후속 #26 범위다. 임시 producer·fake routing·미래 이벤트를 추가하지 않는다.
 

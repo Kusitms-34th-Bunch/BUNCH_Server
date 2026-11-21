@@ -620,6 +620,17 @@ class BundleService(
         deleteInternal(bundle, requestId)
     }
 
+    /** Trusted operations only; callers must authenticate operators before invoking this method. */
+    @Transactional
+    fun deleteForModeration(bundleId: Long, requestId: String) {
+        if (bundleId <= 0) fail(ErrorCode.INVALID_INPUT)
+        val bunchId = bundles.findBunchId(bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        val bundle = bundles.findLocked(bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        mode(bundle, BundleStatus.PUBLISHED)
+        deleteInternal(bundle, requestId)
+    }
+
     /** Called by #25 inside its membership-change transaction after locking the bunch. */
     @Transactional(propagation = Propagation.MANDATORY)
     fun memberDeparted(bunchId: Long, memberId: Long) {

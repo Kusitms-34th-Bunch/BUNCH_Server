@@ -229,7 +229,7 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `public page refills before limit after block report ops private and deletion changes`() {
+    fun `public page retains reports while refilling after block moderation private and deletion changes`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -250,10 +250,11 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         reports.bundle(user, reported, SocialContentReportRequest(BunchReportReason.SPAM))
         block(blockedTarget, current)
         val next = feed.get(user, 20, page.nextCursor)
-        assertThat(next.bundleIds()).containsExactly(surviving)
+        assertThat(next.bundleIds()).containsExactly(reported, surviving)
         assertThat(next.bundleIds()).doesNotContain(blocked)
         assertThat(next.endReached).isTrue()
         hide("BUNDLE", surviving)
+        hide("BUNDLE", reported)
         val nowEmpty = feed.get(user, 20, page.nextCursor)
         assertThat(nowEmpty.items).isEmpty()
         assertThat(nowEmpty.hasNext).isFalse()
@@ -366,7 +367,7 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `actual reaction batches include deleted slots and exclude blocked reported and moderated actors and comments`() {
+    fun `actual reaction batches retain reported actors and comments while excluding blocks and moderation`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -393,9 +394,9 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         hide("BUNCH", actors[3].second)
         reports.comment(user, bundle, hiddenRoot, SocialContentReportRequest(BunchReportReason.SPAM))
         val card = feed.get(user).bundles().single().bundle
-        assertThat(card.likeCount).isEqualTo(2)
+        assertThat(card.likeCount).isEqualTo(3)
         assertThat(card.likedByCurrentBunch).isTrue()
-        assertThat(card.commentCount).isEqualTo(4)
+        assertThat(card.commentCount).isEqualTo(7)
         assertThat(card.commentCount).isEqualTo(comments.counts(user, listOf(bundle)).getValue(bundle))
         assertThat(card.likeCount).isEqualTo(likes.summaries(user, listOf(bundle)).getValue(bundle).likeCount)
     }

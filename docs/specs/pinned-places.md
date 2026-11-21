@@ -2,6 +2,8 @@
 
 #92·#125, FEED-10, 승인한 6.3.1 및 8.1.1~8.1.9의 서버 범위를 구현한다.
 [피드 접근](feed-api.md)과 [번들 장소](bundle-locations.md) 계약을 따른다.
+2026-11-22 사용자 결정(#207)에 따라 신고로 장소 조회·콕·출처 접근을 제한하지 않는다.
+신고 이력·과거 숨김 행의 처리와 검토 후 삭제는 [신고 계약](feed-reports.md)·[공통 접근](feed-api.md)을 따른다.
 8장 화면 UI는 별도 범위이며, 주소 없는 지역 계약은
 [#126 장소 검색 계약](place-search.md)을 따른다.
 8.1.8의 되돌리기는 2026-11-08 승인으로 앱의 삭제 요청 지연 방식으로 처리한다.
@@ -28,7 +30,7 @@ DB 테이블 `pinned_places`와 컬럼·인덱스·Flyway 이력은 유지한다
   `{id, provider, externalId, name, address, position, pinned, pinId}`다.
   가입 완료 소속 0개 사용자는 공개 장소를 조회할 수 있고 canPin=false, pinId=null이다.
 - `PUT /api/v1/bundles/{bundleId}/locations/{locationId}/pin`: 본문 없이 저장된 장소를 콕한다.
-  실제 발행 번들과 장소 소속·공개범위·차단·신고·운영 숨김을 쓰기 잠금 뒤 재검사한다.
+  실제 발행 번들과 장소 소속·공개범위·차단·호환용 전역 BUNCH/BUNDLE 숨김을 쓰기 잠금 뒤 재검사한다.
   이름·주소·provider·externalId는 서버 장소 행에서만 복사하며 요청 본문은 사용하지 않는다.
   응답은 아래 핀 스냅샷이다. 중복 요청도 HTTP 200이며 기존 핀을 반환한다.
 - `DELETE /api/v1/pinned-places/{pinId}`: 현재 번치의 핀을 취소하고 data=null 반환.
@@ -94,7 +96,7 @@ sourceAccessible, sourceBundleId, sourceBunchId, sourceBunchName, sourceBundleTi
 장소 이름·주소는 등록 당시 스냅샷이다. `sourceType`은 기존 `BUNDLE / ADVERTISEMENT`를 유지한다.
 앱은 ADVERTISEMENT를 **BUNCH SPOT**으로 표시하고 이동하지 않는다(`sourceAccessible=false`).
 BUNDLE이 접근 가능할 때만 원본 번들·번치 ID와 현재 번치명·번들 제목을 제공한다.
-원본 삭제·비공개·차단·신고·운영 숨김·유효한 내보내짐 안내로 접근 불가하면
+원본 삭제·비공개·차단·호환용 전역 BUNCH/BUNDLE 숨김·유효한 내보내짐 안내로 접근 불가하면
 `sourceAccessible=false`와 출처 4개 필드 null을 제공하고 핀은 그대로 남긴다.
 다시 접근 가능해지면 다음 조회에 출처 표시가 복구된다. 상세 후보 일괄 검사
 `FeedAccessService.visibleBundleIds(..., forFeed=false)`와 기존 안내 조건을 재사용한다.
@@ -156,7 +158,7 @@ V28의 pinned_places는 `(bunch_id, provider, external_id)` UNIQUE다.
 정확히 `(sourceBundleId, sourceLocationId)`가 일치하는 핀만 삭제한다.
 실패하면 장소 편집과 핀 삭제를 함께 롤백한다. 같은 장소의 다른 출처 핀은 유지한다.
 이 listener는 저장 대상 번치 잠금을 추가로 획득하지 않는다.
-번들 자체 삭제에는 이벤트가 없고 bundle/location FK의 ON DELETE SET NULL로
+번들 자체 삭제에는 장소 제거 이벤트를 발행하지 않고 bundle/location FK의 ON DELETE SET NULL로
 출처 참조만 비우며 이름·주소·키·등록자·등록시각 스냅샷을 보존한다.
 
 ## H/B 내부 계약
@@ -179,10 +181,10 @@ H가 실제 광고 테이블과 참조 제약/삭제 정책을 연결한다.
 ## 검증
 
 실제 PostgreSQL/Redis에서 중복·동시 콕·타 멤버 취소·재콕·현재 번치 전환·소속 0개,
-숨김/차단/신고/공개범위 재검사·잘못된 장소 소속·HTTP 입력 위조 방지,
+호환용 전역 BUNCH/BUNDLE 숨김·차단·공개범위 재검사·신고에 따른 접근 불변·잘못된 장소 소속·HTTP 입력 위조 방지,
 실제 replaceLocked의 선택 삭제/롤백·번들/번치 삭제 스냅샷·V28 재실행·제약을 검증한다.
 목록은 전체/멤버 필터·0개 멤버·이탈/탈퇴/등록자 null 전체 집계·역할 무관 접근·동일 시각 ID 경계·
-삭제된 커서 행·문맥 불일치·현재 번치 전환·원본 비공개/팔로우/차단/숨김/삭제/안내 만료 복구·
+삭제된 커서 행·문맥 불일치·현재 번치 전환·원본 비공개/팔로우/차단/호환용 전역 숨김/삭제/안내 만료 복구·
 출처 이름 최신값·광고 구분·프로필이 있는 여러 출처의 쿼리 수 고정·V37 적용/재실행을 검증한다.
 실제 광고 DB 연계는 H, 전체 발행본 일괄 편집은 C 통합 후 검증한다.
 실제 iOS/WebView 수동 검증은 앱 환경 준비 후 진행한다.

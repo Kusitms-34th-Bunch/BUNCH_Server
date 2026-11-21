@@ -12,14 +12,6 @@ interface FeedAccessRepository : Repository<Bundle, Long> {
     fun findVisibleBundle(currentBunchId: Long?, bundleId: Long): Bundle?
 
     @Query("select bundle from Bundle bundle, Bunch bunch where bunch.id = bundle.bunchId " +
-        "and bundle.id = :bundleId and " + PUBLISHED_VISIBILITY + """
-        and not exists (select hide.id from FeedContentHide hide where
-            hide.targetKind = com.bunch.feed.domain.FeedContentKind.BUNDLE and hide.targetId = bundle.id
-            and hide.reporterBunchId is null)
-        """)
-    fun findReportableBundle(currentBunchId: Long, bundleId: Long): Bundle?
-
-    @Query("select bundle from Bundle bundle, Bunch bunch where bunch.id = bundle.bunchId " +
         "and bunch.id = :bunchId and " + PUBLISHED_ACCESS + " order by bundle.publishedAt desc, bundle.id desc")
     fun findPublishedBundles(currentBunchId: Long?, bunchId: Long, pageable: Pageable): Page<Bundle>
 
@@ -40,11 +32,9 @@ interface FeedAccessRepository : Repository<Bundle, Long> {
             not exists (select block.id from BunchBlock block where
                 (block.blockerBunchId = :currentBunchId and block.blockedBunchId = bunch.id) or
                 (block.blockedBunchId = :currentBunchId and block.blockerBunchId = bunch.id))
-            and not exists (select report.id from BunchProfileReport report where
-                report.reporterBunchId = :currentBunchId and report.targetBunchId = bunch.id)
             and not exists (select hide.id from FeedContentHide hide where
                 hide.targetKind = com.bunch.feed.domain.FeedContentKind.BUNCH and hide.targetId = bunch.id
-                and (hide.reporterBunchId is null or hide.reporterBunchId = :currentBunchId))
+                and hide.reporterBunchId is null)
         """
 
         const val PUBLISHED_VISIBILITY = VISIBLE_BUNCH + """
@@ -60,7 +50,7 @@ interface FeedAccessRepository : Repository<Bundle, Long> {
         const val PUBLISHED_ACCESS = PUBLISHED_VISIBILITY + """
             and not exists (select hide.id from FeedContentHide hide where
                 hide.targetKind = com.bunch.feed.domain.FeedContentKind.BUNDLE and hide.targetId = bundle.id
-                and (hide.reporterBunchId is null or hide.reporterBunchId = :currentBunchId))
+                and hide.reporterBunchId is null)
         """
 
         const val FEED_EXCLUSIONS = """

@@ -12,6 +12,11 @@
 - 업무 서비스가 이미 성공한 요청을 재생하면 저장된 업무 결과만 반환한다. notification writer를 다시 호출하거나 별도 이벤트 원장을 조회하지 않는다.
 - 기존 번치·번들 잠금을 먼저 잡고, 활동 합산 때 해당 수신자의 열린 notification 행을 잠근다. 새 행·읽음·합산·취소의 실패는 업무 변경과 함께 롤백한다.
 - V15는 `push_jobs`, `push_devices`, `push_preferences`를 추가한다. 기존 writer에서 notification과 현재 기기별 job을 함께 저장한다. 기기가 없는 사건은 앱 inbox만 남기며, 나중에 등록한 기기로 소급 전송하지 않는다.
+- 2026-11-22 사용자 결정(#207)의 신고 결과·검토·삭제 조치에는 새 notification·push job을 생성하지 않는다.
+  삭제 방식과 기존 알림의 접근 재검사는 [신고 계약](feed-reports.md)·[알림 API](notification-api.md)를 따른다.
+- `NotificationWriter.redactModeratedComment(commentId)`는 운영 댓글 삭제와 같은 트랜잭션에서
+  해당 댓글의 기존 `SOCIAL_COMMENT_CREATED` 알림 `body`·`push_jobs.payload.body`를
+  「삭제된 댓글입니다」로 교체한다. V52도 전역 COMMENT 숨김 행 제거 전에 같은 미리보기 정리를 적용한다.
 
 ## 2. `notifications`
 
@@ -25,7 +30,7 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 | `bunch_id bigint` | `bunches` FK, CASCADE |
 | `type varchar(40)` | 아래 21개 enum; DB CHECK 유지 |
 | `dedupe_key varchar(200)` | 수신자별 업무 회차 식별자 |
-| `title text`, `body text` | 발생 당시 문구 snapshot |
+| `title text`, `body text` | 발생 당시 문구 snapshot. 운영 삭제된 소셜 댓글의 body는 위 미리보기 정리 계약 적용 |
 | `target jsonb` | `kind,bunchId,bundleId?,noticeId?,targetBunchId?` |
 | `activity_data jsonb` | nullable; 행위자 snapshot·사진 수·첫 행위자 ID |
 | `group_until timestamptz` | nullable; `DRAFT_ACTIVITY`의 고정 10분 종료 시각 |

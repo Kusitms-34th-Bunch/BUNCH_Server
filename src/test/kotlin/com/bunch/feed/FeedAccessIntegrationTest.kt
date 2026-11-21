@@ -6,7 +6,6 @@ import com.bunch.bunch.dto.BunchReportRequest
 import com.bunch.bunch.dto.FollowDecision
 import com.bunch.bunch.service.BunchPublicService
 import com.bunch.bunch.service.BunchSocialService
-import com.bunch.feed.domain.FeedContentHideRepository
 import com.bunch.feed.domain.FeedContentKind
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.ErrorCode
@@ -19,9 +18,6 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.transaction.IllegalTransactionStateException
-import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
 @SpringBootTest
@@ -35,12 +31,6 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var publicService: BunchPublicService
-
-    @Autowired
-    private lateinit var hides: FeedContentHideRepository
-
-    @Autowired
-    private lateinit var transactionManager: PlatformTransactionManager
 
     @AfterEach
     fun cleanFeedData() {
@@ -155,7 +145,7 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `existing profile reports hide all target content only for reporting current bunch`() {
+    fun `profile reports preserve target access for reporting peers other bunches and guests`() {
         val actor = member()
         val viewer = publicBunch(actor)
         val another = publicBunch(actor)
@@ -163,16 +153,24 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         val target = publicBunch(owner)
         val bundle = published(target, owner)
         selectCurrent(actor, viewer)
+        val peer = member()
+        join(peer, issue(actor, viewer))
+        val unrelated = member().also(::publicBunch)
+        val guest = member()
         social.report(actor, viewer, BunchReportRequest(target, BunchReportReason.SPAM, null))
-        assertThat(access.visibleBundleIds(actor, listOf(bundle))).isEmpty()
-        assertThat(access.visibleBunchIds(actor, listOf(target))).isEmpty()
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { access.requireInteraction(actor, bundle) }
+        listOf(actor, peer, unrelated, guest).forEach {
+            assertThat(access.visibleBundleIds(it, listOf(bundle))).containsExactly(bundle)
+            assertThat(access.visibleBunchIds(it, listOf(target))).containsExactly(target)
+            assertThat(access.readPublishedBundle(it, bundle).id).isEqualTo(bundle)
+        }
+        assertThat(access.requireInteraction(actor, bundle).bundle.id).isEqualTo(bundle)
+        assertThat(access.requireInteraction(peer, bundle).bundle.id).isEqualTo(bundle)
         assertThat(access.readPublishedBundle(member(), bundle).id).isEqualTo(bundle)
         selectCurrent(actor, another)
         assertThat(access.readPublishedBundle(actor, bundle).id).isEqualTo(bundle)
         jdbc.update("UPDATE bunch_profile_reports SET status = 'DISMISSED'")
         selectCurrent(actor, viewer)
-        assertThat(access.visibleBundleIds(actor, listOf(bundle))).isEmpty()
+        assertThat(access.visibleBundleIds(actor, listOf(bundle))).containsExactly(bundle)
     }
 
     @Test
@@ -195,7 +193,7 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `reporter suppression is shared by active members not other bunches or guest exploration`() {
+    fun `legacy reporter hides are ignored by active members other bunches and guest exploration`() {
         val actor = member()
         val viewer = publicBunch(actor)
         val colleague = member()
@@ -203,12 +201,12 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(target, owner)
-        TransactionTemplate(transactionManager).executeWithoutResult {
-            hides.hideForReporter(FeedContentKind.BUNDLE, bundle, viewer)
-        }
+        hideForReporter(FeedContentKind.BUNDLE, bundle, viewer)
+        hideForReporter(FeedContentKind.BUNCH, target, viewer)
         listOf(actor, colleague).forEach {
-            assertThat(access.visibleBundleIds(it, listOf(bundle))).isEmpty()
-            assertError(ErrorCode.RESOURCE_NOT_FOUND) { access.readPublishedBundle(it, bundle) }
+            assertThat(access.visibleBundleIds(it, listOf(bundle))).containsExactly(bundle)
+            assertThat(access.readPublishedBundle(it, bundle).id).isEqualTo(bundle)
+            assertThat(access.requireInteraction(it, bundle).bundle.id).isEqualTo(bundle)
             assertThat(access.requireBundleReportTarget(it, bundle).bundle.id).isEqualTo(bundle)
         }
         hideGlobally(FeedContentKind.BUNDLE, bundle)
@@ -267,42 +265,13 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `private reaction actor remains visible without following but blocks and reports filter it`() {
+    fun `private reaction actor remains visible without following and after reports`() {
         val actor = member()
         val viewer = create(actor).id
         val other = create(member()).id
         assertThat(access.visibleBunchIds(actor, listOf(other))).containsExactly(other)
         social.report(actor, viewer, BunchReportRequest(other, BunchReportReason.SPAM, null))
-        assertThat(access.visibleBunchIds(actor, listOf(other))).isEmpty()
-    }
-
-    @Test
-    fun `simultaneous reporter hides are idempotent and join caller rollback`() {
-        val actor = member()
-        val viewer = create(actor).id
-        val bundle = published(viewer, actor)
-        val results = concurrently(listOf(
-            { TransactionTemplate(transactionManager).execute {
-                hides.hideForReporter(FeedContentKind.BUNDLE, bundle, viewer)
-            } },
-            { TransactionTemplate(transactionManager).execute {
-                hides.hideForReporter(FeedContentKind.BUNDLE, bundle, viewer)
-            } }
-        )).map { it.getOrThrow()!! }
-        assertThat(results.sum()).isEqualTo(1)
-        assertThat(count("feed_content_hides")).isEqualTo(1)
-        assertThatThrownBy {
-            TransactionTemplate(transactionManager).executeWithoutResult {
-                hides.hideForReporter(FeedContentKind.COMMENT, 100, viewer)
-                error("report failed")
-            }
-        }.isInstanceOf(IllegalStateException::class.java)
-        assertThat(jdbc.queryForObject(
-            "SELECT count(*) FROM feed_content_hides WHERE target_kind = 'COMMENT' AND target_id = 100",
-            Long::class.java
-        )).isZero()
-        assertThatThrownBy { hides.hideForReporter(FeedContentKind.COMMENT, 100, viewer) }
-            .isInstanceOf(IllegalTransactionStateException::class.java)
+        assertThat(access.visibleBunchIds(actor, listOf(other))).containsExactly(other)
     }
 
     @Test
@@ -313,11 +282,9 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         hideGlobally(FeedContentKind.COMMENT, 100)
         assertThatThrownBy { hideGlobally(FeedContentKind.COMMENT, 100) }
             .isInstanceOf(DataIntegrityViolationException::class.java)
-        TransactionTemplate(transactionManager).executeWithoutResult {
-            hides.hideForReporter(FeedContentKind.COMMENT, 101, viewer)
-            hides.hideForReporter(FeedContentKind.COMMENT, 101, other)
-            hides.hideForReporter(FeedContentKind.BUNDLE, 101, viewer)
-        }
+        hideForReporter(FeedContentKind.COMMENT, 101, viewer)
+        hideForReporter(FeedContentKind.COMMENT, 101, other)
+        hideForReporter(FeedContentKind.BUNDLE, 101, viewer)
         assertThat(jdbc.queryForList(
             "SELECT target_id FROM feed_content_hides WHERE target_kind = 'COMMENT' AND reporter_bunch_id IS NULL",
             Long::class.java
@@ -362,6 +329,13 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
             java.sql.Timestamp.from(Instant.parse("2026-01-02T00:00:00Z")),
             actor,
             bunchId
+        )
+    }
+
+    private fun hideForReporter(kind: FeedContentKind, target: Long, reporter: Long) {
+        jdbc.update(
+            "INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) VALUES (?,?,?,'LEGACY')",
+            kind.name, target, reporter
         )
     }
 

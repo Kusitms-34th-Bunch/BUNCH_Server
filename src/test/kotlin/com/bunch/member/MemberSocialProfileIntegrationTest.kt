@@ -158,7 +158,7 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `both block directions and shared report operator hides filter before returning rows`() {
+    fun `both block directions and global hides filter rows while reports and legacy reporter hides do not`() {
         val viewer = member()
         val current = create(viewer).id
         val target = member()
@@ -175,11 +175,11 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("INSERT INTO feed_content_hides (target_kind, target_id, reason) VALUES ('BUNCH', ?, 'review')", hidden)
         jdbc.update("""INSERT INTO feed_content_hides (target_kind, target_id, reporter_bunch_id, reason)
             VALUES ('BUNCH', ?, ?, 'REPORTED')""", scoped, current)
-        assertThat(profiles.get(viewer, target).bunches.map { it.bunch.id }).containsExactly(visible)
+        assertThat(profiles.get(viewer, target).bunches.map { it.bunch.id }).containsExactly(visible, reported, scoped)
         assertThat(profiles.get(member(), target).bunches.map { it.bunch.id })
             .containsExactlyInAnyOrder(outgoing, incoming, reported, scoped, visible)
         jdbc.update("DELETE FROM feed_content_hides WHERE reporter_bunch_id IS NULL")
-        assertThat(profiles.get(viewer, target).bunches.map { it.bunch.id }).containsExactly(visible, hidden)
+        assertThat(profiles.get(viewer, target).bunches.map { it.bunch.id }).containsExactly(visible, reported, scoped, hidden)
     }
 
     @Test
