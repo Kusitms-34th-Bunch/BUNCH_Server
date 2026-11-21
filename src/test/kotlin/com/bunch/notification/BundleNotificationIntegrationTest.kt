@@ -363,7 +363,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `publication notifies all active members, deduplicates retries and re-alerts after stage falls`() {
+    fun `publication notifies all active members and deduplicates retries, and no growth notification is made when the stage rises`() {
         val owner = member()
         val guest = member()
         val otherActiveMember = member()
@@ -380,7 +380,9 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         val secondDraft = publishableDraft(owner, guest, bunchId, photo(bunchId, listOf(owner)), "stage-two")
         val secondKey = UUID.randomUUID()
         val secondPublished = publish(owner, bunchId, secondDraft, secondKey)
-        assertThat(growthFor(bunchId, secondPublished.id).map { it.recipientMemberId })
+        assertThat(bundleService.summary(owner, bunchId).stage).isEqualTo(2)
+        assertThat(growthFor(bunchId, secondPublished.id)).isEmpty()
+        assertThat(publishedFor(bunchId, secondPublished.id).map { it.recipientMemberId })
             .containsExactlyInAnyOrder(guest, otherActiveMember)
         val beforeReplay = notificationFingerprint(notificationsFor(bunchId))
         bundleService.publish(
@@ -405,7 +407,9 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
 
         val thirdDraft = publishableDraft(owner, guest, bunchId, photo(bunchId, listOf(owner)), "stage-rises-again")
         val thirdPublished = publish(owner, bunchId, thirdDraft, UUID.randomUUID())
-        assertThat(growthFor(bunchId, thirdPublished.id).map { it.recipientMemberId })
+        assertThat(bundleService.summary(owner, bunchId).stage).isEqualTo(2)
+        assertThat(growthFor(bunchId, thirdPublished.id)).isEmpty()
+        assertThat(publishedFor(bunchId, thirdPublished.id).map { it.recipientMemberId })
             .containsExactlyInAnyOrder(guest, otherActiveMember)
     }
 

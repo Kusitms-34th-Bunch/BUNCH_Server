@@ -219,20 +219,8 @@ class NotificationWriter(
             bundle, NotificationType.BUNDLE_PUBLISHED, recipients, actorId,
             " 번들이 완성됐어요", "함께한 순간들이 하나의 소중한 기록으로 남았어요.", NotificationTargetKind.BUNDLE
         )
-        if (grew) {
-            saveNotifications(recipients.filter { it != actorId }.map {
-                Notification(
-                    recipientMemberId = it,
-                    bunchId = bundle.bunchId,
-                    type = NotificationType.CHARACTER_GROWN,
-                    dedupeKey = "CHARACTER_GROWN:${bundle.id}:${bundle.revision}",
-                    title = "우리 번치의 뭉치가 성장했어요!",
-                    body = "차곡차곡 쌓인 추억이 뭉치를 키웠어요.",
-                    target = NotificationTarget(NotificationTargetKind.BUNCH_HOME, bundle.bunchId),
-                    createdAt = clock.instant()
-                )
-            })
-        }
+        // The notification that the stage of the bunch rose (CHARACTER_GROWN) is no longer made, and [grew] is not used
+        // any more. Both go away with the stage itself.
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
