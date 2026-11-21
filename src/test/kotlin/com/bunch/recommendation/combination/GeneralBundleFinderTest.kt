@@ -1,7 +1,5 @@
 package com.bunch.recommendation.combination
 
-import com.bunch.recommendation.combination.EventTestSupport.clued
-import com.bunch.recommendation.combination.EventTestSupport.friends
 import com.bunch.recommendation.combination.GeneralTestSupport.DAY
 import com.bunch.recommendation.combination.GeneralTestSupport.active
 import com.bunch.recommendation.combination.GeneralTestSupport.day
@@ -16,11 +14,8 @@ import com.bunch.recommendation.domain.combination.ActivityCode.SIGHTSEEING
 import com.bunch.recommendation.domain.combination.ActivityCode.SPORTS
 import com.bunch.recommendation.domain.combination.AiAnalysis
 import com.bunch.recommendation.domain.combination.BundleKind
-import com.bunch.recommendation.domain.combination.EventClueCode.CANDLE_WHOLE_CAKE
-import com.bunch.recommendation.domain.combination.EventFinder
-import com.bunch.recommendation.domain.combination.EventResult
-import com.bunch.recommendation.domain.combination.EventType
 import com.bunch.recommendation.domain.combination.GeneralBundleFinder
+import com.bunch.recommendation.domain.combination.GeneralChunker
 import com.bunch.recommendation.domain.combination.GeneralResult
 import com.bunch.recommendation.domain.combination.PeopleCount
 import com.bunch.recommendation.domain.combination.PhotoRole
@@ -40,8 +35,8 @@ import kotlin.random.Random
  * the photo box specification 4.2.7 that the two have in common).
  */
 class GeneralBundleFinderTest {
-    private fun find(vararg groups: List<RecoPhoto>, events: EventResult? = null): GeneralResult =
-        GeneralTestSupport.find(groups.toList().flatten(), events ?: EventResult(emptyList(), emptyList()))
+    private fun find(vararg groups: List<RecoPhoto>): GeneralResult =
+        GeneralTestSupport.find(groups.toList().flatten())
 
     private fun photoIds(bundle: RecoBundle) = bundle.photos.map { it.photoId }
 
@@ -103,19 +98,6 @@ class GeneralBundleFinderTest {
 
         assertThat(result.bundles).isEmpty()
         assertThat(result.notBundledPhotoIds).containsExactlyElementsOf(ids(photos))
-    }
-
-    @Test
-    fun `G6 a cafe before a birthday is a general bundle, and the birthday is not`() {
-        val cafe = active(1, "14:00", 10, CAFE)
-        val party = listOf(clued(100, "20:00", 1, CANDLE_WHOLE_CAKE, person = true)) + friends(101, "20:10", 5)
-        val events = EventFinder().find(day(cafe + party))
-
-        val result = find(cafe, party, events = events)
-
-        assertThat(events.confirmed.map { it.type }).containsExactly(EventType.BIRTHDAY)
-        assertThat(result.bundles.map { photoIds(it) }).containsExactly(ids(cafe))
-        assertThat(activities(result)).containsExactly(CAFE)
     }
 
     @Test
@@ -271,33 +253,6 @@ class GeneralBundleFinderTest {
         assertThat(find(photos.take(5)).bundles).isEmpty()
     }
 
-    // --- the events ---
-
-    @Test
-    fun `the photos an event left inside its range are a chunk of their own, apart from the photos outside`() {
-        val cafe = active(1, "14:00", 6, CAFE)
-        val party = listOf(clued(100, "20:00", 1, CANDLE_WHOLE_CAKE, person = true)) + friends(101, "20:10", 5)
-        val food = active(200, "20:25", 7, MEAL)
-        val events = EventFinder().find(day(cafe + party + food))
-
-        val result = find(cafe, party, food, events = events)
-
-        assertThat(result.bundles.map { photoIds(it) }).containsExactly(ids(cafe), ids(food))
-        assertThat(result.bundles.last().trace.general!!.rules.first()).isEqualTo("event_leftover:BIRTHDAY")
-        assertThat(result.bundles.flatMap { photoIds(it) }).doesNotContainAnyElementsOf(ids(party))
-    }
-
-    @Test
-    fun `an event that is not a bundle does not change what the general bundles make`() {
-        val photos = active(1, "12:00", 13, MEAL) + active(100, "18:00", 13, MEAL)
-        val failed = EventResult(emptyList(), listOf(EventResult.Failed(EventType.BIRTHDAY, listOf(1L, 2L))))
-
-        val without = find(photos)
-        val with = find(photos, events = failed)
-
-        assertThat(with.bundles.map { photoIds(it) }).isEqualTo(without.bundles.map { photoIds(it) })
-    }
-
     // --- 7-10 and the bundle itself ---
 
     @Test
@@ -354,7 +309,7 @@ class GeneralBundleFinderTest {
         assertThat(trace.configVersion).isEqualTo("reco-cfg-1")
         assertThat(trace.event).isNull()
         assertThat(trace.general!!.activity).isEqualTo(MEAL)
-        assertThat(trace.general!!.rules.first()).isEqualTo("outside_event_range")
+        assertThat(trace.general!!.rules.first()).isEqualTo(GeneralChunker.DAY)
         assertThat(trace.general!!.segments.map { it.activity }).containsExactly(MEAL)
     }
 

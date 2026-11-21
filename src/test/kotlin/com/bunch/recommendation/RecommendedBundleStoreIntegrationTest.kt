@@ -3,7 +3,6 @@ package com.bunch.recommendation
 import com.bunch.photo.PhotoHttpTestSupport
 import com.bunch.recommendation.combination.CombinerTestSupport.CLOCK
 import com.bunch.recommendation.combination.CombinerTestSupport.shot
-import com.bunch.recommendation.combination.EventTestSupport.clued
 import com.bunch.recommendation.domain.RecommendedBundlePhotoRepository
 import com.bunch.recommendation.domain.RecommendedBundleRepository
 import com.bunch.recommendation.domain.combination.ActivityCode
@@ -12,9 +11,6 @@ import com.bunch.recommendation.domain.combination.BundleKind
 import com.bunch.recommendation.domain.combination.BundleStableKey
 import com.bunch.recommendation.domain.combination.CombinationResult
 import com.bunch.recommendation.domain.combination.DayCombination
-import com.bunch.recommendation.domain.combination.EstablishedBy
-import com.bunch.recommendation.domain.combination.EventClueCode
-import com.bunch.recommendation.domain.combination.EventType
 import com.bunch.recommendation.domain.combination.PhotoRole
 import com.bunch.recommendation.domain.combination.RecoBundle
 import com.bunch.recommendation.domain.combination.RecoPhoto
@@ -92,26 +88,6 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         assertThat(rows.mapNotNull { it.cardPosition }.sorted()).isEqualTo((1..8).toList())
         @Suppress("UNCHECKED_CAST")
         assertThat((saved.ruleTrace["counts"] as Map<String, Any?>)["photos"]).isEqualTo(8)
-    }
-
-    @Test
-    fun `an event bundle is saved with its event and what made it stand`() {
-        val (ownerId, bunchId) = bunchWithOwner()
-        val cake = clued(photoId(bunchId, ownerId, "20:00"), "20:00", 1, EventClueCode.CANDLE_WHOLE_CAKE, person = true)
-        val friends = (0 until 5).map { i ->
-            val time = LocalTime.parse("20:10").plusMinutes(10L * i).toString()
-            clued(photoId(bunchId, ownerId, time), time, (i % 2 + 1).toLong(), person = true)
-        }
-
-        store.replace(bunchId, combine(listOf(cake) + friends), evening)
-
-        val saved = bundles.findByBunchId(bunchId)
-        assertThat(saved).isNotEmpty
-        val event = saved.first { it.kind == BundleKind.EVENT }
-        assertThat(event.eventType).isEqualTo(EventType.BIRTHDAY)
-        assertThat(event.establishedBy).isEqualTo(EstablishedBy.STRONG)
-        assertThat(event.title).isEqualTo("10월 19일 생일 파티")
-        assertThat(bundlePhotos.findByBundleIdIn(listOf(event.id)).map { it.role }).contains(PhotoRole.CLUE)
     }
 
     @Test
