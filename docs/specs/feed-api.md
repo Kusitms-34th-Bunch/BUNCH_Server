@@ -3,6 +3,8 @@
 이슈 #87(A)·#95(B), FEED-01·FEED-06. 정책과 6장 기능 색인은 [feed](feed.md)를 따른다.
 공통 접근 경계와 실제 `GET /api/v1/feed` 조립 계약이다.
 소셜·광고·장소의 쓰기 API는 기능별 Spec을 따른다.
+신고 노출·운영 삭제는 2026-11-22 사용자 결정(#207)의 [신고 계약](feed-reports.md)이 우선한다.
+아래는 변경 후 계약이며 이번 문서 갱신은 구현·검증 완료를 뜻하지 않는다.
 
 ## GET `/api/v1/feed`
 
@@ -10,7 +12,7 @@
 클라이언트의 현재 번치·회원 ID는 받지 않는다.
 2026-11-21 사용자 결정에 따라 소속을 이유로 제외하는 대상은 서버 선택 `currentBunchId`뿐이다.
 다른 ACTIVE 소속 번치는 외부와 동일하게 PUBLIC 발행 번들 중 공개 번치 또는 현재 번치의
-APPROVED 팔로우 대상만 허용하며 차단·신고·숨김을 검사한다. 소속만으로 비공개 접근을 허용하지 않는다.
+APPROVED 팔로우 대상만 허용하며 차단·레거시 전역 BUNCH/BUNDLE 숨김을 검사한다. 소속만으로 비공개 접근을 허용하지 않는다.
 `currentBunchId=null`이면 현재 번치 제외 없이 공개 구간을 조회한다.
 
 | 입력 | 계약 |
@@ -71,7 +73,7 @@ followingContext는 현재 번치의 정렬된 APPROVED 관계 ID·대상 ID·�
 다른 회원의 커서·미래 anchor·짝이 맞지 않는 튜플·음수/과대 count 등은 `400 COMMON_001`이다.
 페이지 크기 변경은 문맥 변경이 아니다.
 
-차단·신고·운영 숨김·삭제·공개 범위는 매 요청 최신 DB 조건으로 LIMIT 전에 검사한다.
+차단·레거시 전역 BUNCH/BUNDLE 숨김·삭제·공개 범위는 매 요청 최신 DB 조건으로 LIMIT 전에 검사한다.
 이 변화만으로 지문을 고정하거나 사후 필터링하지 않는다. 한 응답의 후보와 카드는
 REPEATABLE_READ 트랜잭션에서 조립해 원자적 발행 수정 전후를 섞지 않는다.
 V31의 PUBLIC/PUBLISHED 부분 인덱스 `(published_at DESC, id DESC)`가 실제 keyset 조회를 지원한다.
@@ -81,7 +83,8 @@ V31의 PUBLIC/PUBLISHED 부분 인덱스 `(published_at DESC, id DESC)`가 실�
 최대 50개 번들에 대해 사진+이미지, 번치 프로필, C의
 `BundleAttributionService.publishedAll`, L의 `BundleLocationService.listForBundles`,
 D의 `SocialLikeService.summaries`, E의 `SocialCommentService.counts`를 각각 배치 호출한다.
-댓글 수는 삭제 자리와 답글을 포함하며 차단·신고·운영 숨김과 숨겨진 부모의 답글은 제외한다.
+댓글 수는 운영 삭제를 포함한 삭제 자리와 답글을 센다. 작성 번치 차단·레거시 전역 BUNCH
+숨김과 그로 인해 보이지 않는 부모의 답글은 제외한다. 신고는 집계를 바꾸지 않는다.
 단일 카드용 상세 API를 반복 호출하지 않는다.
 
 누적 6번들마다 광고 자리를 계산하고 매 요청 H의 실제
@@ -96,9 +99,10 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 
 알림 이동/전송도 공통 접근 정책을 적용한다. 실제 알림 target의 `sourceBunchId`는
 반응 작성 번치, `commentId`는 소셜 댓글/답글이며 번들 소유 번치와 구별한다.
-명시적 열기는 현재 서버 번치(소속 0개면 null)로 공개/승인·차단·숨김을 재검사한다.
+명시적 열기는 현재 서버 번치(소속 0개면 null)로 공개/승인·차단·레거시 전역 숨김을 재검사한다.
 푸시 전달은 저장된 수신 번치의 ACTIVE 소속과 문맥을 사용하고, 실제 댓글 및 원댓글의
-숨김/삭제도 전송 직전에 다시 확인한다. 원문 토큰이나 알림 target을 접근 권한으로 쓰지 않는다.
+삭제·작성 번치 접근 제한도 전송 직전에 다시 확인한다. 신고는 열기·전송을 막지 않는다.
+원문 토큰이나 알림 target을 접근 권한으로 쓰지 않는다.
 
 ## 호출 인터페이스
 
@@ -109,11 +113,11 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 | --- | --- |
 | `viewer(userId: Long)` | `FeedViewer(memberId: Long, currentBunchId: Long?)`. 활성·가입 완료 검증과 서버 현재 번치 조회. 피드는 이 `currentBunchId`만 DB 조건으로 제외하며, 소속 0개는 `currentBunchId:null` |
 | `requireActor(userId: Long)` | 현재 ACTIVE `BunchMembership`. 소속 0개는 `CURRENT_BUNCH_REQUIRED` |
-| `readPublishedBundle(userId: Long, bundleId: Long)` | 현재 번치·공개/팔로우·차단·신고/운영 숨김을 통과한 실제 `Bundle`. 피드 전용 현재 번치 제외는 적용하지 않음 |
+| `readPublishedBundle(userId: Long, bundleId: Long)` | 현재 번치·공개/팔로우·차단·레거시 전역 BUNCH/BUNDLE 숨김을 통과한 실제 `Bundle`. 피드 전용 현재 번치 제외는 적용하지 않음 |
 | `requireInteraction(userId: Long, bundleId: Long)` | `FeedBundleInteraction(bundle: Bundle, actor: BunchMembership)`. 현재 ACTIVE 소속과 상세 접근을 함께 검증. 좋아요·댓글·장소 콕 등에서 사용 |
-| `requireBundleReportTarget(userId: Long, bundleId: Long)` | 같은 DTO. **번들 재신고 접수 전용**으로 그 번들의 reporter-scoped 숨김만 무시. 전역 운영 숨김·프로필 신고·차단·공개범위는 계속 적용. 첫 신고 뒤에도 허용된 두 번째 신고를 접수하기 위한 검사이며 본문 조회에 사용 금지 |
+| `requireBundleReportTarget(userId: Long, bundleId: Long)` | 같은 DTO. **번들 신고 접수 전용**이며 일반 상세와 같은 접근 조건. 신고 이력·non-null reporter 숨김은 두 경로 모두 무시. 차단·공개범위·삭제·레거시 전역 BUNCH/BUNDLE 숨김은 유지. 대상별 신고 권한·한도는 신고 서비스가 검증 |
 | `visibleBundleIds(userId: Long, bundleIds: Collection<Long>, forFeed: Boolean = true)` | DB에서 접근 가능한 ID 집합. 기본은 현재 `currentBunchId`만 제외하고 다른 소속은 외부 접근 조건 적용. 현재 번치가 없으면 공개 후보 조회. `false`는 상세 후보 검사. 최대 500개, 양수 ID, 빈 입력은 빈 집합. 집합 순서는 미보장 |
-| `visibleBunchIds(userId: Long, bunchIds: Collection<Long>)` | 실제 존재하는 번치 중 양방향 차단·프로필 신고·번치 숨김을 통과한 ID 집합. 좋아요·댓글 작성 번치 필터에 사용. 비공개 작성 번치에 대한 팔로우는 요구하지 않음. 최대 500개, 양수 ID |
+| `visibleBunchIds(userId: Long, bunchIds: Collection<Long>)` | 실제 존재하는 번치 중 양방향 차단·레거시 전역 BUNCH 숨김을 통과한 ID 집합. 좋아요·댓글 작성 번치 필터에 사용. 비공개 작성 번치에 대한 팔로우는 요구하지 않음. 최대 500개, 양수 ID |
 | `publishedBundles(userId: Long, bunchId: Long, pageable: Pageable)` | 기존 프로필 발행 번들 목록용 `Page<Bundle>`. 숨김을 LIMIT·count 이전 DB 조건으로 적용. 현재 번치라면 PRIVATE도 포함. 호출자가 페이지 입력 제한을 검증 |
 
 조회와 쓰기에서 같은 `actor.bunch.id`를 사용한다. 상호작용 검사는 현재 번치를 한 번 선택한 뒤
@@ -138,17 +142,18 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 공통 경계로 연결했다. 기존 응답 모양과 현재 번치 내부/다른 소속 외부 구분은 유지한다.
 `BundleService`·`BundleAccessService`의 내부 편집/조회 경로는 C(#88)가 소유한다.
 발행 상세는 위 공통 검사를 연결하며 `BunchPublicService`도 같은 경계를 유지한다.
-운영 숨김을 초안 수정 권한 등 다른 권한으로 대체하지 않는다.
+레거시 전역 숨김을 초안 수정 권한 등 다른 권한으로 대체하지 않는다.
 
 ## 페이지 DB 조건 재사용 (#95)
 
 `com.bunch.feed.domain.FeedAccessRepository`의 `companion object`는 아래 JPQL 상수를 제공한다.
 
 - `VISIBLE_BUNCH`: 별칭 `bunch`, 파라미터 `currentBunchId: Long?`.
-  양방향 차단·기존 프로필 신고·번치 운영/현재 번치 숨김 검사.
+  양방향 차단·레거시 전역 BUNCH 숨김 검사. 모든 `BunchProfileReport` predicate와
+  non-null reporter 숨김 조건은 제거한다.
 - `PUBLISHED_VISIBILITY`: 위 조건 + 별칭 `bundle`의 PUBLISHED 상태·현재 번치 내부/
-  외부 PUBLIC 및 공개 번치/APPROVED 팔로우 검사. reporter-scoped 번들 숨김만 빠져 있으므로 일반 조회에 단독 사용 금지.
-- `PUBLISHED_ACCESS`: 위 조건 + 번들 운영/현재 번치 숨김 검사.
+  외부 PUBLIC 및 공개 번치/APPROVED 팔로우 검사. 번들 전역 숨김 검사가 빠져 있으므로 일반 조회에 단독 사용 금지.
+- `PUBLISHED_ACCESS`: 위 조건 + 레거시 전역 BUNDLE 숨김 검사.
 - `FEED_EXCLUSIONS`: 별칭 `bunch`, 파라미터 `currentBunchId: Long?`.
   조건은 `(:currentBunchId is null or bunch.id <> :currentBunchId)`이며 현재 번치만 제외한다.
 
@@ -167,60 +172,40 @@ Repository의 `following`·`publicBundles`·`visibleBundleIds`는 위 `currentBu
 `viewer`의 `memberId/currentBunchId`를 요청마다 다시 얻고 클라이언트의 viewer ID로 바꾸지 않는다.
 
 댓글·좋아요 집계는 실제 자기 테이블의 작성 번치에 `VISIBLE_BUNCH`를 적용한다.
-댓글 타깃 숨김도 count와 LIMIT 이전 `NOT EXISTS FeedContentHide`로 제외한다.
+댓글 타깃의 `FeedContentHide` predicate는 제거한다. 댓글 삭제는 행을 제외하지 않고
+삭제 자리로 표시하며, 신고 이력과 non-null reporter 숨김은 모든 조회·집계에서 무시한다.
 삭제된 댓글 자리 포함 규칙과 답글 부모 처리 등은 E/F가 소유한다.
 
-## V23 `feed_content_hides`
+## V23 `feed_content_hides` 호환 경계 (#207)
 
-| 컬럼 | 계약 |
+기존 스키마는 유지하되 새 신고·운영 조치의 저장소로 쓰지 않는다.
+
+| 컬럼 | 호환 계약 |
 | --- | --- |
 | `id BIGINT` | identity PK |
-| `target_kind VARCHAR(16)` | `BUNCH`, `BUNDLE`, `COMMENT`만 허용. COMMENT는 실제 소셜 댓글/답글 ID 공간이며 기존 `bundle_comments` 코멘트가 아님 |
-| `target_id BIGINT` | 양수 대상 ID. 종류와 함께 식별. 다형 참조이므로 대상 FK는 없음 |
-| `reporter_bunch_id BIGINT NULL` | null이면 운영 전역 숨김, 값이 있으면 이 신고 번치가 현재 번치일 때만 비노출. `bunches(id) ON DELETE CASCADE` |
-| `reason TEXT` | 비어 있지 않은 사유. 신고 writer는 `REPORTED`, 운영은 검토 사유를 직접 기록 |
-| `created_at TIMESTAMPTZ` | NOT NULL, 기본 DB now(). 중복 숨김은 최초 기록·시각 유지 |
+| `target_kind VARCHAR(16)` | 기존 BUNCH/BUNDLE/COMMENT. COMMENT는 실제 소셜 댓글·답글 ID |
+| `target_id BIGINT` | 양수 다형 대상 ID, 대상 FK 없음. 삭제 후 ID 재사용 금지 |
+| `reporter_bunch_id BIGINT NULL` | null인 기존 BUNCH/BUNDLE 행만 전역 숨김으로 적용. non-null 파생 행은 V52에서 제거하고 배포 중 잔존 행도 모든 경로에서 무시. 기존 FK는 유지 |
+| `reason TEXT` | 기존 사유 보존. 새 신고·운영 숨김 writer 없음 |
+| `created_at TIMESTAMPTZ` | 기존 기록 시각 보존 |
 
-`UNIQUE NULLS NOT DISTINCT(target_kind, target_id, reporter_bunch_id)`로 전역 한 건과
-신고 번치별 한 건을 각각 보장한다(PostgreSQL 16). 다른 kind나 reporter는 별개다.
-기존 `bunch_profile_reports`의 이력은 검토 상태와 관계없이 비노출 근거이며 복사·재작성하지 않는다.
+기존 `UNIQUE NULLS NOT DISTINCT(target_kind, target_id, reporter_bunch_id)`는 유지한다.
+`bunch_profile_reports`는 상태와 무관하게 조회·집계·접근의 제외 근거가 아니며 신고 이력으로 보존한다.
+`FeedContentHideRepository.hideForReporter` 호출을 중단하고 불필요해진 repository writer를 제거한다.
+쿼리 상수는 레거시 null-reporter BUNCH/BUNDLE 숨김만 LIMIT·count 이전에 제외한다.
+이 규칙은 피드·상세·프로필·좋아요·댓글·콕 출처·알림 열기와 푸시 재검사에 동일하게 적용한다.
 
-`FeedContentHideRepository.hideForReporter(kind: FeedContentKind, targetId: Long, reporterBunchId: Long): Int`는
-**이미 시작한 쓰기 트랜잭션 필수(MANDATORY)**이며 `INSERT ... ON CONFLICT DO NOTHING`으로
-신규 1/기존 0을 반환한다. F(#91)는 신고 접수·한도 검증·새 신고 row 저장이 성공한 같은
-트랜잭션에서 호출한다. 재신고는 새 신고 ID를 만들지만 숨김 row는 중복하지 않는다. 실패 시 함께 롤백한다.
-이 writer는 신고 대상의 존재·권한·24시간 한도를 판정하지 않으며 신고 대신 단독 호출하지 않는다.
+### V52·삭제·보존
 
-페이지·집계는 전역·현재 신고 번치의 숨김을 제외하는 `NOT EXISTS` 조건을 자기 도메인의 실제 DB 쿼리에 넣어야 한다.
+V52는 non-null reporter 파생 숨김을 모두 제거하고 신고 이력은 보존한다.
+전역 COMMENT 숨김은 실제 댓글 soft delete로 변환한 뒤 해당 숨김 행을 제거한다.
+세부 변환·신고 이력 보존은 [신고 전환 계약](feed-reports.md)을 따른다.
+댓글 삭제 자리는 댓글 타깃 숨김으로 사라지지 않으며 답글·집계 포함 규칙을 유지한다.
 
-### 삭제·보존·참조 경계
+번들·번치 영구 삭제 후 남는 다형 target 숨김 행은 기존 보존 정책을 유지한다.
+실제 콘텐츠가 없으면 접근 불가다. 구버전 앱 배포 중 잔존하는 non-null 행도 효과가 없다.
+레거시 전역 BUNCH/BUNDLE 숨김 해제는 해당 null-reporter 행만 제거하며,
+신고 이력은 복구를 막지 않는다. 삭제·차단·공개 범위 등 실제 접근 제한은 계속 적용한다.
 
-- 다형 target에는 FK가 없고 미래 댓글 테이블도 참조하지 않는다. target ID는 종류별 identity이며
-  삭제 후 재사용하거나 sequence를 되감아 새 콘텐츠에 옛 ID를 붙이지 않는다.
-- **A의 현재 보존 정책:** 번들·번치 target의 영구 삭제 후에도 그 target을 가리키는 숨김 row는
-  남긴다. 존재하는 실제 콘텐츠를 먼저 조회하므로 orphan은 콘텐츠를 되살리거나 허용하지 않는다.
-  target 삭제만으로 다른 번치의 신고 이력·숨김이 변경되지 않는다. 별도 TTL·자동 purge는 없다.
-- reporter 번치가 삭제되면 그 번치가 신고한 숨김 row만 FK CASCADE로 제거한다.
-  같은 target의 다른 reporter row와 전역(null reporter) row는 그대로 남는다.
-- F는 실제 소셜 댓글 **soft delete** 시 숨김을 제거하지 않는다. 삭제 자리도 차단/신고/운영 숨김이
-  우선하며, 숨김을 해제해도 실제 soft-delete 본문을 복원하지 않는다.
-- C/F는 번들 영구 삭제 시 실제 번들·댓글의 생애주기와 위 **target 숨김 보존** 정책을 연결한다.
-  이 테이블에 댓글이 있다고 미래 댓글을 생성하거나 가짜 adapter로 대체하지 않는다.
-  향후 물리 정리를 도입하려면 실제 대상 테이블과 삭제 트랜잭션/보존 요구를 근거로 새 계약·테스트를 추가한다.
-- 전역 운영 숨김 해제는 해당 null-reporter row만 삭제한다. reporter 숨김·기존 프로필 신고는
-  남으므로 계속 비노출일 수 있다. 신고 자체를 이유로 전역 row를 만들지 않는다.
-
-운영 예시(신뢰된 DB 운영 경로에서만 수행):
-
-```sql
-INSERT INTO feed_content_hides(target_kind, target_id, reason)
-VALUES ('BUNDLE', :bundle_id, :review_reason)
-ON CONFLICT (target_kind, target_id, reporter_bunch_id) DO NOTHING;
-
-DELETE FROM feed_content_hides
-WHERE target_kind = 'BUNDLE' AND target_id = :bundle_id AND reporter_bunch_id IS NULL;
-```
-
-공통 경계는 운영자 인증·API·심사 화면·자동 제재를 제공하지 않는다.
-실제 신고 접수 테이블과 API는 [신고 계약](feed-reports.md)을 따른다.
-전역 해제는 보존된 콘텐츠의 조회만 복구하며 삭제·계정 상태·공개 범위·차단을 우회하지 않는다.
+새 위반 조치는 신뢰된 내부 서비스의 댓글·번들 삭제로 처리한다([신고 계약](feed-reports.md)).
+전역 숨김을 새로 쓰는 SQL 운영 절차나 관리자 인증·API·화면은 추가하지 않는다.

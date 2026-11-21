@@ -4,7 +4,6 @@ import com.bunch.bunch.domain.BunchReportPolicy
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipRole
 import com.bunch.bundle.domain.BundleRepository
-import com.bunch.feed.domain.FeedContentHideRepository
 import com.bunch.feed.domain.FeedContentKind
 import com.bunch.feed.dto.FeedBundleInteraction
 import com.bunch.feed.service.FeedAccessService
@@ -28,7 +27,6 @@ class SocialContentReportService(
     private val commentService: SocialCommentService,
     private val comments: SocialCommentRepository,
     private val reports: SocialContentReportRepository,
-    private val hides: FeedContentHideRepository,
     private val members: MemberRepository,
     private val bunches: BunchRepository,
     private val bundles: BundleRepository,
@@ -58,7 +56,6 @@ class SocialContentReportService(
         val actorId = lockTargets(userId, bundleId, commentId)
         val interaction = access.requireInteraction(userId, bundleId)
         requireSameActor(actorId, interaction)
-        // E rejects own/deleted/blocked/global-hidden targets, allowing only the target reporter hide.
         commentService.requireReportable(userId, bundleId, commentId)
         return accept(userId, actorId, FeedContentKind.COMMENT, commentId, request, detail)
     }
@@ -121,7 +118,6 @@ class SocialContentReportService(
                 windowStartedAt = window
             )
         )
-        hides.hideForReporter(kind, targetId, actorId)
         return SocialContentReportResult(saved.id)
     }
 

@@ -10,6 +10,13 @@ import java.time.Instant
 import java.util.UUID
 
 interface PushJobRepository : JpaRepository<PushJob, UUID> {
+    @Modifying(flushAutomatically = true)
+    @Query(value = """UPDATE push_jobs
+        SET payload = jsonb_set(payload, '{aps,alert,body}', to_jsonb(CAST(:body AS text)))
+        WHERE type = 'SOCIAL_COMMENT_CREATED'
+          AND payload -> 'target' ->> 'commentId' = CAST(:commentId AS text)""", nativeQuery = true)
+    fun redactCommentBody(commentId: Long, body: String): Int
+
     fun existsByRecipientMemberIdAndDeviceIdAndDedupeKey(
         recipientMemberId: Long,
         deviceId: Long,

@@ -90,7 +90,7 @@ class PublishedNotificationAccessIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `global and reporter hides are checked again before opening and delivery`() {
+    fun `legacy reporter hides preserve notification access while global hides still restrict it`() {
         val recipient = member()
         val inbox = create(recipient).id
         val bundle = published(recipient, inbox)
@@ -100,8 +100,8 @@ class PublishedNotificationAccessIntegrationTest : BunchIntegrationSupport() {
                 "VALUES ('BUNDLE', ?, ?, 'REPORTED')",
             bundle, inbox
         )
-        assertThat(service.open(recipient, inbox, notification.id).available).isFalse()
-        assertThat(publishedAccess.canDeliver(inbox, notification.target)).isFalse()
+        assertThat(service.open(recipient, inbox, notification.id).available).isTrue()
+        assertThat(publishedAccess.canDeliver(inbox, notification.target)).isTrue()
         jdbc.update("DELETE FROM feed_content_hides")
         assertThat(publishedAccess.canDeliver(inbox, notification.target)).isTrue()
         jdbc.update(

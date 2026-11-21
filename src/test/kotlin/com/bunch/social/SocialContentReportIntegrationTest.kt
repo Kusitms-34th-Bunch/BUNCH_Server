@@ -24,6 +24,7 @@ import com.bunch.social.dto.SocialContentReportRequest
 import com.bunch.social.dto.SocialContentReportResult
 import com.bunch.social.service.SocialCommentService
 import com.bunch.social.service.SocialContentReportService
+import com.bunch.social.service.SocialLikeService
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -39,6 +40,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -59,6 +61,12 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var comments: SocialCommentService
+
+    @Autowired
+    private lateinit var likes: SocialLikeService
+
+    @Autowired
+    private lateinit var transaction: TransactionTemplate
 
     @Autowired
     private lateinit var reports: SocialContentReportRepository
@@ -105,14 +113,13 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
     @AfterEach
     fun cleanupReportFixtures() {
         sessionIds.forEach { (sid, member) -> sessions.delete(sid, member) }
-        jdbc.execute("DROP TRIGGER IF EXISTS report_test_reject_hide ON feed_content_hides")
         jdbc.execute("DROP TRIGGER IF EXISTS report_test_reject_row ON social_content_reports")
         jdbc.execute("DROP FUNCTION IF EXISTS report_test_reject_write()")
         jdbc.update("DELETE FROM feed_content_hides WHERE target_kind IN ('BUNDLE', 'COMMENT')")
     }
 
     @Test
-    fun `bundle re-report creates independent rows but hides once and third is rejected`() {
+    fun `bundle re-report creates independent rows without hiding and third is rejected`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
         val actor = member()
@@ -129,13 +136,13 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         assertThat(row.status).isEqualTo("RECEIVED")
         assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.bundle(actor, bundle.id, reportRequest()) }
         assertThat(count("social_content_reports")).isEqualTo(2)
-        assertThat(count("feed_content_hides")).isEqualTo(1)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { access.readPublishedBundle(actor, bundle.id) }
+        assertThat(count("feed_content_hides")).isZero()
+        assertThat(access.readPublishedBundle(actor, bundle.id).id).isEqualTo(bundle.id)
         assertThat(access.readPublishedBundle(owner, bundle.id).id).isEqualTo(bundle.id)
     }
 
     @Test
-    fun `comment and reply re-report use actual comment target access despite own reporter hide`() {
+    fun `comment and reply re-report preserve list reply counts and total counts`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
         val root = write(owner, bundle.id)
@@ -146,14 +153,55 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         val second = service.comment(actor, bundle.id, reply, reportRequest())
         assertThat(first.reportId).isNotEqualTo(second.reportId)
         assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.comment(actor, bundle.id, reply, reportRequest()) }
-        assertThat(comments.list(actor, bundle.id).items.single().replyCount).isZero()
-        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 1L)
+        assertThat(comments.list(actor, bundle.id).items.single().replyCount).isEqualTo(1)
+        assertThat(comments.list(actor, bundle.id, root).items.map { it.id }).containsExactly(reply)
+        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
         service.comment(actor, bundle.id, root, reportRequest())
         service.comment(actor, bundle.id, root, reportRequest())
         assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.comment(actor, bundle.id, root, reportRequest()) }
-        assertThat(comments.list(actor, bundle.id).items).isEmpty()
-        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 0L)
+        assertThat(comments.list(actor, bundle.id).items.map { it.id }).containsExactly(root)
+        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
         assertThat(comments.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+    }
+
+    @Test
+    fun `all report kinds preserve content metadata for reporter peers unrelated bunches and guests`() {
+        val owner = member()
+        val target = publicBunch(owner)
+        val bundle = published(owner, target)
+        val root = write(owner, bundle.id)
+        val reply = write(owner, bundle.id, root)
+        val actor = member()
+        val reporter = publicBunch(actor)
+        val peer = member()
+        join(peer, issue(actor, reporter))
+        val unrelated = member().also(::publicBunch)
+        val guest = member()
+        likes.like(actor, bundle.id)
+        val viewers = listOf(actor, peer, unrelated, guest)
+        val before = viewers.associateWith { viewer ->
+            Triple(comments.list(viewer, bundle.id), comments.list(viewer, bundle.id, root),
+                likes.summary(viewer, bundle.id))
+        }
+        val beforeNotifications = count("notifications")
+        val beforePushJobs = count("push_jobs")
+        profileReports.report(actor, reporter, BunchReportRequest(target, BunchReportReason.SPAM))
+        service.bundle(actor, bundle.id, reportRequest())
+        service.comment(actor, bundle.id, root, reportRequest())
+        service.comment(actor, bundle.id, reply, reportRequest())
+        viewers.forEach { viewer ->
+            assertThat(access.visibleBundleIds(viewer, listOf(bundle.id))).containsExactly(bundle.id)
+            assertThat(access.readPublishedBundle(viewer, bundle.id).id).isEqualTo(bundle.id)
+            assertThat(access.visibleBunchIds(viewer, listOf(target))).containsExactly(target)
+            assertThat(comments.list(viewer, bundle.id)).isEqualTo(before.getValue(viewer).first)
+            assertThat(comments.list(viewer, bundle.id, root)).isEqualTo(before.getValue(viewer).second)
+            assertThat(likes.summary(viewer, bundle.id)).isEqualTo(before.getValue(viewer).third)
+            assertThat(comments.counts(viewer, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+        }
+        assertThat(count("feed_content_hides")).isZero()
+        assertThat(count("bunch_blocks")).isZero()
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
     }
 
     @Test
@@ -255,8 +303,6 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("UPDATE bunch_memberships SET role = 'MEMBER' WHERE member_id = ? AND bunch_id = ?", guest, target)
         service.bundle(guest, bundle.id, reportRequest())
         assertThat(count("social_content_reports")).isEqualTo(2)
-        // Bundle reporter hide legitimately prevents a separate comment action on the hidden bundle.
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'BUNDLE'")
         val root = write(owner, bundle.id)
         assertError(ErrorCode.FORBIDDEN) { service.comment(owner, bundle.id, root, reportRequest()) }
         service.comment(guest, bundle.id, root, reportRequest())
@@ -390,77 +436,99 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `global moderation hide is never bypassed and removal preserves reporter suppression`() {
+    fun `global bundle hides still deny reporting while removal restores access after a report`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
-        val root = write(owner, bundle.id)
         val actor = member()
-        val reporter = publicBunch(actor)
-        hide("COMMENT", root)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.comment(actor, bundle.id, root, reportRequest()) }
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT' AND reporter_bunch_id IS NULL")
-        service.comment(actor, bundle.id, root, reportRequest())
-        hide("COMMENT", root)
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT' AND reporter_bunch_id IS NULL")
-        assertThat(comments.list(actor, bundle.id).items).isEmpty()
-        assertThat(comments.list(owner, bundle.id).items).hasSize(1)
+        publicBunch(actor)
+        service.bundle(actor, bundle.id, reportRequest())
         hide("BUNDLE", bundle.id)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.bundle(actor, bundle.id, reportRequest()) }
         jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'BUNDLE' AND reporter_bunch_id IS NULL")
         service.bundle(actor, bundle.id, reportRequest())
-        assertThat(access.visibleBundleIds(actor, listOf(bundle.id), false)).isEmpty()
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM feed_content_hides WHERE reporter_bunch_id = ?",
-            Long::class.java, reporter)).isEqualTo(2)
+        assertThat(access.visibleBundleIds(actor, listOf(bundle.id), false)).containsExactly(bundle.id)
+        assertThat(count("feed_content_hides")).isZero()
     }
 
     @Test
-    fun `reported parent suppresses children but actual deleted parent still permits reporting a visible reply`() {
+    fun `reported and moderated parent preserves placeholder replies counts and reply reporting`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
         val root = write(owner, bundle.id)
         val reply = write(owner, bundle.id, root)
         val actor = member()
         publicBunch(actor)
-        comments.delete(owner, bundle.id, root)
-        service.comment(actor, bundle.id, reply, reportRequest())
-        hide("COMMENT", root)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.comment(actor, bundle.id, reply, reportRequest()) }
+        service.comment(actor, bundle.id, root, reportRequest())
+        assertThat(comments.list(actor, bundle.id).items.single().deleted).isFalse()
+        assertThat(comments.list(actor, bundle.id, root).items.map { it.id }).containsExactly(reply)
+        comments.deleteForModeration(root)
+        val placeholder = comments.list(actor, bundle.id).items.single()
+        assertThat(placeholder.deleted).isTrue()
+        assertThat(placeholder.content).isEqualTo("삭제된 댓글입니다")
+        assertThat(placeholder.replyCount).isEqualTo(1)
+        assertThat(comments.list(actor, bundle.id, root).items.map { it.id }).containsExactly(reply)
+        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.comment(actor, bundle.id, root, reportRequest()) }
+        repeat(2) { service.comment(actor, bundle.id, reply, reportRequest()) }
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.comment(actor, bundle.id, reply, reportRequest()) }
     }
 
     @Test
-    fun `hide failure rolls back first acceptance and retry gets two slots anchored on successful retry`() {
+    fun `caller rollback consumes no quota creates no notifications and retry anchors on successful request`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
+        val root = write(owner, bundle.id)
         val actor = member()
         publicBunch(actor)
-        reject("report_test_reject_hide", "feed_content_hides")
-        assertThatThrownBy { service.bundle(actor, bundle.id, reportRequest()) }.isInstanceOf(RuntimeException::class.java)
+        val beforeNotifications = count("notifications")
+        val beforePushJobs = count("push_jobs")
+        assertThatThrownBy {
+            transaction.executeWithoutResult {
+                service.bundle(actor, bundle.id, reportRequest())
+                service.comment(actor, bundle.id, root, reportRequest())
+                error("caller rollback")
+            }
+        }.isInstanceOf(IllegalStateException::class.java)
         assertThat(count("social_content_reports")).isZero()
         assertThat(count("feed_content_hides")).isZero()
-        jdbc.execute("DROP TRIGGER report_test_reject_hide ON feed_content_hides")
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
         at(start.plusSeconds(3600))
         val first = service.bundle(actor, bundle.id, reportRequest())
+        val comment = service.comment(actor, bundle.id, root, reportRequest())
         service.bundle(actor, bundle.id, reportRequest())
+        service.comment(actor, bundle.id, root, reportRequest())
         assertThat(row(first).windowStartedAt).isEqualTo(start.plusSeconds(3600))
+        assertThat(row(comment).windowStartedAt).isEqualTo(start.plusSeconds(3600))
         assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.bundle(actor, bundle.id, reportRequest()) }
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.comment(actor, bundle.id, root, reportRequest()) }
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
     }
 
     @Test
-    fun `report insert failure leaves no hide and no consumed quota`() {
+    fun `report insert failure leaves no hide notification push job or consumed quota`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
         val actor = member()
         publicBunch(actor)
+        val beforeNotifications = count("notifications")
+        val beforePushJobs = count("push_jobs")
         reject("report_test_reject_row", "social_content_reports")
         assertThatThrownBy { service.bundle(actor, bundle.id, reportRequest()) }.isInstanceOf(RuntimeException::class.java)
         assertThat(count("feed_content_hides")).isZero()
         assertThat(count("social_content_reports")).isZero()
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
         jdbc.execute("DROP TRIGGER report_test_reject_row ON social_content_reports")
         repeat(2) { service.bundle(actor, bundle.id, reportRequest()) }
+        assertError(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED) { service.bundle(actor, bundle.id, reportRequest()) }
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
     }
 
     @Test
-    fun `reported content remains hidden after soft or hard deletion with history retained until reporter deletion`() {
+    fun `actual soft or hard deletion retains report history without creating hides until reporter deletion`() {
         val owner = member()
         val bundle = published(owner, publicBunch(owner))
         val root = write(owner, bundle.id)
@@ -468,18 +536,19 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         val reporter = publicBunch(actor)
         service.comment(actor, bundle.id, root, reportRequest())
         comments.delete(owner, bundle.id, root)
-        assertThat(comments.list(actor, bundle.id).items).isEmpty()
+        assertThat(comments.list(actor, bundle.id).items.single().deleted).isTrue()
+        assertThat(comments.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 1L)
         service.bundle(actor, bundle.id, reportRequest())
         bundles.deleteById(bundle.id)
         assertThat(count("social_content_reports")).isEqualTo(2)
-        assertThat(count("feed_content_hides")).isEqualTo(2)
+        assertThat(count("feed_content_hides")).isZero()
         jdbc.update("DELETE FROM bunches WHERE id = ?", reporter)
         assertThat(count("social_content_reports")).isZero()
         assertThat(count("feed_content_hides")).isZero()
     }
 
     @Test
-    fun `report creates no automatic sanction or notifications and bundle late access reflects reporter hide`() {
+    fun `reports create no sanction or notifications and preserve opening and delivery access`() {
         val owner = member()
         val bunch = publicBunch(owner)
         val bundle = published(owner, bunch)
@@ -497,8 +566,8 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         assertThat(notifications.canDeliver(reporter, commentTarget)).isTrue()
         val before = count("notifications")
         service.comment(actor, bundle.id, root, reportRequest())
-        assertThat(notifications.canOpen(actor, commentTarget)).isFalse()
-        assertThat(notifications.canDeliver(reporter, commentTarget)).isFalse()
+        assertThat(notifications.canOpen(actor, commentTarget)).isTrue()
+        assertThat(notifications.canDeliver(reporter, commentTarget)).isTrue()
         assertThat(access.readPublishedBundle(actor, bundle.id).id).isEqualTo(bundle.id)
         val target = NotificationTarget(
             kind = com.bunch.notification.domain.NotificationTargetKind.BUNDLE,
@@ -508,8 +577,8 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
         )
         assertThat(notifications.canDeliver(reporter, target)).isTrue()
         service.bundle(actor, bundle.id, reportRequest())
-        assertThat(notifications.canDeliver(reporter, target)).isFalse()
-        assertThat(notifications.canOpen(actor, target)).isFalse()
+        assertThat(notifications.canDeliver(reporter, target)).isTrue()
+        assertThat(notifications.canOpen(actor, target)).isTrue()
         assertThat(count("notifications")).isEqualTo(before)
         assertThat(count("bunch_blocks")).isZero()
         assertThat(jdbc.queryForObject("SELECT count(*) FROM feed_content_hides WHERE reporter_bunch_id IS NULL",
@@ -633,7 +702,7 @@ class SocialContentReportIntegrationTest : BunchIntegrationSupport() {
             assertThat((it as BusinessException).errorCode).isEqualTo(ErrorCode.BUNCH_REPORT_LIMIT_EXCEEDED)
         }
         assertThat(count("social_content_reports")).isEqualTo(2)
-        assertThat(count("feed_content_hides")).isEqualTo(1)
+        assertThat(count("feed_content_hides")).isZero()
     }
 
     private fun awaitLockWait() {

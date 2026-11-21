@@ -596,7 +596,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `card and detail counts consistently filter blocked reported and hidden reaction sources`() {
+    fun `card and detail counts retain reported reaction sources while filtering blocks and global hides`() {
         val f = fixture()
         val sources = (1..4).map {
             val actor = member()
@@ -614,8 +614,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reason) VALUES ('BUNCH',?,'test')", sources[2])
         val detail = publicService.bundle(f.owner, f.bunchId, f.id)
         val card = publicService.bundles(f.owner, f.bunchId, 0, 20).items.single()
-        assertThat(detail.likeCount).isEqualTo(1)
-        assertThat(detail.commentCount).isEqualTo(1)
+        assertThat(detail.likeCount).isEqualTo(2)
+        assertThat(detail.commentCount).isEqualTo(2)
         assertThat(card.likeCount).isEqualTo(detail.likeCount)
         assertThat(card.commentCount).isEqualTo(detail.commentCount)
     }
