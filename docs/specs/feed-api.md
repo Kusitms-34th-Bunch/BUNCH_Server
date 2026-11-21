@@ -8,6 +8,10 @@
 
 기존 access JWT와 Redis 세션 검증을 사용한다. 응답은 공통 `success / data / error`다.
 클라이언트의 현재 번치·회원 ID는 받지 않는다.
+2026-11-21 사용자 결정에 따라 소속을 이유로 제외하는 대상은 서버 선택 `currentBunchId`뿐이다.
+다른 ACTIVE 소속 번치는 외부와 동일하게 PUBLIC 발행 번들 중 공개 번치 또는 현재 번치의
+APPROVED 팔로우 대상만 허용하며 차단·신고·숨김을 검사한다. 소속만으로 비공개 접근을 허용하지 않는다.
+`currentBunchId=null`이면 현재 번치 제외 없이 공개 구간을 조회한다.
 
 | 입력 | 계약 |
 | --- | --- |
@@ -60,6 +64,7 @@ lastAdId는 마지막 실제 광고 ID다. JWT 비밀키·암호화 키·콘텐�
 
 membershipContext는 정렬된 ACTIVE 소속의 ID·번치 ID·lastUsedAt 지문이다.
 followingContext는 현재 번치의 정렬된 APPROVED 관계 ID·대상 ID·상태·승인 시각 지문이다.
+2026-11-21 피드 제외 변경 후에도 두 지문과 아래 무효화 조건은 그대로 유지한다.
 현재 선택/소속 또는 팔로우 생성·취소·승인·재생성으로 지문이 달라지면
 `409 FEED_001 / error.feed_cursor_context_changed`다. 앱은 현재 목록을 새 cursor 없는
 조회로 갱신한다. 시트의 「팔로우 변경은 다음 새로고침 때 반영」은 이 갱신 경로로 충족한다.
@@ -102,12 +107,12 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 
 | 메서드 | 반환·의미 |
 | --- | --- |
-| `viewer(userId: Long)` | `FeedViewer(memberId: Long, currentBunchId: Long?)`. 활성·가입 완료 검증과 서버 현재 번치 조회. 피드의 모든 ACTIVE 소속 제외는 viewer에 소속 목록을 싣지 않고 DB `NOT EXISTS`로 적용하며, 소속 0개는 `currentBunchId:null` |
+| `viewer(userId: Long)` | `FeedViewer(memberId: Long, currentBunchId: Long?)`. 활성·가입 완료 검증과 서버 현재 번치 조회. 피드는 이 `currentBunchId`만 DB 조건으로 제외하며, 소속 0개는 `currentBunchId:null` |
 | `requireActor(userId: Long)` | 현재 ACTIVE `BunchMembership`. 소속 0개는 `CURRENT_BUNCH_REQUIRED` |
-| `readPublishedBundle(userId: Long, bundleId: Long)` | 현재 번치·공개/팔로우·차단·신고/운영 숨김을 통과한 실제 `Bundle`. 피드 전용 소속 제외는 적용하지 않음 |
+| `readPublishedBundle(userId: Long, bundleId: Long)` | 현재 번치·공개/팔로우·차단·신고/운영 숨김을 통과한 실제 `Bundle`. 피드 전용 현재 번치 제외는 적용하지 않음 |
 | `requireInteraction(userId: Long, bundleId: Long)` | `FeedBundleInteraction(bundle: Bundle, actor: BunchMembership)`. 현재 ACTIVE 소속과 상세 접근을 함께 검증. 좋아요·댓글·장소 콕 등에서 사용 |
 | `requireBundleReportTarget(userId: Long, bundleId: Long)` | 같은 DTO. **번들 재신고 접수 전용**으로 그 번들의 reporter-scoped 숨김만 무시. 전역 운영 숨김·프로필 신고·차단·공개범위는 계속 적용. 첫 신고 뒤에도 허용된 두 번째 신고를 접수하기 위한 검사이며 본문 조회에 사용 금지 |
-| `visibleBundleIds(userId: Long, bundleIds: Collection<Long>, forFeed: Boolean = true)` | DB에서 접근 가능한 ID 집합. 기본은 모든 ACTIVE 소속 번치를 제외. `false`는 상세 후보 검사. 최대 500개, 양수 ID, 빈 입력은 빈 집합. 집합 순서는 미보장 |
+| `visibleBundleIds(userId: Long, bundleIds: Collection<Long>, forFeed: Boolean = true)` | DB에서 접근 가능한 ID 집합. 기본은 현재 `currentBunchId`만 제외하고 다른 소속은 외부 접근 조건 적용. 현재 번치가 없으면 공개 후보 조회. `false`는 상세 후보 검사. 최대 500개, 양수 ID, 빈 입력은 빈 집합. 집합 순서는 미보장 |
 | `visibleBunchIds(userId: Long, bunchIds: Collection<Long>)` | 실제 존재하는 번치 중 양방향 차단·프로필 신고·번치 숨김을 통과한 ID 집합. 좋아요·댓글 작성 번치 필터에 사용. 비공개 작성 번치에 대한 팔로우는 요구하지 않음. 최대 500개, 양수 ID |
 | `publishedBundles(userId: Long, bunchId: Long, pageable: Pageable)` | 기존 프로필 발행 번들 목록용 `Page<Bundle>`. 숨김을 LIMIT·count 이전 DB 조건으로 적용. 현재 번치라면 PRIVATE도 포함. 호출자가 페이지 입력 제한을 검증 |
 
@@ -144,7 +149,13 @@ slots는 현재 페이지 번들 기준 1-based 위치다. 구간과 페이지�
 - `PUBLISHED_VISIBILITY`: 위 조건 + 별칭 `bundle`의 PUBLISHED 상태·현재 번치 내부/
   외부 PUBLIC 및 공개 번치/APPROVED 팔로우 검사. reporter-scoped 번들 숨김만 빠져 있으므로 일반 조회에 단독 사용 금지.
 - `PUBLISHED_ACCESS`: 위 조건 + 번들 운영/현재 번치 숨김 검사.
-- `FEED_EXCLUSIONS`: 별칭 `bunch`, 파라미터 `memberId: Long`의 모든 ACTIVE 소속을 DB `NOT EXISTS`로 제외.
+- `FEED_EXCLUSIONS`: 별칭 `bunch`, 파라미터 `currentBunchId: Long?`.
+  조건은 `(:currentBunchId is null or bunch.id <> :currentBunchId)`이며 현재 번치만 제외한다.
+
+Repository의 `following`·`publicBundles`·`visibleBundleIds`는 위 `currentBunchId`를 기준으로
+조회하며 피드 제외를 위한 `memberId`는 받지 않는다. 서비스의
+`FeedAccessService.visibleBundleIds(userId: Long, bundleIds: Collection<Long>, forFeed: Boolean = true)`는
+회원 자격과 서버 현재 번치를 검증한다. 커서의 membership/following 문맥은 유지한다.
 
 피드 페이지 조회는 실제 `Bundle bundle, Bunch bunch`에서 `bunch.id = bundle.bunchId`와
 `PUBLISHED_ACCESS AND FEED_EXCLUSIONS`를 **LIMIT/커서/count 이전**에 적용한다.

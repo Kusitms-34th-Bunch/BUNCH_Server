@@ -65,7 +65,7 @@ class FeedAccessService(
         val currentBunchId = socialAccess.current(userId)?.bunch?.id
         validateBatch(bundleIds)
         if (bundleIds.isEmpty()) return emptySet()
-        return access.visibleBundleIds(userId, currentBunchId, bundleIds, forFeed)
+        return access.visibleBundleIds(currentBunchId, bundleIds, forFeed)
     }
 
     // Attribution/count filter: private acting bunches need not be followed to leave visible reactions.
