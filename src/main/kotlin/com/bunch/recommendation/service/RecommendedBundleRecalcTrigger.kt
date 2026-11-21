@@ -56,14 +56,6 @@ class RecommendedBundleRecalcTrigger(
         queue.putAllDays(event.bunchId, dueAt())
     }
 
-    /** The analysis of a photo is done or failed for good (10-1), so the day of the photo is calculated again. */
-    fun noteAnalyzed(photoId: Long) {
-        if (!enabled) return
-        val change = queue.findPhotoChange(photoId) ?: return
-        val date = change.capturedDate ?: return
-        putDaysOf(change.bunchId, date)
-    }
-
     private fun putDaysOf(bunchId: Long, date: LocalDate) {
         val dueAt = dueAt()
         queue.put(bunchId, date.minusDays(1), dueAt)

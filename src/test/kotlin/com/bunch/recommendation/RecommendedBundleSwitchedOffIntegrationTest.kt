@@ -3,21 +3,16 @@ package com.bunch.recommendation
 import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.photo.service.PhotoChangedEvent
-import com.bunch.recommendation.analysis.PhotoAnalysisFakesConfig
-import com.bunch.recommendation.analysis.ScriptedPhotoAnalyzer
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.RecommendedBundleRepository
 import com.bunch.recommendation.service.RecommendedBundleScheduler
-import com.bunch.recommendation.service.analysis.PhotoAnalysisService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
-import org.springframework.context.annotation.Import
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -32,7 +27,6 @@ import java.time.LocalDate
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(PhotoAnalysisFakesConfig::class)
 class RecommendedBundleSwitchedOffIntegrationTest : RecommendationIntegrationSupport() {
     @Autowired
     private lateinit var events: ApplicationEventPublisher
@@ -49,18 +43,7 @@ class RecommendedBundleSwitchedOffIntegrationTest : RecommendationIntegrationSup
     @Autowired
     private lateinit var bundles: RecommendedBundleRepository
 
-    @Autowired
-    private lateinit var analysis: PhotoAnalysisService
-
-    @Autowired
-    private lateinit var analyzer: ScriptedPhotoAnalyzer
-
     private val day = LocalDate.parse("2026-10-19")
-
-    @BeforeEach
-    fun resetAnalyzer() {
-        analyzer.reset()
-    }
 
     @AfterEach
     fun cleanNewFixtures() {
@@ -76,16 +59,6 @@ class RecommendedBundleSwitchedOffIntegrationTest : RecommendationIntegrationSup
 
         publish(PhotoChangedEvent(bunchId, day, photoAdded = true))
         publish(BundleChangedEvent(bunchId, 987_654L, 1L, "request", BundleEventType.PHOTOS, null))
-
-        assertThat(count("recommended_bundle_recalc_queue", "bunch_id = $bunchId")).isZero()
-    }
-
-    @Test
-    fun `the end of the analysis of a photo puts nothing in the queue`() {
-        val (ownerId, bunchId) = bunchWithOwner()
-        val photoId = insertPhoto(bunchId, "2026-10-19", "10:00", uploaders = listOf(ownerId))
-
-        analysis.analyze(photoId)
 
         assertThat(count("recommended_bundle_recalc_queue", "bunch_id = $bunchId")).isZero()
     }
