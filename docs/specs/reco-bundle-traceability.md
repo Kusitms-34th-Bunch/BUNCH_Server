@@ -48,7 +48,7 @@
 | 묶기·나누기 1~5순위 | 사람 바뀜 → 시간대 바뀜 → 같은 시간대 4시간 → 묶음 → 40장 분할 | `GeneralBundleFinder`, `GeneralSegmenter`, `GeneralChunker`, `GeneralPeopleTimeSplitter`, `GeneralBigSplitter`, `GeneralSectionBalancer`(활동 라벨 기반) | `GeneralBundleFinderTest` 등 | 교체 예정 | 후속 |
 | 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄 | 없음 | — | 미구현 | 후속 |
 | 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility`(6장 + 2명, 활동 미상 제외) | `BundleEligibilityTest` | 교체 예정 | 후속 |
-| 이벤트 번들 | 만들지 않음 | `EventFinder` 등 | `EventFinderTest` 등 | 삭제 예정 | #199 |
+| 이벤트 번들 | 만들지 않음 | `EventFinder` 등 | `EventFinderTest` 등 | 삭제됨 | #199 |
 
 ### 사진 고르기와 이름 (새 기준 「사진 고르기」)
 
