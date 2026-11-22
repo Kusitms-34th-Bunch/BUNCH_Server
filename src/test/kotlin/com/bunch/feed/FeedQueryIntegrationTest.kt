@@ -60,7 +60,7 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `every suppression predicate runs before limit and keyset resumes same timestamp by id`() {
+    fun `blocks and global hides filter before limit while reports remain in stable keyset pages`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -72,9 +72,11 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
         val reporterHidden = published(visible, owner, anchor)
         jdbc.update("""INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason)
             VALUES ('BUNDLE',?,?,'REPORTED')""", reporterHidden, current)
+        var reportedBundle = 0L
         listOf("BLOCK_FORWARD", "BLOCK_REVERSE", "REPORT", "BUNCH_HIDE").forEach { kind ->
             val target = publicBunch(owner)
-            published(target, owner, anchor)
+            val candidate = published(target, owner, anchor)
+            if (kind == "REPORT") reportedBundle = candidate
             when (kind) {
                 "BLOCK_FORWARD" -> block(current, target)
                 "BLOCK_REVERSE" -> block(target, current)
@@ -85,9 +87,11 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
             }
         }
         val page = query.publicBundles(current, anchor, since, listOf(-1L), null, null, false, PageRequest.of(0, 1))
-        assertThat(page.map { it.id }).containsExactly(second)
-        val next = query.publicBundles(current, anchor, since, listOf(-1L), anchor, second, true, PageRequest.of(0, 2))
-        assertThat(next.map { it.id }).containsExactly(first)
+        assertThat(page.map { it.id }).containsExactly(reportedBundle)
+        val next = query.publicBundles(current, anchor, since, listOf(-1L), anchor, reportedBundle, true, PageRequest.of(0, 2))
+        assertThat(next.map { it.id }).containsExactly(reporterHidden, second)
+        val last = query.publicBundles(current, anchor, since, listOf(-1L), anchor, second, true, PageRequest.of(0, 2))
+        assertThat(last.map { it.id }).containsExactly(first)
         assertThat(query.publicBundles(current, anchor, since, listOf(-1L), anchor, first, true, PageRequest.of(0, 1)))
             .isEmpty()
     }

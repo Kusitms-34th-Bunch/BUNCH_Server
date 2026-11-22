@@ -6,6 +6,7 @@
 2026-11-12 승인한 4.3.10 동시 편집 보완에 따라 의도 요청의 행 ID 보존·중복/정원 거부를 적용한다.
 사진·위치가 움직이는 과정의 실시간 공유는 후속이다. 이번에는 놓은 뒤 최종 위치 순서만 저장·전파한다.
 공개 접근은 [피드 공통 계약](feed-api.md), 초안 프로토콜은 [번들 API](bundle-api.md)를 재사용한다.
+신고로 장소 접근을 제한하지 않는 2026-11-22 사용자 결정(#207)과 검토 후 삭제는 [신고 계약](feed-reports.md)을 따른다.
 
 ## 저장·입력
 
@@ -36,7 +37,7 @@
 기존 `success / data / error` 응답과 활성 JWT session 인증을 사용한다.
 
 - `GET`: DRAFT는 가입 완료 ACTIVE 번치 멤버만 조회한다. PUBLISHED는
-  `FeedAccessService.readPublishedBundle`의 공개·팔로우·차단·신고·운영 숨김을 매번 검사한다.
+  `FeedAccessService.readPublishedBundle`의 공개·팔로우·차단·호환용 전역 BUNCH/BUNDLE 숨김을 매번 검사한다.
   가입 완료자는 소속 0개여도 공개 발행본을 조회할 수 있다. 경로 번치 불일치는 404다.
   읽기 트랜잭션은 REPEATABLE_READ로 버전과 장소 목록을 같은 스냅샷에서 읽는다.
   두 조회 사이에 일괄 편집이 커밋되어도 이전 버전과 새 장소를 섞어 반환하지 않는다.

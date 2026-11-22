@@ -44,15 +44,8 @@ class FeedAccessService(
         return FeedBundleInteraction(bundle, actor)
     }
 
-    // A successful first report must not prevent the permitted second report of the same bundle.
-    fun requireBundleReportTarget(userId: Long, bundleId: Long): FeedBundleInteraction {
-        val actor = requireActor(userId)
-        positive(bundleId)
-        val bundle = bundles.findById(bundleId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
-        requireTarget(userId, bundle.bunchId, actor.bunch.id)
-        val reportable = access.findReportableBundle(actor.bunch.id, bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
-        return FeedBundleInteraction(reportable, actor)
-    }
+    fun requireBundleReportTarget(userId: Long, bundleId: Long): FeedBundleInteraction =
+        requireInteraction(userId, bundleId)
 
     fun publishedBundles(userId: Long, bunchId: Long, pageable: Pageable): Page<Bundle> {
         val currentBunchId = socialAccess.current(userId)?.bunch?.id

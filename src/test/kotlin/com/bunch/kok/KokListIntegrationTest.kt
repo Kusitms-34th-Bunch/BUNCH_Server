@@ -4,8 +4,6 @@ import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.dto.FollowDecision
 import com.bunch.bunch.service.BunchPublicService
 import com.bunch.bunch.service.BunchSocialService
-import com.bunch.feed.domain.FeedContentHideRepository
-import com.bunch.feed.domain.FeedContentKind
 import com.bunch.global.exception.ErrorCode
 import com.bunch.kok.dto.KokCardResponse
 import com.bunch.kok.service.KokService
@@ -17,8 +15,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
 @SpringBootTest
@@ -32,12 +28,6 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var content: BunchPublicService
-
-    @Autowired
-    private lateinit var hides: FeedContentHideRepository
-
-    @Autowired
-    private lateinit var transactions: PlatformTransactionManager
 
     @Autowired
     private lateinit var entityManagerFactory: EntityManagerFactory
@@ -205,7 +195,7 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `bilateral block and reporter or global content hiding never leak source metadata`() {
+    fun `blocks and global moderation hide source metadata while legacy reporter hides are ignored`() {
         val f = fixture()
         social.block(f.owner, f.sourceBunch, f.bunch)
         assertHidden(f)
@@ -214,10 +204,9 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
         social.block(f.actor, f.bunch, f.sourceBunch)
         assertHidden(f)
         jdbc.update("DELETE FROM bunch_blocks")
-        TransactionTemplate(transactions).execute {
-            hides.hideForReporter(FeedContentKind.BUNDLE, f.bundle, f.bunch)
-        }
-        assertHidden(f)
+        jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) " +
+            "VALUES ('BUNDLE',?,?,'LEGACY')", f.bundle, f.bunch)
+        assertVisible(f)
         jdbc.update("DELETE FROM feed_content_hides")
         assertVisible(f)
         jdbc.update(

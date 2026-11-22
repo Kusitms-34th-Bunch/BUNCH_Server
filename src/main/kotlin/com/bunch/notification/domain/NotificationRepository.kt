@@ -8,6 +8,12 @@ import org.springframework.data.jpa.repository.Query
 import java.time.Instant
 
 interface NotificationRepository : JpaRepository<Notification, Long> {
+    @Modifying(flushAutomatically = true)
+    @Query(value = """UPDATE notifications SET body = :body
+        WHERE type = 'SOCIAL_COMMENT_CREATED' AND target ->> 'commentId' = CAST(:commentId AS text)""",
+        nativeQuery = true)
+    fun redactCommentBody(commentId: Long, body: String): Int
+
     // Bound the SQL result before applying page offsets, even for an arbitrarily large page value.
     @Query(value = """SELECT * FROM notifications
         WHERE recipient_member_id = :memberId AND bunch_id = :bunchId AND created_at > :cutoff
