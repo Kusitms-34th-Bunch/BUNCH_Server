@@ -13,6 +13,7 @@ permissions:
 concurrency:
   group: bunch-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   changes:
@@ -22,6 +23,8 @@ jobs:
     outputs:
       app: ${{ steps.paths.outputs.app }}
       monitoring: ${{ steps.paths.outputs.monitoring }}
+      deploy_app: ${{ steps.paths.outputs.deploy_app }}
+      deploy_monitoring: ${{ steps.paths.outputs.deploy_monitoring }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +35,11 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          # This job has no environment: vars here are repository configuration variables.
+          REPO_DEPLOY_DEV_ENABLED: ${{ vars.DEPLOY_DEV_ENABLED }}
+          REPO_DEPLOY_PROD_ENABLED: ${{ vars.DEPLOY_PROD_ENABLED }}
+          REPO_MONITORING_DEPLOY_ENABLED: ${{ vars.MONITORING_DEPLOY_ENABLED }}
         run: |
           set -euo pipefail
           app=false
@@ -48,7 +56,8 @@ jobs:
             git diff --no-renames --name-only -z "$BASE" "$HEAD" > "$changed"
             while IFS= read -r -d '' path; do
               case "$path" in
-                .github/workflows/ci.yml|deploy/compose.yaml|deploy/.env.example)
+                *.md) ;;
+                .github/workflows/ci.yml|deploy/compose.yaml|deploy/.env.example|deploy/environments/*|deploy/*.sh|deploy/*.py|deploy/tests/*)
                   app=true
                   monitoring=true
                   ;;
@@ -63,6 +72,21 @@ jobs:
           fi
           echo "app=$app" >> "$GITHUB_OUTPUT"
           echo "monitoring=$monitoring" >> "$GITHUB_OUTPUT"
+          deploy_app=false
+          deploy_monitoring=false
+          if [[ "$EVENT_NAME" == 'push' ]]; then
+            if [[ "$app" == 'true' ]] &&
+               { [[ "$REF" == 'refs/heads/dev' && "$REPO_DEPLOY_DEV_ENABLED" == 'true' ]] ||
+                 [[ "$REF" == 'refs/heads/main' && "$REPO_DEPLOY_PROD_ENABLED" == 'true' ]]; }; then
+              deploy_app=true
+            fi
+            if [[ "$REF" == 'refs/heads/main' && "$monitoring" == 'true' &&
+                  "$REPO_MONITORING_DEPLOY_ENABLED" == 'true' ]]; then
+              deploy_monitoring=true
+            fi
+          fi
+          echo "deploy_app=$deploy_app" >> "$GITHUB_OUTPUT"
+          echo "deploy_monitoring=$deploy_monitoring" >> "$GITHUB_OUTPUT"
 
   build:
     needs: changes
@@ -113,65 +137,12 @@ jobs:
       - name: Validate monitoring configuration
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: |
-          cp deploy/.env.example deploy/.env
           bash deploy/monitoring/check.sh
       - name: Test Grafana and Loki with local HTTP stubs
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: python3 deploy/monitoring/smoke_test.py
-      - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
-        env:
-          IMAGE: ghcr.io/kusitms-34th-bunch/bunch_server:latest
-        run: |
-          docker build -t "$IMAGE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
-          docker push "$IMAGE"
-      - name: Deploy over SSH
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success'
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_CHANGED: ${{ needs.changes.outputs.app }}
-          MONITORING_CHANGED: ${{ needs.changes.outputs.monitoring }}
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y sshpass
-          install -m 700 -d ~/.ssh
-          target="$SSH_USER@$SSH_HOST"
-          ssh_options=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
-          sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" \
-            deploy/compose.yaml "$target:compose.yaml" 3<<< "$SSH_PASSWORD"
-          if [[ "$MONITORING_CHANGED" == 'true' ]]; then
-            sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" \
-              'set -eu; cd ~; mkdir -p monitoring' 3<<< "$SSH_PASSWORD"
-            sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" -r \
-              deploy/monitoring/. "$target:monitoring/" 3<<< "$SSH_PASSWORD"
-          fi
-          printf '%s' "$GITHUB_TOKEN" | sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" "
-            set -eu
-            cd ~
-            docker compose config --quiet
-            if [ '$APP_CHANGED' = 'true' ]; then
-              trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-              docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
-              docker compose pull app
-              docker compose up -d --no-deps app
-            fi
-            if [ '$MONITORING_CHANGED' = 'true' ]; then
-              docker compose pull alloy loki prometheus grafana
-              docker compose up -d --no-deps --force-recreate alloy loki prometheus grafana
-            fi
-          " 3<<< "$SSH_PASSWORD"
+      - name: Validate deployment contracts and release safety
+        run: bash deploy/check.sh
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,3 +150,91 @@ jobs:
           name: test-reports
           path: build/reports/tests/
           if-no-files-found: ignore
+
+  publish:
+    needs: [changes, build]
+    if: github.event_name == 'push' && needs.build.result == 'success' && needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      environment: ${{ steps.image.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Package verified source
+        run: ./gradlew bootJar
+      - name: Select immutable image tag
+        id: image
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$BRANCH" in
+            dev) environment=dev ;;
+            main) environment=prod ;;
+            *) exit 1 ;;
+          esac
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push immutable image tag
+        env:
+          ENVIRONMENT: ${{ steps.image.outputs.environment }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/kusitms-34th-bunch/bunch_server:$ENVIRONMENT-$GITHUB_SHA"
+          docker build -t "$image" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+          docker push "$image"
+
+  deploy:
+    needs: [changes, build, publish]
+    # Enable flags are captured in changes (no environment), so environment-scoped
+    # variables cannot override the repository's deployment admission decision.
+    # One server job per run avoids sibling jobs replacing each other while pending.
+    if: >-
+      always() && !cancelled() && github.event_name == 'push' &&
+      needs.changes.result == 'success' && needs.build.result == 'success' &&
+      ((needs.publish.result == 'success' && needs.changes.outputs.deploy_app == 'true') ||
+       (needs.changes.outputs.deploy_monitoring == 'true' &&
+        (needs.publish.result == 'success' || needs.publish.result == 'skipped')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'prod' }}
+    concurrency:
+      group: bunch-server-deploy
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SSH transport
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sshpass
+          install -m 700 -d ~/.ssh
+      # Reuse the frozen repository decision after environment secrets become available.
+      - name: Deploy approved application and shared monitoring sequentially
+        env:
+          DEPLOY_ENV: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'prod' }}
+          DEPLOY_APP: ${{ needs.publish.result == 'success' && needs.changes.outputs.deploy_app == 'true' }}
+          DEPLOY_MONITORING: ${{ needs.changes.outputs.deploy_monitoring }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOY_APP" == 'true' ]]; then
+            bash deploy/ci-deploy.sh "$DEPLOY_ENV" "$GITHUB_SHA"
+          fi
+          if [[ "$DEPLOY_MONITORING" == 'true' ]]; then
+            bash deploy/ci-deploy.sh monitoring "$GITHUB_SHA"
+          fi

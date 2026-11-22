@@ -33,7 +33,7 @@ BUNCH_Server/
 ├── README.md / AGENTS.md / CLAUDE.md / CONTRIBUTING.md
 ├── .editorconfig / .gitattributes / .gitignore / .env.example
 ├── compose.yml             # 로컬 DB·Redis
-├── deploy/                 # 운영 Compose·모니터링 프로비저닝
+├── deploy/                 # 개발·운영 Compose·공용 모니터링
 ├── docs/
 │   ├── PRD.md
 │   ├── GROUND_RULES.md
@@ -271,18 +271,18 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 운영 Compose는 관리 포트를 공개하지 않는다. Alloy가 앱 요청 로그를 Loki로,
 Prometheus가 메트릭을 수집하고 Grafana 대시보드 하나에서 함께 조회한다.
 
-Discord 알림은 두 개다. 최근 1분 요청 종료 로그의 **5xx 한 건부터** 다음 10초 평가에서
+Discord 알림은 개발·운영 각각 두 개다. 최근 1분 요청 종료 로그의 **5xx 한 건부터** 다음 10초 평가에서
 알리며 복구 메시지는 보내지 않는다. 앱 메트릭 수집 중단은 1분 유지 후 알리고 복구도 보낸다.
 최초 묶음 대기는 0초, 지속 장애 반복은 5분이다. 로그 수집·초기 기동·전송 지연이 더해지므로
 요청 후 10초 내 수신 보장은 아니다. 로그·메트릭은 7일, Docker 로그는 `10m × 3`으로 제한한다.
-운영 환경변수는 `.env` 하나에 두고 Compose의 `env_file`로 읽는다.
-상세 조건·한계는 [모니터링 Spec](docs/specs/monitoring.md)을 따른다.
+개발·운영·공용 관측의 `.env`를 분리하고 서비스별 필요한 변수만 전달한다.
+환경 selector가 로그와 메트릭에 함께 적용된다. 상세 조건·한계는 [모니터링 Spec](docs/specs/monitoring.md)과
+[환경 분리 계약](docs/specs/environments.md), [공용 모니터링 안내](deploy/monitoring/README.md)를 따른다.
 
 모니터링 설정을 바꿀 때는 Docker가 실행된 환경에서 다음을 검증한다.
 로컬 HTTP stub는 실제 Grafana/Loki를 사용하며 운영 Discord에 전송하지 않는다.
 
 ```bash
-test -f deploy/.env || cp deploy/.env.example deploy/.env
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 ```
@@ -297,7 +297,8 @@ python3 deploy/monitoring/smoke_test.py
 | [온보딩 Spec](docs/specs/onboarding.md) | 번치 생성·초대 발급·참여·웹 초대장 |
 | [로그인·온보딩 API 계약](docs/specs/login-onboarding-api.md) | 이슈 #5 확정 정책·API·데이터 보장 |
 | [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
-| [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
+| [배포 안내](deploy/README.md) | 개발·운영·공용 관측 이전·CI 분기·복구 |
+| [환경 분리 계약](docs/specs/environments.md) | 프로젝트·볼륨·네트워크·키 격리와 전환 순서 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
 | [번들 API 계약](docs/specs/bundle-api.md) | 번들 REST·STOMP 클라이언트 요청·응답·복구 프로토콜 |
 | [발행본 상세·원자적 수정](docs/specs/published-bundle-edit.md) | 발행 사진·참여자 표시·OWNER 일괄 저장·삭제 |
@@ -320,10 +321,26 @@ python3 deploy/monitoring/smoke_test.py
 CI는 dev 대상 PR과 dev/main push에서 빌드·테스트한다.
 문서만 변경하면 변경 확인만 수행하고 빌드·테스트·배포를 건너뛴다.
 CI는 앱과 모니터링 변경을 각각 감지한다. 공통 Compose·환경 예제·CI 변경은 둘 다 검증한다.
-main push는 앱 변경일 때만 GHCR `latest` 게시와 앱 교체를 수행한다.
-모니터링 변경은 네 모니터링 서비스만 함께 재생성하며, 모니터링 단독 변경은 앱을 재시작하지 않는다.
-Compose 파일과 변경된 모니터링 파일은 SSH 사용자 홈(`~`)에 복사하며 `.env`는 보존한다.
+dev/main push는 앱 변경일 때 환경별 SHA 태그를 GHCR에 게시하며, 준비한 환경만 digest로 고정해 배포한다.
+공용 모니터링은 main에서 별도 활성화했을 때만 네 서비스를 함께 재생성한다. 모니터링 단독 변경은 앱을 재시작하지 않는다.
+후보 설정을 환경별 디렉터리에 전송·검증한 뒤 반영하며 서버 `.env`는 보존한다.
 앱 단독 변경은 모니터링 파일을 건드리지 않는다. DB·Redis·Tunnel은 자동 갱신하지 않는다.
 서버 Compose·환경 변수·SSH Secrets 준비는 [배포 안내](deploy/README.md)를 따른다.
 원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
 확정 마감일은 없다.
+
+## 개발·운영 서버 분리 (#212)
+
+단일 가비아 서버의 Linux `bunch` 계정 아래 `~/dev`, `~/prod`, `~/monitoring`을 사용한다.
+`dev`는 개발 `dev.bunch.kr`, `main`은 운영 `api.bunch.kr`에 배포한다. 기존 홈에서 실행 중인 환경은 개발이며,
+프로젝트 `bunch`와 `bunch-pgdata` / `bunch-redis-data`를 보존한다. 운영은 새 볼륨과 빈 DB로 시작한다.
+
+[환경 분리 계약](docs/specs/environments.md)과 [이전·배포·복구 절차](deploy/README.md)를 따른다.
+기존 홈 자동 배포 중지 → 백업/복구 시험 → 개발 경로 이전 → dev 도메인과 테스트 앱 API/WebSocket 확인 →
+개발 R2 전환(#213) → 독립 운영 검증 → api 운영 전환 → 환경별 자동 배포 활성화 순서다.
+준비 표식과 활성화 변수 없이 새 자동 배포는 실행되지 않는다. 앱은 환경별 digest로 고정하고 관측은 한 세트로 환경 라벨을 구분한다.
+
+R2 배포 변수는 `R2_ENDPOINT`(버킷명 제외), `R2_BUCKET`(`bunch-dev` / `bunch-prod`),
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`다. 서명 기본 만료는 #213 코드의 1800초다.
+위 Cloudinary 설정 설명은 #213 적용 전의 현재 동작이며, 기존 키 제거는 R2 코드·데이터 검증 이후에 진행한다.
+실제 서버·도메인·iOS 연동 적용 완료 여부는 별도 검증한다.

@@ -3,14 +3,27 @@ discovery.docker "app" {
   host = "unix:///var/run/docker.sock"
   filter {
     name   = "label"
-    values = ["com.docker.compose.project=bunch", "com.docker.compose.service=app"]
+    values = ["com.docker.compose.service=app", "kr.bunch.environment"]
+  }
+}
+
+discovery.relabel "app" {
+  targets = discovery.docker.app.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_kr_bunch_environment"]
+    regex         = "dev|prod"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_kr_bunch_environment"]
+    target_label  = "environment"
   }
 }
 
 loki.source.docker "app" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.app.targets
-  labels     = { service = "bunch", environment = sys.env("MONITORING_ENVIRONMENT") }
+  targets    = discovery.relabel.app.output
+  labels     = { service = "bunch" }
   forward_to = [loki.process.app.receiver]
 }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Real monitoring smoke test (~5 minutes). Requires Python 3 and Docker Compose.
+"""Real two-environment monitoring smoke test (~8 minutes). Requires Python 3 and Docker Compose.
 
 Uses production provisioning/timings and isolated storage; only the Prometheus
 scrape target is replaced. Discord requests terminate at a local HTTP stub.
-Alloy collection and the application's metrics/log production are tested separately.
+Alloy collects two isolated Docker fixtures; the application itself is tested separately.
 """
 
 import base64
@@ -119,6 +119,12 @@ def main():
     stub.discord_status = 204
     stub.deliveries = []
     threading.Thread(target=stub.serve_forever, daemon=True).start()
+    prod_stub = ThreadingHTTPServer(("0.0.0.0", 0), Stub)
+    prod_stub.lock = threading.Lock()
+    prod_stub.metrics_up = True
+    prod_stub.discord_status = 204
+    prod_stub.deliveries = []
+    threading.Thread(target=prod_stub.serve_forever, daemon=True).start()
 
     # Preserve Docker connectivity, but never let shell variables override the
     # env file (especially image references or notification settings).
@@ -127,7 +133,7 @@ def main():
         "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "XDG_RUNTIME_DIR",
     }}
     try:
-        with tempfile.TemporaryDirectory(prefix=run_id + "-") as directory:
+        with tempfile.TemporaryDirectory(prefix=run_id + "-", dir=ROOT) as directory:
             fixture = Path(directory)
             fixture.chmod(0o755)
             shutil.copytree(ROOT / "grafana", fixture / "grafana")
@@ -140,29 +146,47 @@ def main():
             require(notification_urls == ["${DISCORD_WEBHOOK_URL}"] * 2,
                     "Both Discord destinations must use the local-only injected webhook")
             shutil.copyfile(ROOT / "loki.yaml", fixture / "loki.yaml")
-            target = "host.docker.internal:" + str(stub.server_port)
-            prometheus, replacements = re.subn(
-                r"(?<![\w.-])app:8081(?![\w.-])", target,
-                (ROOT / "prometheus.yaml").read_text(),
-            )
-            require(replacements == 1, "Expected exactly one production scrape target app:8081")
+            targets = {"dev": "host.docker.internal:" + str(stub.server_port),
+                       "prod": "host.docker.internal:" + str(prod_stub.server_port)}
+            target = targets["dev"]
+            prometheus = (ROOT / "prometheus.yaml").read_text()
+            for environment in ("dev", "prod"):
+                prometheus, replacements = re.subn(
+                    r"(?<![\w.-])" + environment + r"-app:8081(?![\w.-])",
+                    targets[environment], prometheus,
+                )
+                require(replacements == 1, "Expected one scrape target per environment")
             (fixture / "prometheus.yaml").write_text(prometheus)
+            alloy = (ROOT / "config.alloy").read_text().replace(
+                '"kr.bunch.environment"]', '"kr.bunch.environment", "' + label + '"]')
+            require(label in alloy, "Alloy fixture must discover only this test's containers")
+            (fixture / "config.alloy").write_text(alloy)
             production = json.loads((fixture / "grafana/provisioning/alerting/rules.json").read_text())
             require(len(production["groups"]) == 1, "Expected one production alert group")
             group = production["groups"][0]
             rules = {rule["uid"]: rule for rule in group["rules"]}
-            require(set(rules) == {"bunch-http-5xx", "bunch-app-down"}, "Unexpected rule UIDs")
+            require(set(rules) == {kind + "-" + env for env in ("dev", "prod")
+                                   for kind in ("bunch-http-5xx", "bunch-app-down")}, "Unexpected rule UIDs")
+            require(production.get("deleteRules") == [
+                {"orgId": 1, "uid": "bunch-http-5xx"}, {"orgId": 1, "uid": "bunch-app-down"}],
+                "Legacy rule cleanup must prevent duplicate alerts on reused Grafana storage")
             require(group["interval"] == "10s", "Production evaluation must be 10s")
-            require(rules["bunch-http-5xx"]["for"] == "0s", "5xx must fire immediately")
-            require(rules["bunch-app-down"]["for"] == "1m", "App down must require 1m")
-            expr = rules["bunch-http-5xx"]["data"][0]["model"]["expr"]
+            for env in ("dev", "prod"):
+                require(rules["bunch-http-5xx-" + env]["for"] == "0s", "5xx must fire immediately")
+                require(rules["bunch-app-down-" + env]["for"] == "1m", "App down must require 1m")
+                for kind in ("bunch-http-5xx", "bunch-app-down"):
+                    rule = rules[kind + "-" + env]
+                    require(rule["labels"]["environment"] == env
+                            and 'environment="' + env + '"' in rule["data"][0]["model"]["expr"],
+                            "Environment selector/label missing")
+            expr = rules["bunch-http-5xx-dev"]["data"][0]["model"]["expr"]
             require("[1m]" in expr and "vector(0)" in expr, "Production 5xx window/fallback changed")
 
             images = {}
-            for service in ("loki", "prometheus", "grafana"):
+            for service in ("loki", "prometheus", "grafana", "alloy"):
                 images[service] = docker(
-                    "compose", "--project-name", run_id, "--env-file", str(ROOT.parent / ".env"),
-                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--images", service,
+                    "compose", "--project-name", run_id, "--env-file", str(ROOT / ".env.example"),
+                    "-f", str(ROOT / "compose.yaml"), "config", "--images", service,
                     env=compose_env,
                 )
                 require(re.fullmatch(r"[\w./-]+:[\w.-]+", images[service]) is not None
@@ -177,19 +201,28 @@ def main():
                 volume = name + "-data"
                 docker("volume", "create", "--label", label, volume)
                 volumes.append(volume)
-                storage = {"loki": "/loki", "prometheus": "/prometheus", "grafana": "/var/lib/grafana"}
+                storage = {"loki": "/loki", "prometheus": "/prometheus",
+                           "grafana": "/var/lib/grafana", "alloy": "/var/lib/alloy/data"}
                 args = ["run", "-d", "--name", name, "--label", label, "--network", run_id,
                         "--network-alias", service, "--add-host", "host.docker.internal:host-gateway",
-                        "-p", "127.0.0.1::" + str(port), "-v", volume + ":" + storage[service]]
+                        "-v", volume + ":" + storage[service]]
+                if port:
+                    args += ["-p", "127.0.0.1::" + str(port)]
+                resources = {"alloy": ("0.15", "192m"), "loki": ("0.20", "320m"),
+                             "prometheus": ("0.15", "256m"), "grafana": ("0.25", "320m")}
+                args += ["--cpus", resources[service][0], "--memory", resources[service][1]]
+                if service == "alloy":
+                    args += ["--user", "0", "-v", "/var/run/docker.sock:/var/run/docker.sock:ro"]
                 for source, destination in mounts:
                     args += ["-v", str(fixture / source) + ":" + destination + ":ro"]
                 for value in environment:
                     args += ["-e", value]
                 containers.append(name)  # Also clean up if Docker times out after creation.
                 docker(*args, images[service], *arguments)
-                binding = docker("port", name, str(port) + "/tcp")
-                require(binding.startswith("127.0.0.1:"), "Test ports must bind localhost only")
-                urls[service] = "http://" + binding
+                if port:
+                    binding = docker("port", name, str(port) + "/tcp")
+                    require(binding.startswith("127.0.0.1:"), "Test ports must bind localhost only")
+                    urls[service] = "http://" + binding
 
             print("Starting isolated production Loki, Prometheus and Grafana...", flush=True)
             start("loki", 3100, [("loki.yaml", "/etc/loki/config.yaml")],
@@ -205,7 +238,7 @@ def main():
                 ("grafana/dashboards", "/var/lib/grafana/dashboards"),
             ], environment=[
                 "GF_SECURITY_ADMIN_USER=smoke", "GF_SECURITY_ADMIN_PASSWORD=" + password,
-                "GF_SERVER_ROOT_URL=http://localhost:3000/", "MONITORING_ENVIRONMENT=smoke",
+                "GF_SERVER_ROOT_URL=http://localhost:3000/",
                 "DISCORD_WEBHOOK_URL=" + webhook, "GF_USERS_ALLOW_SIGN_UP=false",
                 "GF_AUTH_ANONYMOUS_ENABLED=false", "GF_ANALYTICS_REPORTING_ENABLED=false",
                 "GF_ANALYTICS_CHECK_FOR_UPDATES=false", "GF_UNIFIED_ALERTING_MIN_INTERVAL=10s",
@@ -214,19 +247,21 @@ def main():
             def grafana(path):
                 return request(urls["grafana"] + path, auth="smoke:" + password)
 
-            def prom_value():
-                result = request(urls["prometheus"] + "/api/v1/query?" + urlencode({"query": 'up{job="bunch"}'}))
+            def prom_value(environment="dev"):
+                query = 'up{job="bunch",environment="' + environment + '"}'
+                result = request(urls["prometheus"] + "/api/v1/query?" + urlencode({"query": query}))
                 values = result["data"]["result"]
                 return float(values[0]["value"][1]) if values else None
 
-            def log_count():
-                result = request(urls["loki"] + "/loki/api/v1/query?" + urlencode({"query": expr}))
+            def log_count(environment="dev"):
+                query = rules["bunch-http-5xx-" + environment]["data"][0]["model"]["expr"]
+                result = request(urls["loki"] + "/loki/api/v1/query?" + urlencode({"query": query}))
                 return float(result["data"]["result"][0]["value"][1])
 
-            def push(*lines):
+            def push(*lines, environment="dev"):
                 now = time.time_ns()
                 request(urls["loki"] + "/loki/api/v1/push", {"streams": [{
-                    "stream": {"service": "bunch", "environment": "smoke"},
+                    "stream": {"service": "bunch", "environment": environment},
                     "values": [[str(now + index), line] for index, line in enumerate(lines)],
                 }]})
 
@@ -255,7 +290,7 @@ def main():
                     for uid in rules:
                         current = status(uid)
                         require(current["state"] == "inactive", "Unexpected alert state: " + uid)
-                    evaluations.add(status("bunch-http-5xx")["lastEvaluation"])
+                    evaluations.add(status("bunch-http-5xx-dev")["lastEvaluation"])
                     require(not deliveries(), "Unexpected Discord delivery during normal/no traffic")
                     # Initial scheduling/API latency can leave only two samples
                     # in 24s. Keep checking state/delivery while waiting for three.
@@ -265,7 +300,7 @@ def main():
                 require(len(evaluations) >= 3, "Must observe at least two 10s evaluation transitions")
 
             wait_for("Grafana ready", lambda: grafana("/api/health"), 120)
-            wait_for("healthy real Prometheus scrape", lambda: prom_value() == 1)
+            wait_for("healthy real Prometheus scrape", lambda: prom_value() == 1 and prom_value("prod") == 1)
             loaded = grafana("/api/v1/provisioning/alert-rules")
             require({rule["uid"] for rule in loaded} == set(rules), "Loaded rule UIDs differ")
             for rule in loaded:
@@ -289,11 +324,52 @@ def main():
                             for route in policy["routes"]), "Missing policy route: " + kind)
             for uid in ("loki", "prometheus"):
                 require(grafana("/api/datasources/uid/" + uid)["uid"] == uid, "Datasource UID differs")
-            require(grafana("/api/dashboards/uid/bunch")["dashboard"]["uid"] == "bunch", "Dashboard missing")
+            dashboard = grafana("/api/dashboards/uid/bunch")["dashboard"]
+            require(dashboard["uid"] == "bunch", "Dashboard missing")
+            require(dashboard["templating"]["list"][0]["query"] == "dev,prod", "Environment choices differ")
+            for panel in dashboard["panels"]:
+                for query in panel["targets"]:
+                    require('environment="$environment"' in query["expr"],
+                            "Dashboard must filter logs AND metrics by environment")
             print("PASS loaded production rules, contacts, policies, datasources and dashboard", flush=True)
 
             wait_for("initial normal evaluations", lambda: all(status(uid)["state"] == "inactive" for uid in rules))
             observe_normal(24)
+            # Real Docker discovery/relabel path. Filtered to exact unique smoke label,
+            # never read unrelated apps. Containers only emit harmless 200/404 lines.
+            for environment in ("dev", "prod"):
+                name = run_id + "-logger-" + environment
+                containers.append(name)
+                line = (time.strftime("%Y-%m-%d %H:%M:%S") +
+                        " [traceId=smoke-trace] [eventId=smoke-event] [userId=] INFO " +
+                        "[REQ END] GET /alloy-" + environment + " status=200 duration=1ms")
+                docker("run", "-d", "--name", name, "--label", label,
+                       "--label", "com.docker.compose.service=app",
+                       "--label", "kr.bunch.environment=" + environment,
+                       "--network", run_id, "--cpus", "0.01", "--memory", "32m",
+                       "--entrypoint", "/bin/sh", images["grafana"],
+                       "-c", 'while true; do printf "%s\\n" "$1"; sleep 5; done', "sh", line)
+            start("alloy", None, [("config.alloy", "/etc/alloy/config.alloy")],
+                  ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"])
+
+            def collected(environment):
+                selector = '{service="bunch",environment="' + environment + '"}'
+                # Log query responses also expose structured metadata as labels;
+                # /series proves the stored index contains only the two stable labels.
+                series = request(urls["loki"] + "/loki/api/v1/series?" + urlencode({"match[]": selector}))
+                require(all(set(labels) == {"service", "environment"} for labels in series["data"]),
+                        "Only service/environment may be indexed")
+                query = selector + ' |= "/alloy-" | eventId="smoke-event"'
+                result = request(urls["loki"] + "/loki/api/v1/query_range?" + urlencode({"query": query}))
+                streams = result["data"]["result"]
+                values = [value for stream in streams for value in stream["values"]]
+                require(all("/alloy-" + environment in value[1] for value in values),
+                        "Alloy assigned a log to the wrong environment")
+                return series["data"] and values
+
+            wait_for("real Alloy dev/prod labels and structured metadata",
+                     lambda: collected("dev") and collected("prod"), 100)
+            print("PASS real Alloy Docker label relabeling, environment isolation and structured metadata", flush=True)
             push("INFO [REQ END] GET /smoke status=200 duration=1ms",
                  "WARN [REQ END] GET /smoke status=404 duration=1ms",
                  "WARN [REQ END] GET /smoke status=429 duration=1ms",
@@ -306,20 +382,30 @@ def main():
             first = time.monotonic()
             push("WARN [REQ END] GET /smoke status=503 duration=1ms")
             wait_for("first single 5xx visible in Loki", lambda: log_count() == 1, 15)
-            title = rules["bunch-http-5xx"]["title"]
+            title = rules["bunch-http-5xx-dev"]["title"]
             sent = wait_for("single first 5xx Discord delivery within a few evaluations",
                             lambda: deliveries(title, True), 35)
             require(len(sent) == 1 and sent[0][0] - first < 35, "Single 5xx delivery missing/duplicated")
             message = json.dumps(sent[0][2], ensure_ascii=False)
             require("firing" in message and "최근 1분 5xx 건수: 1" in message
-                    and "smoke" in message and "/d/bunch/bunch" in message,
+                    and "dev" in message and "/d/bunch/bunch" in message
+                    and "var-environment=dev" in message,
                     "First 5xx notification content differs")
+            require(status("bunch-http-5xx-prod")["state"] == "inactive"
+                    and log_count("prod") == 0, "Dev 5xx leaked into prod")
+            require(not deliveries(rules["bunch-http-5xx-prod"]["title"]), "Prod was notified for dev 5xx")
+            push("WARN [REQ END] GET /smoke status=502 duration=1ms", environment="prod")
+            prod_title = rules["bunch-http-5xx-prod"]["title"]
+            wait_for("independent prod 5xx notification", lambda: deliveries(prod_title, True), 35)
+            require(log_count() == 1 and log_count("prod") == 1, "Environment counts were aggregated")
+            require("var-environment=prod" in json.dumps(deliveries(prod_title, True)[0][2], ensure_ascii=False),
+                    "Prod message environment missing")
             push("ERROR [REQ END] GET /smoke status=500 duration=1ms")
             wait_for("two actual Loki failures", lambda: log_count() == 2, 10)
             evaluations = set()
             deadline = time.monotonic() + 24
             while time.monotonic() < deadline:
-                current = status("bunch-http-5xx")
+                current = status("bunch-http-5xx-dev")
                 require(current["state"] == "firing", "5xx should remain firing")
                 evaluations.add(current["lastEvaluation"])
                 require(len(deliveries(title)) == 1, "Count 1 -> 2 resent every evaluation")
@@ -327,8 +413,10 @@ def main():
             require(len(evaluations) >= 3, "Duplicate suppression needs >=2 evaluation transitions")
             print("PASS first single 5xx delivered; count 1 -> 2 suppressed across >=2 evaluations", flush=True)
             wait_for("5xx window expired", lambda: log_count() == 0, 80)
-            wait_for("5xx returned normal", lambda: status("bunch-http-5xx")["state"] == "inactive", 30)
+            wait_for("5xx returned normal", lambda: status("bunch-http-5xx-dev")["state"] == "inactive", 30)
+            wait_for("prod 5xx returned normal", lambda: status("bunch-http-5xx-prod")["state"] == "inactive", 80)
             time.sleep(12)
+            require(len(deliveries(prod_title)) == 1, "Prod 5xx resolved/repeated unexpectedly")
             require(len(deliveries(title)) == 1, "5xx sent an unwanted resolved message")
             print("PASS quiet 5xx recovery sends no resolved notification", flush=True)
 
@@ -338,18 +426,20 @@ def main():
                 stub.metrics_up = False
                 stub.discord_status = 500
             wait_for("real Prometheus up=0", lambda: prom_value() == 0, 35)
-            down_title = rules["bunch-app-down"]["title"]
-            wait_for("app-down pending", lambda: status("bunch-app-down")["state"] == "pending", 25)
+            down_title = rules["bunch-app-down-dev"]["title"]
+            wait_for("app-down pending", lambda: status("bunch-app-down-dev")["state"] == "pending", 25)
             pending_since = time.monotonic()
             while time.monotonic() - pending_since < 50:
                 require(not deliveries(down_title), "App down sent before its 1m pending period")
+                require(status("bunch-app-down-prod")["state"] == "inactive"
+                        and prom_value("prod") == 1, "Dev outage affected prod")
                 time.sleep(2)
             failed = wait_for("local Discord HTTP 500 failure", lambda: deliveries(down_title, False), 55)
             require(failed[0][0] - pending_since >= 55, "App down did not preserve production 1m pending")
-            require(status("bunch-app-down")["state"] == "firing", "Send failure changed evaluation state")
-            previous_evaluation = status("bunch-app-down")["lastEvaluation"]
+            require(status("bunch-app-down-dev")["state"] == "firing", "Send failure changed evaluation state")
+            previous_evaluation = status("bunch-app-down-dev")["lastEvaluation"]
             wait_for("evaluation continues despite Discord failure",
-                     lambda: status("bunch-app-down")["lastEvaluation"] != previous_evaluation, 20)
+                     lambda: status("bunch-app-down-dev")["lastEvaluation"] != previous_evaluation, 20)
             require(not deliveries(down_title, True), "Stub failure was incorrectly treated as success")
             with stub.lock:
                 stub.discord_status = 204
@@ -362,9 +452,23 @@ def main():
             wait_for("app-down resolved delivery", lambda: any(
                 "resolved" in json.dumps(item[2], ensure_ascii=False)
                 for item in deliveries(down_title, True)), 45)
-            require(status("bunch-app-down")["state"] == "inactive", "App-down failed to recover")
+            require(status("bunch-app-down-dev")["state"] == "inactive", "App-down failed to recover")
             require(len(deliveries(title)) == 1, "Unexpected late 5xx resolved/repeated delivery")
-            print("PASS app-down recovery sends resolved; monitoring smoke test passed", flush=True)
+            require(not deliveries(rules["bunch-app-down-prod"]["title"]), "Prod notified during dev outage")
+            print("PASS dev app-down recovery sends resolved; prod stayed healthy", flush=True)
+            with prod_stub.lock:
+                prod_stub.metrics_up = False
+            wait_for("independent prod scrape outage", lambda: prom_value("prod") == 0, 35)
+            prod_down_title = rules["bunch-app-down-prod"]["title"]
+            wait_for("prod app-down notification", lambda: deliveries(prod_down_title, True), 110)
+            require(status("bunch-app-down-dev")["state"] == "inactive" and prom_value() == 1,
+                    "Prod outage affected recovered dev")
+            with prod_stub.lock:
+                prod_stub.metrics_up = True
+            wait_for("prod recovery delivery", lambda: any(
+                "resolved" in json.dumps(item[2], ensure_ascii=False)
+                for item in deliveries(prod_down_title, True)), 55)
+            print("PASS independent prod app-down/recovery; two-environment monitoring smoke passed", flush=True)
     finally:
         # Exact generated names only: no compose down, prune, or shared volumes.
         cleanup_failed = False
@@ -380,6 +484,8 @@ def main():
                 cleanup_failed = True
         stub.shutdown()
         stub.server_close()
+        prod_stub.shutdown()
+        prod_stub.server_close()
         require(not cleanup_failed, "Failed to clean up own Docker resources; prefix: " + run_id)
 
 

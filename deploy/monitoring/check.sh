@@ -1,23 +1,17 @@
 #!/usr/bin/env sh
 set -eu
 
-# CI prepares .env from the example; never render the interpolated configuration.
-deploy_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-compose() {
-  docker compose --project-name bunch-monitoring-check \
-    --env-file "$deploy_dir/.env" -f "$deploy_dir/compose.yaml" "$@"
-}
-
-compose config --quiet
-# These one-shot validators start no application, storage, or notification service.
-# Bind mounts avoid creating deployment data volumes during CI validation.
-docker run --rm -e MONITORING_ENVIRONMENT=test \
-  -v "$deploy_dir/monitoring/config.alloy:/etc/alloy/config.alloy:ro" \
-  "$(compose config --images alloy)" validate /etc/alloy/config.alloy
+monitoring_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Only the inert example is rendered; no local .env or shell secret overrides.
+python3 "$monitoring_dir/config_test.py"
+# These one-shot validators do not start the application or notifications.
 docker run --rm \
-  -v "$deploy_dir/monitoring/loki.yaml:/etc/loki/config.yaml:ro" \
-  "$(compose config --images loki)" -config.file=/etc/loki/config.yaml -verify-config=true
+  -v "$monitoring_dir/config.alloy:/etc/alloy/config.alloy:ro" \
+  grafana/alloy:v1.20.1 validate /etc/alloy/config.alloy
+docker run --rm \
+  -v "$monitoring_dir/loki.yaml:/etc/loki/config.yaml:ro" \
+  grafana/loki:3.7.8 -config.file=/etc/loki/config.yaml -verify-config=true
 docker run --rm --entrypoint /bin/promtool \
-  -v "$deploy_dir/monitoring/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro" \
-  "$(compose config --images prometheus)" check config /etc/prometheus/prometheus.yaml
+  -v "$monitoring_dir/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro" \
+  prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yaml
 printf '%s\n' 'Monitoring configuration checks passed.'
