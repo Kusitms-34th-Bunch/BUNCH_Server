@@ -11,7 +11,8 @@ data class NotificationTarget(
     val noticeId: Long? = null,
     val targetBunchId: Long? = null,
     val sourceBunchId: Long? = null,
-    val commentId: Long? = null
+    val commentId: Long? = null,
+    val parentCommentId: Long? = null
 )
 
 data class NotificationItem(

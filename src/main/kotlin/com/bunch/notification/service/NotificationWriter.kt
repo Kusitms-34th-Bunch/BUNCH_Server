@@ -247,6 +247,7 @@ class NotificationWriter(
         actorId: Long,
         actorNickname: String,
         content: String,
+        parentCommentId: Long?,
         parentAuthorId: Long?,
         parentBunchId: Long?,
         now: Instant
@@ -279,7 +280,8 @@ class NotificationWriter(
                     bundleId = bundle.id,
                     targetBunchId = bundle.bunchId,
                     sourceBunchId = sourceBunch.id,
-                    commentId = commentId
+                    commentId = commentId,
+                    parentCommentId = parentCommentId
                 ),
                 createdAt = now
             )

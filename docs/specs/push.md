@@ -95,7 +95,7 @@ V15는 다음 세 테이블을 추가한다. 기존 `notifications`를 포함해
 | --- | --- |
 | `push_devices` | bigint identity PK; installation UUID UNIQUE; member FK CASCADE; sid UUID; environment/topic; AES-256-GCM token BYTEA; SHA-256 hash CHAR(64); authorization; registered_at |
 | `push_preferences` | member PK/FK CASCADE; enabled; 카테고리 JSONB(V35, 없는 키는 켜짐); 예전 종류별 override JSONB(V15, 더 이상 읽지 않음); updated_at |
-| `push_jobs` | UUID PK; device FK SET NULL; recipient member FK CASCADE; sid; bunch ID(의도적으로 FK 없음); notification FK SET NULL; dedupe/type/payload JSONB/status/attempts/available_at/expires_at/sent_at/last_error_code/created_at |
+| `push_jobs` | UUID PK; device FK SET NULL; recipient member FK CASCADE; sid; bunch ID(의도적으로 FK 없음); nullable notification FK SET NULL; dedupe/type/payload JSONB/status/attempts/available_at/expires_at/sent_at/last_error_code/created_at |
 
 기기는 `(environment,topic,token_hash)` UNIQUE, `(member_id,session_id)` 인덱스를 가진다.
 job은 `(recipient_member_id,device_id,dedupe_key)` UNIQUE와 `(status,available_at,id)` 인덱스를 가진다.
@@ -111,6 +111,8 @@ writer는 기존 업무 트랜잭션을 요구하며 실패하면 모두 롤백�
 상태·시도 횟수·재시도 시각을 이전 값으로 덮어쓰지 않는다.
 
 내보내짐(14)·번치 삭제(15)는 inbox 없이 detached job만 저장한다. 번치 FK가 없으므로 삭제 뒤에도 안내를 전송할 수 있다.
+이 job의 `push_jobs.notification_id`와 payload의 top-level `notificationId`는 모두 null이고,
+`eventId`는 다른 job과 마찬가지로 job UUID다.
 이 producer 및 재참여 시 이전 removal job 취소는 [이탈 #25](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/25)·
 [삭제 #50](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/50)의 실제 업무 트랜잭션에서 연결한다.
 공동 관리자/인계(11~13)와 공개 전환(16)은 각 기능의 실제 notification 저장 지점에 연결했다.
@@ -141,17 +143,28 @@ JDK 21 HTTP/2와 기존 JWT 도구로 ES256 provider 인증을 사용한다. pro
 | 410 Unregistered / BadDeviceToken / DeviceTokenNotForTopic | 시도 당시 hash·등록 시각이 여전히 같은 기기만 삭제·pending 취소; 새 등록은 보존 |
 | 429 / 5xx / 연결 실패·timeout | 15분 후 재시도; 더 긴 Retry-After 존중; 총 5회·발생 후 24시간 이내 |
 | ExpiredProviderToken | 갱신 가능한 시점에 재서명/재시도; 기기 삭제 금지 |
+| `PayloadTooLarge` | body를 줄여도 payload의 metadata/title만으로 4096 bytes를 초과하면 해당 job만 `FAILED` 처리한다. attempt를 증가시키지 않고 같은 queue의 다른 job을 막지 않는다 |
 | 그 외 provider 인증·topic·payload·4xx | FAILED; 같은 payload 무한 재시도 금지 |
 | Redis 장애 | 15분 후 자격 재확인; 실제 APNs 미시도는 attempts를 소모하지 않음 |
 | 만료·횟수 소진 | FAILED |
 
-payload는 UTF-8 JSON 4096 bytes 이하, `aps.alert.title/body`, `sound:default`, `eventId/type/target`이다.
+payload는 UTF-8 JSON 4096 bytes 이하, `aps.alert.title/body`, `sound:default`, `eventId/type/target/notificationId`다.
+top-level `notificationId`는 persisted inbox의 `notifications.id`이며 nullable이다. 일반 inbox job은
+해당 ID를 담고, detached `MEMBER_REMOVED`·`BUNCH_DELETED` job은 null을 담는다. `eventId`는
+항상 job UUID이며 APNs `apns-id`와 같다. target의 `bunchId`는 수신 inbox 번치이고 번들 소유 번치는
+`targetBunchId ?? bunchId`다. root/non-comment target의 `parentCommentId`는 null이며 답글만
+원댓글 ID를 담는다. 구버전 JSON에서 없는 nullable 필드는 null로 읽는다.
 제목은 `[수신 번치 이름] 제목`, 이미 이름을 포함한 14/15는 중복 접두사를 붙이지 않는다.
 소셜 댓글 설명은 줄바꿈을 공백으로 바꾸고 50 grapheme 뒤 `…`로 자른다. 총 byte 제한 초과 시 본문을 더 줄인다.
 target은 내부 ID만 포함하며 실제 열기 시 현재 접근 권한을 재검사한다.
 
+앱이 푸시를 눌러 inbox를 열 때 `target.bunchId`와 top-level `notificationId`로
+`POST /api/v1/bunches/{bunchId}/notifications/{notificationId}/open`을 호출한다.
+open 응답의 `available`·`target`이 권위 있는 최신 결과이며, unavailable이어도 read는 저장된다.
+`notificationId:null`인 detached push에는 이 deep link를 호출하지 않는다.
+
 ```json
-{"aps":{"alert":{"title":"[퇴근런클럽] 새 멤버가 들어왔어요","body":"민수님이 번치에 참여했어요."},"sound":"default"},"eventId":"c340f5c9-1208-4692-a782-cebf4a76b316","type":"MEMBER_JOINED","target":{"kind":"MEMBERS","bunchId":42}}
+{"aps":{"alert":{"title":"[퇴근런클럽] 새 댓글이 있어요","body":"답글 내용"},"sound":"default"},"eventId":"c340f5c9-1208-4692-a782-cebf4a76b316","notificationId":801,"type":"SOCIAL_COMMENT_CREATED","target":{"kind":"BUNDLE_COMMENTS","bunchId":42,"bundleId":900,"targetBunchId":7,"sourceBunchId":12,"commentId":1002,"parentCommentId":1001}}
 ```
 
 ## 환경·검증

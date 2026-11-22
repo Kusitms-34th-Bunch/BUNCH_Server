@@ -95,7 +95,8 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
             .containsOnly(owner)
         assertThat(jdbc.queryForObject(
             "SELECT count(*) FROM push_jobs job JOIN notifications n ON job.notification_id = n.id " +
-                "WHERE job.payload ->> 'eventId' = job.id::text AND n.type = 'MEMBER_JOINED'",
+                "WHERE job.payload ->> 'eventId' = job.id::text " +
+                    "AND job.payload ->> 'notificationId' = n.id::text AND n.type = 'MEMBER_JOINED'",
             Long::class.java
         )).isEqualTo(2)
     }
@@ -251,6 +252,11 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
         assertThat(jobs.single()["status"]).isEqualTo("PENDING")
         assertThat(jobs.single()["available_at"]).isEqualTo(firstJob["available_at"])
         assertThat(jobs.single()["payload"].toString()).contains("사진 2장")
+        assertThat(jdbc.queryForObject(
+            "SELECT payload ->> 'notificationId' FROM push_jobs WHERE notification_id = ?",
+            Long::class.java,
+            activity.id
+        )).isEqualTo(activity.id)
         assertThat(jdbc.queryForObject(
             "SELECT payload -> 'aps' -> 'alert' ->> 'title' FROM push_jobs WHERE notification_id = ?",
             String::class.java,
