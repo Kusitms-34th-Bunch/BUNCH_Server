@@ -66,7 +66,7 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `feed excludes every active membership while detail uses current bunch internal rights`() {
+    fun `feed excludes only current bunch while detail uses current bunch internal rights`() {
         val actor = member()
         val first = publicBunch(actor)
         val second = publicBunch(actor)
@@ -79,12 +79,14 @@ class FeedAccessIntegrationTest : BunchIntegrationSupport() {
         val viewer = access.viewer(actor)
         assertThat(viewer.currentBunchId).isEqualTo(second)
         assertThat(access.visibleBundleIds(actor, listOf(firstBundle, secondBundle, otherBundle)))
-            .containsExactly(otherBundle)
+            .containsExactlyInAnyOrder(firstBundle, otherBundle)
         assertThat(access.visibleBundleIds(actor, listOf(firstBundle, secondBundle), forFeed = false))
             .containsExactlyInAnyOrder(firstBundle, secondBundle)
         assertThat(access.readPublishedBundle(actor, privateBundle).id).isEqualTo(privateBundle)
         assertThat(access.requireInteraction(actor, privateBundle).actor.bunch.id).isEqualTo(second)
         selectCurrent(actor, first)
+        assertThat(access.visibleBundleIds(actor, listOf(firstBundle, secondBundle, otherBundle)))
+            .containsExactlyInAnyOrder(secondBundle, otherBundle)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { access.readPublishedBundle(actor, privateBundle) }
         jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ?", second)
         assertThat(access.visibleBundleIds(actor, listOf(secondBundle))).containsExactly(secondBundle)
