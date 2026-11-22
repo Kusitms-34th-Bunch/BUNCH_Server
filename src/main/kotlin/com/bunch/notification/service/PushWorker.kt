@@ -7,6 +7,8 @@ import com.bunch.bundle.domain.BundleCommentRepository
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
+import com.bunch.global.exception.BusinessException
+import com.bunch.global.exception.ErrorCode
 import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.member.domain.AccountStatus
 import com.bunch.member.domain.MemberRepository
@@ -48,6 +50,7 @@ class PushWorker(
     private val apns: ApnsClient,
     private val clock: Clock,
     private val publishedAccess: PublishedNotificationAccess,
+    private val payloads: PushPayloadFactory,
     transactionManager: PlatformTransactionManager
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -125,6 +128,14 @@ class PushWorker(
         }
         if (!sessionActive) {
             cancel(job, "SessionEnded")
+            return null
+        }
+        try {
+            job.payload = payloads.fitForDelivery(job.payload)
+        } catch (ex: BusinessException) {
+            if (ex.errorCode != ErrorCode.INVALID_INPUT) throw ex
+            job.status = PushJobStatus.FAILED
+            job.lastErrorCode = "PayloadTooLarge"
             return null
         }
         job.attempts++

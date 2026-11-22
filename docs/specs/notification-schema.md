@@ -31,7 +31,7 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 | `type varchar(40)` | 아래 21개 enum; DB CHECK 유지 |
 | `dedupe_key varchar(200)` | 수신자별 업무 회차 식별자 |
 | `title text`, `body text` | 발생 당시 문구 snapshot. 운영 삭제된 소셜 댓글의 body는 위 미리보기 정리 계약 적용 |
-| `target jsonb` | `kind,bunchId,bundleId?,noticeId?,targetBunchId?` |
+| `target jsonb` | `kind,bunchId,bundleId?,noticeId?,targetBunchId?,sourceBunchId?,commentId?,parentCommentId?` |
 | `activity_data jsonb` | nullable; 행위자 snapshot·사진 수·첫 행위자 ID |
 | `group_until timestamptz` | nullable; `DRAFT_ACTIVITY`의 고정 10분 종료 시각 |
 | `created_at timestamptz` | 발생 시각, UTC |
@@ -40,6 +40,28 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 `UNIQUE (recipient_member_id, dedupe_key)`를 둔다. 목록 인덱스는
 `(recipient_member_id, bunch_id, created_at DESC, id DESC)`이며 SQL에서 최신 100개를 제한한 뒤 page를 적용한다.
 30일 cutoff는 조회·미확인 집계·open·정리에서 동일하게 사용한다.
+
+`target.bunchId`는 수신 inbox 번치다. 번들 소유 번치는 `target.targetBunchId ?? target.bunchId`로
+결정하며, `sourceBunchId`는 행동 번치다. `commentId`는 실제 원댓글 또는 답글 ID이고,
+원댓글·댓글이 아닌 target의 `parentCommentId`는 null, 답글의 `parentCommentId`는 원댓글 ID다.
+구버전 target JSON에서 없는 필드는 null로 역직렬화한다.
+
+### V53 JSON backfill
+
+V53은 새 inbox/job을 만들지 않고 JSON wire shape만 보정한다.
+
+- 기존 `notifications.target`은 `target.commentId`와 `target.bundleId`가 모두 일치하는
+  `social_comments` 행의 `parent_id`에서 `parentCommentId`를 복원한다. 원댓글·댓글이 아닌 target,
+  또는 일치하는 원본 행이 없는 target은 `parentCommentId:null`로 보정한다. 답글의 부모가 이미
+  삭제된 경우에도 `parent_id`의 ID는 null로 바꾸지 않는다.
+- 기존 `PENDING` `push_jobs`도 payload의 `target.commentId`·`target.bundleId`로 같은
+  `social_comments` 행을 찾아 `target.parentCommentId`를 복원한다. 원댓글·댓글이 아닌 target과
+  일치하는 원본 행이 없는 target은 null이다. 연결된 inbox의 `notifications.id`는 top-level
+  `payload.notificationId`로 채우고, detached `MEMBER_REMOVED`·`BUNCH_DELETED` job은
+  `notificationId:null`을 유지한다.
+- `payload.eventId`는 job UUID이므로 변경하지 않는다. `SENT` job은 재전송하지 않으며 backfill 대상이 아니다.
+
+마이그레이션 전 JSON에서 없는 `parentCommentId`·`notificationId`도 읽을 때 null로 처리한다.
 
 ### type과 target 호환성
 
@@ -61,7 +83,8 @@ V12는 V3 `bunch_join_notifications`를 `notifications`로 rename하고 확장�
 `BUNDLE`, `BUNDLE_COMMENTS`, `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다.
 17~19는 #51의 실제 관계 ID·type·수신 회원으로 중복을 구분하며 관계 변경과 함께 저장한다.
 `OTHER_BUNCH_PROFILE`의 `bunchId`는 수신/현재 번치, `targetBunchId`는 상대 번치다.
-open은 #51의 실제 접근 검사를 사용하고 저장된 target JSON을 접근 증거로 사용하지 않는다.
+번들 소유 번치는 `targetBunchId ?? bunchId`로 해석한다. open은 `{bunchId}`와 notification ID로
+inbox 행을 찾고 현재 접근 검사를 사용하며, 저장된 target JSON을 접근 증거로 사용하지 않는다.
 역할 변경·나가며 인계·공개 전환은 각 실제 저장 지점에서 notification과 기기 job을 같은 트랜잭션에 기록한다.
 이탈·삭제의 접근 안내는 본체 FK 없는 notice와 detached job으로 저장하며 재참여는 과거 removal job을 취소한다.
 

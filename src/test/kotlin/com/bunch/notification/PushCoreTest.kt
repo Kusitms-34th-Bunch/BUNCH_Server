@@ -15,10 +15,13 @@ import com.bunch.notification.domain.push.PushJob
 import com.bunch.notification.domain.push.PushJobRepository
 import com.bunch.notification.domain.push.PushPreferenceRepository
 import com.bunch.notification.dto.NotificationTarget
+import com.bunch.notification.dto.PushPayload
 import com.bunch.notification.service.DeviceTokenCipher
 import com.bunch.notification.service.PushJobWriter
 import com.bunch.notification.service.PushPayloadFactory
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -122,8 +125,56 @@ class PushCoreTest {
         assertThat(saved.value.recipientMemberId).isEqualTo(1)
         assertThat(saved.value.deviceId).isEqualTo(0)
         assertThat(saved.value.notificationId).isEqualTo(42)
+        assertThat(saved.value.payload.notificationId).isEqualTo(42)
+        assertThat(saved.value.payload.eventId).isEqualTo(saved.value.id)
+        assertThat(saved.value.payload.target).containsEntry("parentCommentId", null)
         assertThat(saved.value.payload.type).isEqualTo(NotificationType.DRAFT_ACTIVITY)
         assertThat(saved.value.payload.aps.alert.title).isEqualTo("[번치] 새 활동")
+    }
+
+    @Test
+    fun `detached payload has explicit null inbox id and old JSON still deserializes`() {
+        val mapper = ObjectMapper().findAndRegisterModules()
+        val factory = PushPayloadFactory(mock(BunchRepository::class.java), mapper)
+        val id = UUID.randomUUID()
+        val payload = factory.forDetached(
+            id, NotificationType.BUNCH_DELETED, "삭제 안내", "번치가 삭제됐어요",
+            NotificationTarget(NotificationTargetKind.ACCESS_NOTICE, 7, noticeId = 9)
+        )
+        val json = mapper.valueToTree<JsonNode>(payload)
+        assertThat(json.has("notificationId")).isTrue()
+        assertThat(json.path("notificationId").isNull).isTrue()
+        assertThat(json.path("target").path("parentCommentId").isNull).isTrue()
+        val legacy = json.deepCopy<ObjectNode>()
+        legacy.remove("notificationId")
+        (legacy.path("target") as ObjectNode).remove("parentCommentId")
+        assertThat(mapper.treeToValue(legacy, PushPayload::class.java).notificationId).isNull()
+        val target = mapper.readValue(
+            """{"kind":"BUNDLE_COMMENTS","bunchId":7,"bundleId":9,"commentId":11}""",
+            NotificationTarget::class.java
+        )
+        assertThat(target.parentCommentId).isNull()
+    }
+
+    @Test
+    fun `delivery fitting preserves deep link fields and title while shortening oversized legacy body`() {
+        val mapper = ObjectMapper().findAndRegisterModules()
+        val factory = PushPayloadFactory(mock(BunchRepository::class.java), mapper)
+        val original = factory.forDetached(
+            UUID.randomUUID(), NotificationType.MEMBER_JOINED, "원래 제목", "본문",
+            NotificationTarget(NotificationTargetKind.MEMBERS, 7)
+        ).copy(notificationId = 42)
+        val oversized = original.copy(
+            aps = original.aps.copy(alert = original.aps.alert.copy(body = "가".repeat(1500)))
+        )
+        assertThat(mapper.writeValueAsBytes(oversized).size).isGreaterThan(4096)
+
+        val fitted = factory.fitForDelivery(oversized)
+
+        assertThat(mapper.writeValueAsBytes(fitted).size).isLessThanOrEqualTo(4096)
+        assertThat(fitted.copy(aps = original.aps)).isEqualTo(original)
+        assertThat(fitted.aps.alert.title).isEqualTo(original.aps.alert.title)
+        assertThat(fitted.aps.alert.body).endsWith("…")
     }
 
     @Test

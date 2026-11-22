@@ -26,12 +26,15 @@ HTTP 400 `COMMON_003`/`error.prohibited_word`와 `detail.fields: ["content"]`로
 답글을 내장해 잘라내지 않는다. `totalCount`는 번들의 원댓글+답글 전체 수다.
 정렬 키는 createdAt/id이고 커서는 번들·부모·현재 번치에 묶인다. 번치 전환 후 커서는 400.
 각 페이지는 최신 접근·비노출 조건을 LIMIT 전에 재확인한다. 커서는 접근 권한을 부여하지 않는다.
+댓글 단건 조회나 position/offset 기반 이동 API는 제공하지 않는다. 알림 deep link도 기존 원댓글·답글
+페이지 조회를 호출해 `commentId`를 찾으며, 답글은 `parentCommentId`를 부모 경로로 사용한다.
 
 항목: id/bundleId/parentId/content/deleted/createdAt/author/badge/replyCount/canDelete/canReply/canReport.
 author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성 시 배지 이름·분위기).
 닉네임·사진은 현재 계정에서 읽고 탈퇴 계정은 작성자/null로 익명화한다.
 삭제 자리는 content=삭제된 댓글입니다, author=작성자, 사진·회원ID·배지·날짜=null,
-쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다.
+쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다. 삭제된 부모 placeholder의
+기존 답글 페이지와 답글 알림 open은 정상 접근하며, 삭제된 부모에 새 답글을 쓰는 기존 conflict는 유지한다.
 
 주요 오류: 입력/커서 오류 COMMON_001(400), 금칙어 content `COMMON_003`(400), payload가 다른 멱등 키 REQUEST_001(409),
 삭제된 부모/2단계 답글 BUNDLE_002(409), 없는/숨긴/다른 번들의 댓글 RESOURCE_001(404),
@@ -78,8 +81,9 @@ BUNCH 숨김은 제외하고, 이 조건으로 보이지 않는 원댓글의 하
 원댓글 작성자는 원댓글 acting Bunch의 ACTIVE 소속일 때 받는다. 행동자는 제외하고 겹치는
 수신자는 답글 알림 한 건만 받는다. `SOCIAL_COMMENT_CREATED` 타입을 재사용하므로 답글도
 댓글 푸시 설정을 따른다. 같은 번치 댓글은 참여자 알림이 없지만 답글 알림은 적용한다.
-각 target은 bunchId=수신 inbox, targetBunchId=실제 번들 소유 Bunch,
-sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다.
+각 target은 bunchId=수신 inbox, targetBunchId=실제 번들 소유 Bunch(없으면 `bunchId`),
+sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다. `commentId`는 실제 원댓글·답글 ID이며,
+원댓글 target의 `parentCommentId`는 null, 답글 target의 `parentCommentId`는 원댓글 ID다.
 5.12.3의 댓글 알림 제목은 `{번치 이름} 번치 {닉네임}님이 '{번들 제목}' 번들에 댓글을 남겼어요`이며,
 행동 번치와 작성자 닉네임을 함께 표시한다. 닉네임은 등록 트랜잭션에서 잠근 작성자 계정의 값이다.
 댓글·답글 원문의 줄바꿈은 보존하고, 알림 본문은 연속된 CR/LF 줄바꿈을 공백 하나로 바꾼 전체 내용으로
@@ -87,7 +91,8 @@ sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다.
 target의 commentId는 실제 소셜 댓글·답글 ID다. 공통 열기·푸시 접근 검사에 댓글 저장소의 동일한
 접근 조건을 연결해, 알림 생성 후 해당 댓글이 삭제되거나 작성 번치 차단·레거시 전역 숨김으로
 접근할 수 없으면 본문을 전송하지 않는다. 원댓글의 작성 번치 접근 제한도 하위 답글 알림에 적용하되,
-원댓글의 삭제 자리만 남은 경우 정상 답글은 유지한다. 신고 자체는 이동·전송을 막지 않는다.
+원댓글의 삭제 자리만 남은 경우에도 placeholder·정상 답글·답글 알림 open은 유지한다. 신고 자체는
+이동·전송을 막지 않는다.
 신고 접수·운영 검토 결과·운영 삭제 조치의 새 알림은 만들지 않는다.
 운영 삭제된 댓글의 기존 알림·푸시 미리보기는 삭제와 같은 트랜잭션에서
 「삭제된 댓글입니다」로 교체한다([미리보기 정리 계약](feed-reports.md)).
