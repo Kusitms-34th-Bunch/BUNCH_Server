@@ -13,7 +13,6 @@ interface FeedQueryRepository : Repository<Bundle, Long> {
         order by bundle.publishedAt desc, bundle.id desc
     """)
     fun following(
-        memberId: Long,
         currentBunchId: Long?,
         anchorTime: Instant,
         followingSince: Instant,
@@ -30,7 +29,6 @@ interface FeedQueryRepository : Repository<Bundle, Long> {
         order by bundle.publishedAt desc, bundle.id desc
     """)
     fun publicBundles(
-        memberId: Long,
         currentBunchId: Long?,
         anchorTime: Instant,
         followingSince: Instant,

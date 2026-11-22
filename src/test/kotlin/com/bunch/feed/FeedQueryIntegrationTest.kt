@@ -28,39 +28,39 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `two segments exclude all active memberships and split approved recent public bundles exactly`() {
+    fun `two segments exclude only current bunch and include other memberships under external rules`() {
         val user = member()
         val current = publicBunch(user)
         val otherMembership = publicBunch(user)
         val owner = member()
-        val followed = publicBunch(owner)
-        val privateFollowed = create(owner).id
+        val followed = publicBunch(user)
+        val privateFollowed = create(user).id
         val pending = create(owner).id
         val stranger = publicBunch(owner)
         follow(current, followed)
         follow(current, privateFollowed)
         follow(current, pending, "PENDING")
-        val atAnchor = published(followed, owner, anchor)
-        val atLowerBoundary = published(privateFollowed, owner, since)
-        val oldFollowed = published(followed, owner, since.minusNanos(1_000))
+        val atAnchor = published(followed, user, anchor)
+        val atLowerBoundary = published(privateFollowed, user, since)
+        val oldFollowed = published(followed, user, since.minusNanos(1_000))
         val publicOther = published(stranger, owner, anchor.minusSeconds(1))
         published(current, user, anchor)
-        published(otherMembership, user, anchor)
+        val ownPublicOther = published(otherMembership, user, anchor)
         published(pending, owner, anchor)
-        published(privateFollowed, owner, since.minusSeconds(1))
-        published(followed, owner, anchor, "PRIVATE")
-        published(followed, owner, anchor.plusNanos(1_000))
+        published(privateFollowed, user, since.minusSeconds(1))
+        published(followed, user, anchor, "PRIVATE")
+        published(followed, user, anchor.plusNanos(1_000))
 
         val ids = listOf(followed, privateFollowed)
-        assertThat(following(user, current, ids).map { it.id }).containsExactly(atAnchor, atLowerBoundary)
-        assertThat(public(user, current, ids).map { it.id }).containsExactly(publicOther, oldFollowed)
-        assertThat(public(member(), null, listOf(-1L)).map { it.id })
+        assertThat(following(current, ids).map { it.id }).containsExactly(atAnchor, atLowerBoundary)
+        assertThat(public(current, ids).map { it.id }).containsExactly(ownPublicOther, publicOther, oldFollowed)
+        assertThat(public(null, listOf(-1L)).map { it.id })
             .contains(atAnchor, oldFollowed, publicOther)
             .doesNotContain(atLowerBoundary)
     }
 
     @Test
-    fun `every suppression predicate runs before limit and keyset resumes same timestamp by id`() {
+    fun `blocks and global hides filter before limit while reports remain in stable keyset pages`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -72,9 +72,11 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
         val reporterHidden = published(visible, owner, anchor)
         jdbc.update("""INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason)
             VALUES ('BUNDLE',?,?,'REPORTED')""", reporterHidden, current)
+        var reportedBundle = 0L
         listOf("BLOCK_FORWARD", "BLOCK_REVERSE", "REPORT", "BUNCH_HIDE").forEach { kind ->
             val target = publicBunch(owner)
-            published(target, owner, anchor)
+            val candidate = published(target, owner, anchor)
+            if (kind == "REPORT") reportedBundle = candidate
             when (kind) {
                 "BLOCK_FORWARD" -> block(current, target)
                 "BLOCK_REVERSE" -> block(target, current)
@@ -84,11 +86,13 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
                 else -> jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reason) VALUES ('BUNCH',?,'ops')", target)
             }
         }
-        val page = query.publicBundles(user, current, anchor, since, listOf(-1L), null, null, false, PageRequest.of(0, 1))
-        assertThat(page.map { it.id }).containsExactly(second)
-        val next = query.publicBundles(user, current, anchor, since, listOf(-1L), anchor, second, true, PageRequest.of(0, 2))
-        assertThat(next.map { it.id }).containsExactly(first)
-        assertThat(query.publicBundles(user, current, anchor, since, listOf(-1L), anchor, first, true, PageRequest.of(0, 1)))
+        val page = query.publicBundles(current, anchor, since, listOf(-1L), null, null, false, PageRequest.of(0, 1))
+        assertThat(page.map { it.id }).containsExactly(reportedBundle)
+        val next = query.publicBundles(current, anchor, since, listOf(-1L), anchor, reportedBundle, true, PageRequest.of(0, 2))
+        assertThat(next.map { it.id }).containsExactly(reporterHidden, second)
+        val last = query.publicBundles(current, anchor, since, listOf(-1L), anchor, second, true, PageRequest.of(0, 2))
+        assertThat(last.map { it.id }).containsExactly(first)
+        assertThat(query.publicBundles(current, anchor, since, listOf(-1L), anchor, first, true, PageRequest.of(0, 1)))
             .isEmpty()
     }
 
@@ -129,9 +133,9 @@ class FeedQueryIntegrationTest : BunchIntegrationSupport() {
             SELECT ?,?,created_by,now() FROM bunches WHERE id=?""", source, target, source)
     }
 
-    private fun following(user: Long, current: Long?, ids: List<Long>) =
-        query.following(user, current, anchor, since, ids, null, null, false, PageRequest.of(0, 50))
+    private fun following(current: Long?, ids: List<Long>) =
+        query.following(current, anchor, since, ids, null, null, false, PageRequest.of(0, 50))
 
-    private fun public(user: Long, current: Long?, ids: List<Long>) =
-        query.publicBundles(user, current, anchor, since, ids, null, null, false, PageRequest.of(0, 50))
+    private fun public(current: Long?, ids: List<Long>) =
+        query.publicBundles(current, anchor, since, ids, null, null, false, PageRequest.of(0, 50))
 }

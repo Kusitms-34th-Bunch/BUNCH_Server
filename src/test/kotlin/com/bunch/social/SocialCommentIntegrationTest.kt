@@ -302,7 +302,7 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `comment reporter hide global hide and parent hide use identical list and count predicates`() {
+    fun `legacy reporter hides and profile reports preserve comment rows metadata and counts`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(owner, target)
@@ -310,22 +310,27 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val source = publicBunch(actor)
         val root = write(actor, bundle.id)
         val reply = write(owner, bundle.id, root.id)
+        val before = service.list(owner, bundle.id)
         hide("COMMENT", reply.id, target)
-        assertThat(service.list(owner, bundle.id).items.single().replyCount).isZero()
-        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 1L)
-        assertThat(service.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
         hide("COMMENT", root.id, target)
-        assertThat(service.list(owner, bundle.id).items).isEmpty()
-        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 0L)
-        hide("COMMENT", root.id)
-        assertThat(service.list(actor, bundle.id).items).isEmpty()
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
         hide("BUNCH", source, target)
-        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 0L)
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'BUNCH' AND target_id = ?", source)
         reports.saveAndFlush(BunchProfileReport(reporterBunchId = target, targetBunchId = source,
             reportedByMemberId = owner, reason = BunchReportReason.SPAM, detail = null, createdAt = Instant.now()))
-        assertThat(service.list(owner, bundle.id).items).isEmpty()
+        assertThat(service.list(owner, bundle.id)).isEqualTo(before)
+        assertThat(service.list(owner, bundle.id, root.id).items.single().id).isEqualTo(reply.id)
+        assertThat(service.list(owner, bundle.id).items.single().replyCount).isEqualTo(1)
+        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+        assertThat(service.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+        service.deleteForModeration(root.id)
+        listOf(owner, actor).forEach { viewer ->
+            val placeholder = service.list(viewer, bundle.id).items.single()
+            assertThat(placeholder.id).isEqualTo(root.id)
+            assertThat(placeholder.deleted).isTrue()
+            assertThat(placeholder.content).isEqualTo("삭제된 댓글입니다")
+            assertThat(placeholder.replyCount).isEqualTo(1)
+            assertThat(service.list(viewer, bundle.id, root.id).items.single().id).isEqualTo(reply.id)
+            assertThat(service.counts(viewer, listOf(bundle.id))).containsEntry(bundle.id, 2L)
+        }
     }
 
     @Test
@@ -469,7 +474,7 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `comment specific hide and deletion suppress actual queued notification access`() {
+    fun `legacy comment hide preserves queued notification access until actual moderation deletion`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(owner, target)
@@ -485,16 +490,17 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
                 "VALUES ('COMMENT',?,?, 'REPORTED')",
             root.id, target
         )
-        assertThat(notificationService.open(owner, target, event.id).available).isFalse()
-        assertThat(notificationAccess.canDeliver(target, event.target)).isFalse()
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
-        service.delete(actor, bundle.id, root.id)
+        assertThat(notificationService.open(owner, target, event.id).available).isTrue()
+        assertThat(notificationAccess.canDeliver(target, event.target)).isTrue()
+        service.deleteForModeration(root.id)
+        assertThat(service.list(owner, bundle.id).items.single().deleted).isTrue()
+        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 1L)
         assertThat(notificationService.open(owner, target, event.id).available).isFalse()
         assertThat(notificationAccess.canDeliver(target, event.target)).isFalse()
     }
 
     @Test
-    fun `parent hide suppresses reply delivery but parent deletion preserves normal reply`() {
+    fun `moderated parent preserves reply notification access placeholder and counts`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(owner, target)
@@ -505,14 +511,12 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         val reply = write(owner, bundle.id, root.id)
         val event = socialNotifications().single { it.recipientMemberId == actor }
         assertThat(event.target.commentId).isEqualTo(reply.id)
-        jdbc.update(
-            "INSERT INTO feed_content_hides(target_kind,target_id,reason) VALUES ('COMMENT',?,'review')",
-            root.id
-        )
-        assertThat(notificationService.open(actor, source, event.id).available).isFalse()
-        assertThat(notificationAccess.canDeliver(source, event.target)).isFalse()
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
-        service.delete(actor, bundle.id, root.id)
+        service.deleteForModeration(root.id)
+        val placeholder = service.list(actor, bundle.id).items.single()
+        assertThat(placeholder.deleted).isTrue()
+        assertThat(placeholder.replyCount).isEqualTo(1)
+        assertThat(service.list(actor, bundle.id, root.id).items.single().id).isEqualTo(reply.id)
+        assertThat(service.counts(actor, listOf(bundle.id))).containsEntry(bundle.id, 2L)
         assertThat(notificationService.open(actor, source, event.id).available).isTrue()
         assertThat(notificationAccess.canDeliver(source, event.target)).isTrue()
     }
@@ -616,7 +620,7 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `report lookup permits reporter re-report hide but not own deleted or globally hidden targets`() {
+    fun `report lookup ignores legacy reporter hides but rejects own and moderation deleted comments`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(owner, target)
@@ -626,10 +630,7 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.FORBIDDEN) { service.requireReportable(actor, bundle.id, root.id) }
         hide("COMMENT", root.id, target)
         assertThatCode { service.requireReportable(owner, bundle.id, root.id) }.doesNotThrowAnyException()
-        hide("COMMENT", root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
-        jdbc.update("DELETE FROM feed_content_hides WHERE target_kind = 'COMMENT'")
-        service.delete(actor, bundle.id, root.id)
+        service.deleteForModeration(root.id)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { service.requireReportable(owner, bundle.id, root.id) }
     }
 
@@ -694,16 +695,20 @@ class SocialCommentIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `idempotent replay cannot reveal a comment hidden after creation and batch inputs are bounded`() {
+    fun `idempotent replay returns moderation placeholder without original content and batch inputs are bounded`() {
         val owner = member()
         val bunch = publicBunch(owner)
         val bundle = published(owner, bunch)
         val key = UUID.randomUUID()
         val root = service.create(owner, bundle.id, key, CreateSocialCommentRequest("본문"))
-        hide("COMMENT", root.id)
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) {
-            service.create(owner, bundle.id, key, CreateSocialCommentRequest("본문"))
-        }
+        service.deleteForModeration(root.id)
+        val replay = service.create(owner, bundle.id, key, CreateSocialCommentRequest("본문"))
+        assertThat(replay.id).isEqualTo(root.id)
+        assertThat(replay.deleted).isTrue()
+        assertThat(replay.content).isEqualTo("삭제된 댓글입니다")
+        assertThat(replay.author.memberId).isNull()
+        assertThat(replay.badge).isNull()
+        assertThat(service.counts(owner, listOf(bundle.id))).containsEntry(bundle.id, 1L)
         assertError(ErrorCode.INVALID_INPUT) { service.counts(owner, List(501) { bundle.id }) }
         assertError(ErrorCode.INVALID_INPUT) { service.counts(owner, listOf(-1)) }
         assertThat(service.counts(owner, emptyList())).isEmpty()

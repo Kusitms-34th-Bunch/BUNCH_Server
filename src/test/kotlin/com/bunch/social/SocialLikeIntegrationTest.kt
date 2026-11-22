@@ -181,7 +181,7 @@ class SocialLikeIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `bundle and bunch hiding and profile reports are rechecked on every request`() {
+    fun `global hides restrict likes while profile reports and legacy reporter hides preserve interactions`() {
         val actor = member()
         val acting = publicBunch(actor)
         val owner = member()
@@ -191,18 +191,24 @@ class SocialLikeIntegrationTest : BunchIntegrationSupport() {
         listOf("BUNDLE" to bundle, "BUNCH" to target).forEach { (kind, id) ->
             listOf<Long?>(acting, null).forEach { reporter ->
                 hide(kind, id, reporter)
-                assertError(ErrorCode.RESOURCE_NOT_FOUND) { likes.unlike(actor, bundle) }
-                assertThat(likes.summaries(actor, listOf(bundle))).isEmpty()
+                if (reporter == null) {
+                    assertError(ErrorCode.RESOURCE_NOT_FOUND) { likes.unlike(actor, bundle) }
+                    assertThat(likes.summaries(actor, listOf(bundle))).isEmpty()
+                } else {
+                    assertThat(likes.unlike(actor, bundle).likeCount).isZero()
+                    assertThat(likes.like(actor, bundle).likeCount).isEqualTo(1)
+                    assertThat(likes.summary(actor, bundle).likedByCurrentBunch).isTrue()
+                }
                 jdbc.update("DELETE FROM feed_content_hides")
             }
         }
         social.report(actor, acting, BunchReportRequest(target, BunchReportReason.SPAM))
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { likes.like(actor, bundle) }
+        assertThat(likes.like(actor, bundle).likeCount).isEqualTo(1)
         assertThat(rows.findByBunchIdAndBundleId(acting, bundle)!!.active).isTrue()
     }
 
     @Test
-    fun `counts filter the acting bunch by block report and hides but include unfollowed private actors`() {
+    fun `counts filter blocks and global hides but retain reported and legacy hidden private actors`() {
         val owner = member()
         val target = publicBunch(owner)
         val bundle = published(target, owner)
@@ -214,14 +220,14 @@ class SocialLikeIntegrationTest : BunchIntegrationSupport() {
         social.report(owner, target, BunchReportRequest(sources[1], BunchReportReason.SPAM))
         hide("BUNCH", sources[2], target)
         hide("BUNCH", sources[3], null)
-        assertThat(access.visibleBunchIds(owner, sources)).containsExactly(sources[4])
-        assertThat(likes.summary(owner, bundle).likeCount).isEqualTo(1)
+        assertThat(access.visibleBunchIds(owner, sources)).containsExactlyInAnyOrder(sources[1], sources[2], sources[4])
+        assertThat(likes.summary(owner, bundle).likeCount).isEqualTo(3)
         assertThat(likes.summary(owner, bundle).likedByCurrentBunch).isFalse()
         val visitor = member()
         assertThat(likes.summary(visitor, bundle).likeCount).isEqualTo(4)
         assertThat(likes.summary(actors[4], bundle).likedByCurrentBunch).isTrue()
         jdbc.update("DELETE FROM bunch_blocks")
-        assertThat(likes.summary(owner, bundle).likeCount).isEqualTo(2)
+        assertThat(likes.summary(owner, bundle).likeCount).isEqualTo(4)
     }
 
     @Test

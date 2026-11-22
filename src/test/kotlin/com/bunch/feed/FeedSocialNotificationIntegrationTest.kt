@@ -2,20 +2,22 @@ package com.bunch.feed
 
 import com.bunch.bunch.BunchIntegrationSupport
 import com.bunch.bunch.domain.Visibility
+import com.bunch.bunch.domain.BunchReportReason
+import com.bunch.bunch.dto.BunchReportRequest
 import com.bunch.bunch.service.BunchSocialService
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleParticipantRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
-import com.bunch.feed.domain.FeedContentHideRepository
-import com.bunch.feed.domain.FeedContentKind
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationType
 import com.bunch.notification.service.NotificationService
 import com.bunch.notification.service.PublishedNotificationAccess
 import com.bunch.social.dto.CreateSocialCommentRequest
+import com.bunch.social.dto.SocialContentReportRequest
+import com.bunch.social.service.SocialContentReportService
 import com.bunch.social.service.SocialCommentService
 import com.bunch.social.service.SocialLikeService
 import org.assertj.core.api.Assertions.assertThat
@@ -24,13 +26,15 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 
 @SpringBootTest
 @ActiveProfiles("test")
 class FeedSocialNotificationIntegrationTest : BunchIntegrationSupport() {
+    @Autowired
+    private lateinit var reports: SocialContentReportService
+
     @Autowired
     private lateinit var likes: SocialLikeService
 
@@ -51,12 +55,6 @@ class FeedSocialNotificationIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var feedAccess: FeedAccessService
-
-    @Autowired
-    private lateinit var hides: FeedContentHideRepository
-
-    @Autowired
-    private lateinit var transaction: TransactionTemplate
 
     @Autowired
     private lateinit var bundles: BundleRepository
@@ -110,7 +108,7 @@ class FeedSocialNotificationIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `actual external reply retains inbox context and reporter hide applies only to that bunch`() {
+    fun `actual external reply retains inbox access and delivery after all reports and legacy reporter hides`() {
         val owner = member()
         val ownerBunch = publicBunch(owner)
         val bundle = published(owner, ownerBunch)
@@ -127,15 +125,30 @@ class FeedSocialNotificationIntegrationTest : BunchIntegrationSupport() {
         assertThat(event.target.sourceBunchId).isEqualTo(ownerBunch)
         assertThat(notificationService.open(actor, actorBunch, event.id).available).isTrue()
 
-        transaction.executeWithoutResult {
-            hides.hideForReporter(FeedContentKind.BUNDLE, bundle, actorBunch)
-        }
+        val beforeNotifications = count("notifications")
+        val beforePushJobs = count("push_jobs")
+        relations.report(actor, actorBunch, BunchReportRequest(ownerBunch, BunchReportReason.SPAM))
+        reports.bundle(actor, bundle, SocialContentReportRequest(BunchReportReason.SPAM))
+        reports.comment(actor, bundle, reply.id, SocialContentReportRequest(BunchReportReason.SPAM))
+        jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) " +
+            "VALUES ('BUNDLE',?,?,'LEGACY')", bundle, actorBunch)
+        jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) " +
+            "VALUES ('COMMENT',?,?,'LEGACY')", reply.id, actorBunch)
 
-        assertThat(notificationService.open(actor, actorBunch, event.id).available).isFalse()
-        assertThat(publishedAccess.canDeliver(actorBunch, event.target)).isFalse()
+        assertThat(notificationService.open(actor, actorBunch, event.id).available).isTrue()
+        assertThat(publishedAccess.canDeliver(actorBunch, event.target)).isTrue()
+        assertThat(comments.counts(actor, listOf(bundle))[bundle]).isEqualTo(2)
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
+        val nextReply = comments.create(owner, bundle, UUID.randomUUID(), CreateSocialCommentRequest("새 답글", root.id))
+        val nextEvent = notifications.findAll().single {
+            it.dedupeKey == "SOCIAL_COMMENT_CREATED:${nextReply.id}" && it.recipientMemberId == actor
+        }
+        assertThat(notificationService.open(actor, actorBunch, nextEvent.id).available).isTrue()
+        assertThat(publishedAccess.canDeliver(actorBunch, nextEvent.target)).isTrue()
         val other = member()
         assertThat(feedAccess.readPublishedBundle(other, bundle).id).isEqualTo(bundle)
-        assertThat(comments.counts(other, listOf(bundle))[bundle]).isEqualTo(2)
+        assertThat(comments.counts(other, listOf(bundle))[bundle]).isEqualTo(3)
     }
 
     private fun publicBunch(owner: Long): Long = create(owner).id.also {

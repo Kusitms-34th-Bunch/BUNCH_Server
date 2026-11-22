@@ -2,24 +2,16 @@ package com.bunch.recommendation.combination
 
 import com.bunch.recommendation.combination.CombinerTestSupport.bundles
 import com.bunch.recommendation.combination.CombinerTestSupport.combine
-import com.bunch.recommendation.combination.CombinerTestSupport.kinds
 import com.bunch.recommendation.combination.CombinerTestSupport.meals
 import com.bunch.recommendation.combination.CombinerTestSupport.onCard
 import com.bunch.recommendation.combination.CombinerTestSupport.photoIds
 import com.bunch.recommendation.combination.CombinerTestSupport.shot
-import com.bunch.recommendation.combination.EventTestSupport.clued
-import com.bunch.recommendation.combination.EventTestSupport.friends
 import com.bunch.recommendation.combination.PreparationTestSupport.scene
 import com.bunch.recommendation.domain.combination.ActivityCode.MEAL
 import com.bunch.recommendation.domain.combination.AiStatus
 import com.bunch.recommendation.domain.combination.BundleCombiner
 import com.bunch.recommendation.domain.combination.BundleKind
 import com.bunch.recommendation.domain.combination.DayCombination
-import com.bunch.recommendation.domain.combination.EstablishedBy
-import com.bunch.recommendation.domain.combination.EventClueCode.CANDLE_WHOLE_CAKE
-import com.bunch.recommendation.domain.combination.EventClueCode.GRAD_CAP
-import com.bunch.recommendation.domain.combination.EventClueCode.HANBOK_GROUP_PHOTO
-import com.bunch.recommendation.domain.combination.EventType
 import com.bunch.recommendation.domain.combination.PhotoRole
 import com.bunch.recommendation.domain.combination.RecoPhoto
 import com.bunch.recommendation.domain.combination.SensitiveClueCode
@@ -34,14 +26,10 @@ import kotlin.random.Random
 
 /**
  * The bundles of the photos of a bunch, from the photos to the cards (recommended bundle specification 2, 13): a day is
- * made ready, held or blocked, its events and its general bundles are made, the photos with a date only are given to a
- * bundle, and the card is chosen for each.
+ * made ready, held or blocked, its general bundles are made (there are no event bundles), the photos with a date only
+ * are given to a bundle, and the card is chosen for each.
  */
 class BundleCombinerTest {
-    private fun birthday(date: String = "2026-10-19"): List<RecoPhoto> =
-        listOf(clued(100, "20:00", 1, CANDLE_WHOLE_CAKE, person = true, date = date)) +
-            friends(101, "20:10", 5, date = date)
-
     // --- what a day says (5-6, 13-5) ---
 
     @Test
@@ -61,10 +49,10 @@ class BundleCombinerTest {
     }
 
     @Test
-    fun `X12 a day with a sensitive clue is blocked, the events and the general bundles alike`() {
+    fun `X12 a day with a sensitive clue is blocked`() {
         val funeral = shot(900, "12:00", sensitive = SensitiveClueCode.FUNERAL_WREATH)
 
-        val day = combine(meals(1, "10:00", 8) + birthday() + funeral).days.single()
+        val day = combine(meals(1, "10:00", 8) + funeral).days.single()
 
         assertThat(day).isInstanceOf(DayCombination.Blocked::class.java)
         val blocked = day as DayCombination.Blocked
@@ -93,48 +81,19 @@ class BundleCombinerTest {
         assertThat(day).isEqualTo(DayCombination.Bundled(LocalDate.parse("2026-10-19"), emptyList()))
     }
 
-    // --- the events and the general bundles together (13-1, 13-2) ---
+    // --- the general bundles (13-2) ---
 
     @Test
-    fun `E1 a birthday is an event bundle with its card and its trace`() {
-        val bundle = bundles(birthday()).single()
+    fun `a day of one activity is one general bundle with its card and its trace`() {
+        val bundle = bundles(meals(1, "12:00", 8)).single()
 
-        assertThat(bundle.kind).isEqualTo(BundleKind.EVENT)
-        assertThat(bundle.eventType).isEqualTo(EventType.BIRTHDAY)
-        assertThat(bundle.establishedBy).isEqualTo(EstablishedBy.STRONG)
-        assertThat(bundle.photos.first { it.photoId == 100L }.role).isEqualTo(PhotoRole.CLUE)
-        assertThat(bundle.photoCount).isEqualTo(6)
-        assertThat(bundle.uploaderCount).isEqualTo(2)
-        assertThat(onCard(bundle)).hasSize(6)
+        assertThat(bundle.kind).isEqualTo(BundleKind.GENERAL)
+        assertThat(bundle.eventType).isNull()
+        assertThat(bundle.establishedBy).isNull()
+        assertThat(bundle.activity).isEqualTo(MEAL)
+        assertThat(bundle.photoCount).isEqualTo(8)
+        assertThat(onCard(bundle)).hasSize(8)
         assertThat(bundle.coverPhotoId).isEqualTo(onCard(bundle).first())
-    }
-
-    @Test
-    fun `E6 a graduation and a dinner two hours later are an event and a general bundle, in the order of the time`() {
-        val graduation = listOf(clued(1, "14:00", 1, GRAD_CAP, person = true)) + friends(10, "14:10", 5)
-        val dinner = meals(100, "18:00", 8)
-
-        val result = bundles(graduation + dinner)
-
-        assertThat(kinds(result)).containsExactly(BundleKind.EVENT, BundleKind.GENERAL)
-        assertThat(result.first().eventType).isEqualTo(EventType.GRADUATION)
-        assertThat(result.last().activity).isEqualTo(MEAL)
-        assertThat(photoIds(result.last())).containsExactlyElementsOf((100L..107L).toList())
-    }
-
-    @Test
-    fun `E15-1 a dinner and a few photos of a birthday hours later are a general bundle that takes the clue photo`() {
-        val dinner = meals(1, "18:00", 12)
-        val late = listOf(clued(100, "22:50", 1, CANDLE_WHOLE_CAKE, person = true)) + friends(101, "22:55", 3)
-
-        val result = bundles(dinner + late)
-
-        assertThat(kinds(result)).containsExactly(BundleKind.GENERAL)
-        val bundle = result.single()
-        assertThat(photoIds(bundle)).contains(100L)
-        val first = bundle.trace.selection!!.picked.first()
-        assertThat(first.photoId).isEqualTo(100L)
-        assertThat(first.by).isEqualTo("P3_failed_clue")
     }
 
     @Test
@@ -198,73 +157,37 @@ class BundleCombinerTest {
         assertThat(bundle.uploaderCount).isEqualTo(2)
     }
 
-    @Test
-    fun `the calendar of the holidays is used for the events`() {
-        val chuseok = listOf(clued(1, "12:00", 1, HANBOK_GROUP_PHOTO, person = true, date = "2026-09-25")) +
-            friends(10, "12:10", 6, date = "2026-09-25")
-        val ordinary = listOf(clued(1, "12:00", 1, HANBOK_GROUP_PHOTO, person = true, date = "2026-09-20")) +
-            friends(10, "12:10", 6, date = "2026-09-20")
-
-        val holiday = bundles(chuseok).single()
-
-        assertThat(holiday.eventType).isEqualTo(EventType.HOLIDAY)
-        assertThat(holiday.establishedBy).isEqualTo(EstablishedBy.DATE_BOOST)
-        assertThat(bundles(ordinary).filter { it.kind == BundleKind.EVENT }).isEmpty()
-    }
-
     // --- the titles (9) ---
 
     @Test
-    fun `E1 the title of a birthday is the date and the name of the event`() {
-        assertThat(bundles(birthday()).single().title).isEqualTo("10월 19일 생일 파티")
-    }
-
-    @Test
-    fun `E6 the event and the dinner each have a title, in the order of the time`() {
-        val graduation = listOf(clued(1, "14:00", 1, GRAD_CAP, person = true)) + friends(10, "14:10", 5)
-
-        val result = bundles(graduation + meals(100, "18:00", 8))
-
-        assertThat(result.map { it.title }).containsExactly("10월 19일 졸업", "10월 19일 밤 식사")
-    }
-
-    @Test
-    fun `an event that stood by the date has the part of the day and no name of the event`() {
-        val chuseok = listOf(clued(1, "12:00", 1, HANBOK_GROUP_PHOTO, person = true, date = "2026-09-25")) +
-            friends(10, "12:10", 6, date = "2026-09-25")
-
-        assertThat(bundles(chuseok).single().title).isEqualTo("9월 25일 오후")
-    }
-
-    @Test
     fun `every bundle has a title and none is blank`() {
-        val result = bundles(birthday() + meals(1, "10:00", 8) + meals(201, "15:00", 8))
+        val result = bundles(meals(1, "10:00", 8) + meals(201, "15:00", 8))
 
-        assertThat(result).hasSize(3)
+        assertThat(result).hasSize(2)
         assertThat(result.map { it.title }).doesNotContainNull().allSatisfy { assertThat(it).isNotBlank() }
     }
 
     @Test
     fun `the year is in the title when the day is not of the year of the clock`() {
-        val past = birthday(date = "2025-10-19")
+        val past = meals(1, "10:00", 8, date = "2025-10-19")
 
-        assertThat(bundles(past).single().title).isEqualTo("2025년 10월 19일 생일 파티")
+        assertThat(bundles(past).single().title).isEqualTo("2025년 10월 19일 오전 식사")
     }
 
     @Test
     fun `the year of a title is the year in the zone of the settings, not the zone of the clock`() {
         // 16:00 UTC on the 31st of December is already the 1st of January in Seoul.
         val clock = Clock.fixed(Instant.parse("2026-12-31T16:00:00Z"), ZoneOffset.UTC)
-        val lastYear = birthday(date = "2026-12-30")
-        val thisYear = birthday(date = "2027-01-01")
+        val lastYear = meals(1, "10:00", 8, date = "2026-12-30")
+        val thisYear = meals(1, "10:00", 8, date = "2027-01-01")
 
         val titles = { photos: List<RecoPhoto> ->
             (BundleCombiner(clock = clock).combine(photos).days.single() as DayCombination.Bundled)
                 .bundles.single().title
         }
 
-        assertThat(titles(lastYear)).isEqualTo("2026년 12월 30일 생일 파티")
-        assertThat(titles(thisYear)).isEqualTo("1월 1일 생일 파티")
+        assertThat(titles(lastYear)).isEqualTo("2026년 12월 30일 오전 식사")
+        assertThat(titles(thisYear)).isEqualTo("1월 1일 오전 식사")
     }
 
     @Test
@@ -278,23 +201,24 @@ class BundleCombinerTest {
 
     @Test
     fun `the clock is the only thing that changes a title`() {
-        val photos = birthday() + meals(1, "10:00", 8)
+        val photos = meals(1, "10:00", 8)
         val later = Clock.fixed(Instant.parse("2027-02-01T00:00:00Z"), ZoneOffset.UTC)
 
         val now = bundles(photos).map { it.title }
         val nextYear = (BundleCombiner(clock = later).combine(photos).days.single() as DayCombination.Bundled)
             .bundles.map { it.title }
 
-        assertThat(now).containsExactly("10월 19일 오전 식사", "10월 19일 생일 파티")
-        assertThat(nextYear).containsExactly("2026년 10월 19일 오전 식사", "2026년 10월 19일 생일 파티")
+        assertThat(now).containsExactly("10월 19일 오전 식사")
+        assertThat(nextYear).containsExactly("2026년 10월 19일 오전 식사")
     }
 
     // --- the trace and the order (11, 1 principle 5) ---
 
     @Test
     fun `every bundle has a trace of its own kind, with the numbers and the card`() {
-        val result = bundles(birthday() + meals(1, "14:00", 8))
+        val result = bundles(meals(1, "14:00", 8) + meals(201, "20:00", 8))
 
+        assertThat(result).hasSize(2)
         result.forEach {
             assertThat(it.trace.dayKey).isEqualTo(it.dayKey)
             assertThat(it.trace.kind).isEqualTo(it.kind)
@@ -302,23 +226,22 @@ class BundleCombinerTest {
             assertThat(it.trace.counts.photos).isEqualTo(it.photoCount)
             assertThat(it.trace.counts.uploaders).isEqualTo(it.uploaderCount)
             assertThat(it.trace.selection!!.cardSize).isEqualTo(onCard(it).size)
+            assertThat(it.trace.general).isNotNull()
+            assertThat(it.trace.event).isNull()
         }
-        assertThat(result.first { it.kind == BundleKind.EVENT }.trace.event).isNotNull()
-        assertThat(result.first { it.kind == BundleKind.EVENT }.trace.general).isNull()
-        assertThat(result.first { it.kind == BundleKind.GENERAL }.trace.general).isNotNull()
-        assertThat(result.first { it.kind == BundleKind.GENERAL }.trace.event).isNull()
     }
 
     @Test
     fun `the bundles of a day come in the order of the time they start`() {
-        val result = bundles(meals(1, "18:00", 8) + meals(201, "09:00", 8) + birthday())
+        val result = bundles(meals(1, "18:00", 8) + meals(201, "09:00", 8))
 
+        assertThat(result).hasSize(2)
         assertThat(result.map { it.startAt }).isSorted()
     }
 
     @Test
     fun `the same photos give the same bundles and the same traces, whatever the order they come in`() {
-        val photos = birthday() + meals(1, "12:00", 8) + meals(201, "15:00", 8)
+        val photos = meals(1, "12:00", 8) + meals(201, "15:00", 8)
 
         val straight = bundles(photos)
         val shuffled = bundles(photos.shuffled(Random(5)))
@@ -330,7 +253,7 @@ class BundleCombinerTest {
 
     @Test
     fun `each usable photo of a day is in one bundle at most`() {
-        val photos = birthday() + meals(1, "12:00", 8) + meals(201, "15:00", 8)
+        val photos = meals(1, "12:00", 8) + meals(201, "15:00", 8)
 
         val ids = bundles(photos).flatMap { photoIds(it) }
 

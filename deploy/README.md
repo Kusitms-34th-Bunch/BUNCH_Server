@@ -93,8 +93,6 @@ openssl rand 64 | openssl base64 -A
 - `CLOUDINARY_*`: 사진 저장 설정. 사진 기능 배포 전에 채운다.
 - `RECO_COMBINATION_ENABLED`: 새 추천 번들의 계산·저장 스위치. 기본 꺼짐이며, 목록·적용 API가 새 저장소를 읽도록 바뀌기 전에는
   켜지 않는다. 꺼져 있으면 큐에 넣지도 계산하지도 않아서 보이는 추천은 기존 그대로다.
-- `ANTHROPIC_API_KEY`: 추천 번들의 사진 AI 분석용 키. 비워 두면 서버는 기동하고 분석 요청만 실패한다. 사용자 사진을 보내기 전에
-  동의·처리방침 이슈가 끝나야 하며, 모델과 생각 깊이(`ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT`)는 샘플 시험 뒤에 정한다.
 - `BUNCH_INVITATION_BASE_URL`: 실제 공개 초대장 URL 접두사.
 - `PROFANITY_DICTIONARY_PATH`: 비워 두면 이미지에 번들된 사전을 사용한다. 외부 사전을 쓸 때는
   아래 [금칙어 외부 사전](#profanity-dictionary)을 먼저 준비하고 `/app/profanity/dictionary.json`을 지정한다.

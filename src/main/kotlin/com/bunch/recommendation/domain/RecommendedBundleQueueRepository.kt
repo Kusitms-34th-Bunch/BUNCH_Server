@@ -48,10 +48,6 @@ interface RecommendedBundleQueueRepository : Repository<RecommendedBundle, Long>
     )
     fun putAllDays(@Param("bunchId") bunchId: Long, @Param("dueAt") dueAt: Instant): Int
 
-    /** The bunch and the date of a photo, or null when the photo is gone. */
-    @Query("select p.bunch.id as bunchId, p.capturedDate as capturedDate from Photo p where p.id = :photoId")
-    fun findPhotoChange(@Param("photoId") photoId: Long): PhotoChangeRow?
-
     /** The bunches that have a day due at [now] or before, in the order of their numbers. */
     @Query(
         """SELECT DISTINCT bunch_id FROM recommended_bundle_recalc_queue

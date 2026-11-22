@@ -24,6 +24,11 @@ class PushJobWriter(
     private val payloads: PushPayloadFactory
 ) {
     @Transactional(propagation = Propagation.MANDATORY)
+    fun redactCommentBody(commentId: Long, body: String) {
+        jobs.redactCommentBody(commentId, body)
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     fun enqueue(notifications: Collection<Notification>, now: Instant) {
         notifications.forEach { notification ->
             if (notification.id <= 0) throw IllegalArgumentException("Notification must be persisted")
