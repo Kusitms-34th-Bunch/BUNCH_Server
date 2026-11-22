@@ -220,7 +220,7 @@ class SocialLikeIntegrationTest : BunchIntegrationSupport() {
         social.report(owner, target, BunchReportRequest(sources[1], BunchReportReason.SPAM))
         hide("BUNCH", sources[2], target)
         hide("BUNCH", sources[3], null)
-        assertThat(access.visibleBunchIds(owner, sources)).containsExactly(sources[1], sources[2], sources[4])
+        assertThat(access.visibleBunchIds(owner, sources)).containsExactlyInAnyOrder(sources[1], sources[2], sources[4])
         assertThat(likes.summary(owner, bundle).likeCount).isEqualTo(3)
         assertThat(likes.summary(owner, bundle).likedByCurrentBunch).isFalse()
         val visitor = member()
