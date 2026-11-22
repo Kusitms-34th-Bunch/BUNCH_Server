@@ -30,7 +30,7 @@ class PushPayloadFactory(
             }
             "[${bunch.name}] ${notification.title}"
         }
-        return fit(jobId, notification.type, title, notification.body, notification.target)
+        return fit(jobId, notification.type, title, notification.body, notification.target, notification.id)
     }
 
     fun forDetached(
@@ -46,18 +46,23 @@ class PushPayloadFactory(
         type: NotificationType,
         title: String,
         body: String,
-        target: NotificationTarget
+        target: NotificationTarget,
+        notificationId: Long? = null
     ): PushPayload {
         val initialBody = if (type == NotificationType.SOCIAL_COMMENT_CREATED) {
             limitGraphemes(body.replace(Regex("[\\r\\n]+"), " "), COMMENT_BODY_LIMIT)
         } else {
             body
         }
-        var candidate = payload(jobId, type, title, initialBody, target)
-        var currentBody = initialBody
+        return fitForDelivery(payload(jobId, type, title, initialBody, target, notificationId))
+    }
+
+    fun fitForDelivery(payload: PushPayload): PushPayload {
+        var candidate = payload
+        var currentBody = payload.aps.alert.body
         while (mapper.writeValueAsBytes(candidate).size > MAX_PAYLOAD_BYTES && currentBody.isNotEmpty()) {
             currentBody = shorten(currentBody)
-            candidate = payload(jobId, type, title, currentBody, target)
+            candidate = payload.copy(aps = payload.aps.copy(alert = payload.aps.alert.copy(body = currentBody)))
         }
         if (mapper.writeValueAsBytes(candidate).size > MAX_PAYLOAD_BYTES) {
             throw BusinessException(ErrorCode.INVALID_INPUT)
@@ -70,12 +75,14 @@ class PushPayloadFactory(
         type: NotificationType,
         title: String,
         body: String,
-        target: NotificationTarget
+        target: NotificationTarget,
+        notificationId: Long?
     ) = PushPayload(
         aps = PushAps(alert = PushAlert(title = title, body = body)),
         eventId = jobId,
         type = type,
-        target = targetMap(target)
+        target = targetMap(target),
+        notificationId = notificationId
     )
 
     private fun targetMap(target: NotificationTarget): Map<String, Any?> = buildMap {
@@ -86,6 +93,7 @@ class PushPayloadFactory(
         target.targetBunchId?.let { put("targetBunchId", it) }
         target.sourceBunchId?.let { put("sourceBunchId", it) }
         target.commentId?.let { put("commentId", it) }
+        put("parentCommentId", target.parentCommentId)
     }
 
     private fun shorten(value: String): String {

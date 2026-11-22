@@ -45,7 +45,11 @@ class ApnsClientTest {
         assertThat(jwt.header.algorithm).isEqualTo("ES256")
         assertThat(jwt.header.keyId).isEqualTo("KEY1")
         assertThat(jwt.body.issuer).isEqualTo("TEAM1")
-        assertThat(f.mapper.readTree(request.body).path("eventId").asText()).isEqualTo(id.toString())
+        val payload = f.mapper.readTree(request.body)
+        assertThat(payload.path("eventId").asText()).isEqualTo(id.toString())
+        assertThat(payload.path("notificationId").asLong()).isEqualTo(42)
+        assertThat(payload.path("target").has("parentCommentId")).isTrue()
+        assertThat(payload.path("target").path("parentCommentId").isNull).isTrue()
     }
 
     @Test
@@ -135,7 +139,8 @@ class ApnsClientTest {
             id,
             PushPayload(
                 PushAps(PushAlert("제목", "내용")), id, NotificationType.MEMBER_JOINED,
-                mapOf("kind" to "MEMBERS", "bunchId" to 1)
+                mapOf("kind" to "MEMBERS", "bunchId" to 1, "parentCommentId" to null),
+                notificationId = 42
             ),
             now.get().plus(Duration.ofHours(24))
         )

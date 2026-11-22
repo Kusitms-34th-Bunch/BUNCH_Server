@@ -1,6 +1,7 @@
 package com.bunch.notification
 
 import com.bunch.bunch.BunchIntegrationSupport
+import com.bunch.bunch.domain.Visibility
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleParticipant
 import com.bunch.bundle.domain.BundleParticipantRepository
@@ -13,6 +14,13 @@ import com.bunch.notification.domain.Notification
 import com.bunch.notification.domain.NotificationRepository
 import com.bunch.notification.domain.NotificationTargetKind
 import com.bunch.notification.domain.NotificationType
+import com.bunch.notification.domain.push.PushAuthorizationStatus
+import com.bunch.notification.domain.push.PushDevice
+import com.bunch.notification.domain.push.PushDeviceEnvironment
+import com.bunch.notification.domain.push.PushDeviceRepository
+import com.bunch.notification.domain.push.PushJobRepository
+import com.bunch.social.dto.CreateSocialCommentRequest
+import com.bunch.social.service.SocialCommentService
 import com.bunch.notification.dto.NotificationTarget
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -65,6 +73,15 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var participants: BundleParticipantRepository
 
+    @Autowired
+    private lateinit var socialComments: SocialCommentService
+
+    @Autowired
+    private lateinit var devices: PushDeviceRepository
+
+    @Autowired
+    private lateinit var pushJobs: PushJobRepository
+
     @MockitoBean
     private lateinit var clock: Clock
 
@@ -86,6 +103,75 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM bundles")
         sessionIds.forEach { (sessionId, memberId) -> sessions.delete(sessionId, memberId) }
         sessionIds.clear()
+    }
+
+    @Test
+    fun `push reply opens cross bunch inbox marks read and keeps parent location after parent deletion`() {
+        val owner = member()
+        val ownerBunch = create(owner).id
+        jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", ownerBunch)
+        val bundle = bundles.saveAndFlush(
+            Bundle(
+                bunchId = ownerBunch,
+                createdBy = owner,
+                status = BundleStatus.PUBLISHED,
+                title = "답글 이동",
+                visibility = Visibility.PUBLIC,
+                createdAt = now,
+                updatedAt = now,
+                publishedAt = now
+            )
+        )
+        participants.saveAndFlush(BundleParticipant(bundleId = bundle.id, memberId = owner))
+        val actor = member()
+        val inboxBunch = create(actor).id
+        val auth = sessionFor(actor)
+        devices.saveAndFlush(
+            PushDevice(
+                installationId = UUID.randomUUID(),
+                memberId = actor,
+                sessionId = UUID.fromString(auth.sessionId),
+                environment = PushDeviceEnvironment.SANDBOX,
+                topic = "test.bunch",
+                tokenCiphertext = byteArrayOf(1),
+                tokenHash = "a".repeat(64),
+                authorizationStatus = PushAuthorizationStatus.AUTHORIZED,
+                registeredAt = now
+            )
+        )
+        val root = socialComments.create(actor, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest("원댓글"))
+        val rootEvent = notifications.findAll().single { it.target.commentId == root.id }
+        assertThat(rootEvent.target.parentCommentId).isNull()
+        val reply = socialComments.create(
+            owner, bundle.id, UUID.randomUUID(), CreateSocialCommentRequest("답글", root.id)
+        )
+        val job = pushJobs.findAll().single { (it.payload.target["commentId"] as? Number)?.toLong() == reply.id }
+        val payload = mapper.valueToTree<JsonNode>(job.payload)
+        val notificationId = payload.path("notificationId").asLong()
+        assertThat(notificationId).isEqualTo(job.notificationId)
+        assertThat(payload.path("eventId").asText()).isEqualTo(job.id.toString())
+        assertThat(payload.path("target").path("bunchId").asLong()).isEqualTo(inboxBunch)
+        assertThat(payload.path("target").path("targetBunchId").asLong()).isEqualTo(ownerBunch)
+        assertThat(payload.path("target").path("parentCommentId").asLong()).isEqualTo(root.id)
+        val listed = listRequest(auth, inboxBunch).expectSuccessEnvelope().andReturn().data()
+        assertThat(listed.path("unreadCount").asLong()).isEqualTo(1)
+        assertThat(listed.path("items").single().path("target").path("parentCommentId").asLong())
+            .isEqualTo(root.id)
+        socialComments.delete(actor, bundle.id, root.id)
+
+        val opened = openRequest(auth, inboxBunch, notificationId).expectSuccessEnvelope().andReturn().data()
+
+        assertThat(opened.path("available").asBoolean()).isTrue()
+        assertThat(opened.path("target").path("commentId").asLong()).isEqualTo(reply.id)
+        assertThat(opened.path("target").path("parentCommentId").asLong()).isEqualTo(root.id)
+        val repeated = openRequest(auth, inboxBunch, notificationId).expectSuccessEnvelope().andReturn().data()
+        assertThat(repeated.path("readAt")).isEqualTo(opened.path("readAt"))
+        listRequest(auth, inboxBunch).expectSuccessEnvelope().andExpect(jsonPath("$.data.unreadCount").value(0))
+        socialComments.delete(owner, bundle.id, reply.id)
+        val unavailable = openRequest(auth, inboxBunch, notificationId).expectSuccessEnvelope().andReturn().data()
+        assertThat(unavailable.path("available").asBoolean()).isFalse()
+        assertThat(unavailable.path("target").isNull).isTrue()
+        assertThat(unavailable.path("readAt")).isEqualTo(opened.path("readAt"))
     }
 
     @Test
@@ -114,7 +200,8 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(item.path("body").asText()).isEqualTo("${fixture.joinedNickname}님이 번치에 참여했어요.")
         assertThat(item.path("readAt").isNull).isTrue()
         assertThat(fieldNames(item.path("target"))).containsExactlyInAnyOrder(
-            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId", "sourceBunchId", "commentId"
+            "kind", "bunchId", "bundleId", "noticeId", "targetBunchId",
+            "sourceBunchId", "commentId", "parentCommentId"
         )
         assertThat(item.path("target").path("kind").asText()).isEqualTo(NotificationTargetKind.MEMBERS.name)
         assertThat(item.path("target").path("bunchId").asLong()).isEqualTo(fixture.bunchId)
@@ -123,6 +210,7 @@ class NotificationHttpIntegrationTest : BunchIntegrationSupport() {
         assertThat(item.path("target").path("targetBunchId").isNull).isTrue()
         assertThat(item.path("target").path("sourceBunchId").isNull).isTrue()
         assertThat(item.path("target").path("commentId").isNull).isTrue()
+        assertThat(item.path("target").path("parentCommentId").isNull).isTrue()
 
         val notificationId = item.path("id").asLong()
         val firstRead = readRequest(fixture.owner, fixture.bunchId, notificationId)

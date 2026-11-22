@@ -27,7 +27,9 @@ import com.bunch.notification.dto.PushAps
 import com.bunch.notification.dto.PushPayload
 import com.bunch.notification.service.ApnsClient
 import com.bunch.notification.service.DeviceTokenCipher
+import com.bunch.notification.service.PushPayloadFactory
 import com.bunch.notification.service.PushWorker
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -52,6 +54,12 @@ import java.util.UUID
 class PushWorkerIntegrationTest : BunchIntegrationSupport() {
     @Autowired
     private lateinit var worker: PushWorker
+
+    @Autowired
+    private lateinit var payloads: PushPayloadFactory
+
+    @Autowired
+    private lateinit var mapper: ObjectMapper
 
     @Autowired
     private lateinit var jobs: PushJobRepository
@@ -116,6 +124,53 @@ class PushWorkerIntegrationTest : BunchIntegrationSupport() {
         assertThat(sent.status).isEqualTo(PushJobStatus.SENT)
         assertThat(sent.sentAt).isEqualTo(now)
         assertThat(sent.attempts).isEqualTo(1)
+    }
+
+    @Test
+    fun `backfilled oversized pending payload is fitted before delivery with identity preserved`() {
+        val job = fixture()
+        job.payload = job.payload.copy(
+            aps = job.payload.aps.copy(alert = job.payload.aps.alert.copy(body = "가".repeat(1500))),
+            notificationId = 42,
+            target = job.payload.target + ("parentCommentId" to null)
+        )
+        jobs.saveAndFlush(job)
+        val fitted = payloads.fitForDelivery(job.payload)
+        assertThat(mapper.writeValueAsBytes(job.payload).size).isGreaterThan(4096)
+        val device = devices.findById(requireNotNull(job.deviceId)).orElseThrow()
+        `when`(apns.send(
+            device.environment, device.topic, cipher.decrypt(device.tokenCiphertext), job.id, fitted, job.expiresAt
+        )).thenReturn(ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+
+        org.mockito.Mockito.verify(apns).send(
+            device.environment, device.topic, cipher.decrypt(device.tokenCiphertext), job.id, fitted, job.expiresAt
+        )
+        val sent = jobs.findById(job.id).orElseThrow()
+        assertThat(sent.status).isEqualTo(PushJobStatus.SENT)
+        assertThat(sent.payload).isEqualTo(fitted)
+        assertThat(mapper.writeValueAsBytes(sent.payload).size).isLessThanOrEqualTo(4096)
+    }
+
+    @Test
+    fun `unfittable backfilled payload fails without blocking next valid job`() {
+        val invalid = fixture()
+        invalid.payload = invalid.payload.copy(
+            aps = invalid.payload.aps.copy(alert = invalid.payload.aps.alert.copy(title = "가".repeat(1500)))
+        )
+        jobs.saveAndFlush(invalid)
+        now = now.plusSeconds(1)
+        val valid = fixture()
+        respond(valid, ApnsResponse(200, null))
+
+        assertThat(worker.runOnce()).isEqualTo(1)
+
+        val failed = jobs.findById(invalid.id).orElseThrow()
+        assertThat(failed.status).isEqualTo(PushJobStatus.FAILED)
+        assertThat(failed.lastErrorCode).isEqualTo("PayloadTooLarge")
+        assertThat(failed.attempts).isZero()
+        assertThat(jobs.findById(valid.id).orElseThrow().status).isEqualTo(PushJobStatus.SENT)
     }
 
     @Test

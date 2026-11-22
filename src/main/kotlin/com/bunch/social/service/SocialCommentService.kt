@@ -106,6 +106,7 @@ class SocialCommentService(
             actorId = userId,
             actorNickname = author.nickname ?: "작성자",
             content = content,
+            parentCommentId = row.parentId,
             parentAuthorId = parent?.authorMemberId,
             parentBunchId = parent?.actingBunchId,
             now = now
