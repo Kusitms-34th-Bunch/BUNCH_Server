@@ -27,7 +27,7 @@
 | F4 | 업로드 시각 | `uploads[].uploadedAt`(`photo_uploaders.uploaded_at`) | `RecoPhotoInputIntegrationTest` | 구현됨 | X5가 쓴다 |
 | F5 | 원본 유형 | `PhotoSourceType`, 업로드 필드 `sourceType`, 입력 만들기에서 한 곳에서 판정 | `PhotoUploadOriginIntegrationTest` | 구현됨 | 값이 없으면 날짜·시각이 있을 때 카메라, 없으면 저장 이미지 |
 | F6 | 품질 | `ImageQuality`(긴 변 1024px 회색조, 흔들림·노출·해상도), `PhotoRecoFeature.quality` | `PhotoUploadQualityIntegrationTest`, `PhotoRecoFeatureQualityMigrationIntegrationTest` | 구현됨 | D3·L3 법무 확인 대기. 업로드 때 동기 계산, 비동기 분리는 별도 이슈 |
-| F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 없음(업로드 요청에 필드 없음) | — | 미구현 | 후속(업로드 입력 확장). 앱 협의 필요, L2 법무 |
+| F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 업로드 필드 `deviceModel`(`photo_reco_feature.device_model`), `capturedMillis`(3자리, `photos.captured_millis`). R1용 해상도는 서버가 읽어 `photos.width`·`height`에 저장 | `PhotoUploadMillisModelIntegrationTest`, `PhotoMillisModelMigrationIntegrationTest` | 부분 구현(#204) | 렌즈·연사 ID·EXIF 고유 ID는 받지 않는다(D4·L2 법무 대기). 추천 입력(`RecoPhoto`)에 연결하는 것은 후속. 앱 협의 필요 |
 | R1 | 중복 묶음 | `DuplicateGrouper`(해시 + 이미지 지문 유사도 기반) | `DuplicateGrouperTest`, `ImageSimilarityTest` | 교체 예정 | 새 기준은 해시·EXIF·같은 업로더 연사. 이미지 지문은 쓰지 않는다. 후속 |
 | R2 | 함께 찍은 순간 | 없음 | — | 미구현 | 후속 |
 
