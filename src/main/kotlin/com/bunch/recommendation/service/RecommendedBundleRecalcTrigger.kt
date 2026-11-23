@@ -1,7 +1,9 @@
 package com.bunch.recommendation.service
 
+import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.photo.service.PhotoChangedEvent
+import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.combination.CombinationSettings
 import org.springframework.beans.factory.annotation.Value
@@ -30,6 +32,7 @@ import java.time.LocalDate
 @Component
 class RecommendedBundleRecalcTrigger(
     private val queue: RecommendedBundleQueueRepository,
+    private val recommendations: RecommendationRepository,
     private val settings: CombinationSettings,
     private val clock: Clock,
     @Value("\${reco.combination.enabled:false}")
@@ -53,6 +56,9 @@ class RecommendedBundleRecalcTrigger(
     @Transactional(propagation = Propagation.MANDATORY)
     fun noteBundleChange(event: BundleChangedEvent) {
         if (!enabled) return
+        // A bundle that is deleted gives its photos back (4.2.9 rule 1): they are not noted as used any more, so they
+        // can be recommended again. This runs before the bundle and its photos are deleted.
+        if (event.type == BundleEventType.DELETED) recommendations.releaseUsedPhotosOfBundle(event.bundleId)
         queue.putAllDays(event.bunchId, dueAt())
     }
 
