@@ -6,8 +6,9 @@ import kotlin.math.abs
 /**
  * The fifth rule of the general bundles (recommended bundle specification 3-2): a piece over
  * [CombinationSettings.subBundleMax] photos is cut into sub bundles. It is cut at the boundary with the biggest gap
- * among those where both sides are enough for a bundle; when the gaps are as big, at the one where the two sides differ
- * least in size, and then at the earlier one. What is cut off is looked at again. A piece with no such boundary is
+ * among those where both sides are recommended (3-4: enough photos and members, and a moment they took photos
+ * together); when the gaps are as big, at the one where the two sides differ least in size, and then at the earlier
+ * one (X9: the same input gives the same answer). What is cut off is looked at again. A piece with no such boundary is
  * left whole, however big it is.
  */
 class GeneralBigSplitter(
@@ -17,7 +18,7 @@ class GeneralBigSplitter(
         if (counter.photos(piece.photos) <= settings.subBundleMax) return listOf(piece)
         val segments = piece.segments
         val candidates = (1 until segments.size).filter {
-            counter.isEnough(photosBefore(segments, it)) && counter.isEnough(photosFrom(segments, it))
+            counter.isRecommendable(photosBefore(segments, it)) && counter.isRecommendable(photosFrom(segments, it))
         }
         if (candidates.isEmpty()) return listOf(piece)
         val best = candidates.sortedWith(
