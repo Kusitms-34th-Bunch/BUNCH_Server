@@ -313,6 +313,44 @@ class WorkflowAdmissionTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
+    def r2_test_step(self):
+        step = self.workflow().split("      - name: Test R2 migration tool when present\n", 1)[1]
+        return textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n      - ", 1)[0])
+
+    def run_r2_test_step(self, tool=None):
+        with tempfile.TemporaryDirectory(dir=ROOT / "deploy/tests") as directory:
+            directory = Path(directory)
+            if tool is not None:
+                script = directory / "scripts/r2/run.sh"
+                script.parent.mkdir(parents=True)
+                script.write_text(tool)
+            return subprocess.run(["bash", "-e", "-o", "pipefail", "-c", self.r2_test_step()],
+                                  cwd=directory, capture_output=True, text=True)
+
+    def test_r2_tool_changes_require_build_without_monitoring_or_pr_deploy(self):
+        for path in ("scripts/r2/R2ImageMigration.java", "scripts/r2/run.sh", "scripts/r2/prepare.sql"):
+            with self.subTest(path=path):
+                plan = self.admission("refs/heads/dev", path, dev="true", prod="true",
+                                      monitoring="true", event="pull_request")
+                self.assertEqual(plan["app"], "true")
+                self.assertEqual(plan["monitoring"], "false")
+                self.assertEqual(plan["deploy_app"], "false")
+                self.assertEqual(plan["deploy_monitoring"], "false")
+
+    def test_missing_r2_tool_does_not_fail_checkout(self):
+        result = self.run_r2_test_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_present_r2_tool_receives_test_argument(self):
+        result = self.run_r2_test_step('test "$#" -eq 1 && test "$1" = test || exit 19\nprintf "r2-tests-ran\\n"\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "r2-tests-ran\n")
+
+    def test_r2_tool_failure_fails_ci(self):
+        result = self.run_r2_test_step('exit 23\n')
+        self.assertEqual(result.returncode, 23, result.stderr)
+
     def test_both_concurrency_groups_keep_pending_runs(self):
         groups = re.findall(r"(?m)^( *)concurrency:\n\1  group: ([^\n]+)\n"
                             r"\1  cancel-in-progress: false\n\1  queue: max$", self.workflow())
