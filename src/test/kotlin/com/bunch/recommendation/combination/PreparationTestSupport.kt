@@ -38,7 +38,10 @@ internal object PreparationTestSupport {
         aiStatus: AiStatus = AiStatus.DONE,
         analysis: AiAnalysis = AiAnalysis.NONE,
         batch: UUID? = null,
-        memberUploadedAt: Map<Long, Instant> = emptyMap()
+        memberUploadedAt: Map<Long, Instant> = emptyMap(),
+        millis: Int? = null,
+        model: String? = null,
+        size: Pair<Int, Int>? = null
     ): RecoPhoto = RecoPhoto(
         photoId = id,
         capturedDate = date?.let(LocalDate::parse),
@@ -56,6 +59,10 @@ internal object PreparationTestSupport {
         quality = PhotoQuality.GOOD,
         aiStatus = aiStatus,
         analysis = analysis,
-        fingerprint = fingerprint
+        fingerprint = fingerprint,
+        capturedMillis = millis,
+        deviceModel = model,
+        width = size?.first,
+        height = size?.second
     )
 }

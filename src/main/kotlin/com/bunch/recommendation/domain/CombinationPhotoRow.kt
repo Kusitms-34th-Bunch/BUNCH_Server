@@ -35,6 +35,16 @@ interface CombinationPhotoRow {
     /** The image fingerprint of the photo, or null when it has none (4.2.8 rule 1). */
     val imageFingerprint: Long?
 
+    /** The part of the shooting time below the second (0 to 999), or null when the device did not record it. */
+    val capturedMillis: Int?
+
+    /** The model of the device that took the photo, or null when the app did not tell it. */
+    val deviceModel: String?
+
+    /** The size of the stored image in pixels, or null for a photo stored before they were kept. */
+    val width: Int?
+    val height: Int?
+
     /** The original type the app told when the photo was uploaded, or null when it did not tell. */
     val source: PhotoSourceType?
 

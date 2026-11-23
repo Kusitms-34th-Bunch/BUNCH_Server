@@ -183,6 +183,34 @@ class RecoPhotoInputIntegrationTest : RecommendationIntegrationSupport() {
     }
 
     @Test
+    fun `the milliseconds, the model and the size are carried, and what is not known stays null, not zero`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val all = insertPhoto(bunchId, "2026-10-19", "13:30:00", uploaders = listOf(ownerId))
+        val zero = insertPhoto(bunchId, "2026-10-19", "13:40:00", uploaders = listOf(ownerId))
+        val none = insertPhoto(bunchId, "2026-10-19", "13:50:00", uploaders = listOf(ownerId))
+        val modelRowOnly = insertPhoto(bunchId, "2026-10-19", "14:00:00", uploaders = listOf(ownerId))
+        setMoment(all, millis = 123, width = 4032, height = 3024)
+        setModel(all, "iPhone15,2")
+        setMoment(zero, millis = 0, width = null, height = null)
+        setFeature(modelRowOnly)
+
+        val photos = inputs.build(bunchId).associateBy { it.photoId }
+
+        assertThat(photos.getValue(all).capturedMillis).isEqualTo(123)
+        assertThat(photos.getValue(all).deviceModel).isEqualTo("iPhone15,2")
+        assertThat(photos.getValue(all).width).isEqualTo(4032)
+        assertThat(photos.getValue(all).height).isEqualTo(3024)
+        // 0 milliseconds is a value that was recorded; a missing one is not 0.
+        assertThat(photos.getValue(zero).capturedMillis).isZero()
+        assertThat(photos.getValue(zero).width).isNull()
+        assertThat(photos.getValue(none).capturedMillis).isNull()
+        assertThat(photos.getValue(none).deviceModel).isNull()
+        assertThat(photos.getValue(none).width).isNull()
+        assertThat(photos.getValue(none).height).isNull()
+        assertThat(photos.getValue(modelRowOnly).deviceModel).isNull()
+    }
+
+    @Test
     fun `the original type the app told is kept whatever the photo has`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val camera = insertPhoto(bunchId, null, uploaders = listOf(ownerId))
@@ -256,6 +284,24 @@ class RecoPhotoInputIntegrationTest : RecommendationIntegrationSupport() {
 
     private fun setOffset(photoId: Long, offset: String) {
         jdbc.update("UPDATE photos SET captured_utc_offset = ? WHERE id = ?", offset, photoId)
+    }
+
+    private fun setMoment(photoId: Long, millis: Int, width: Int?, height: Int?) {
+        jdbc.update(
+            "UPDATE photos SET captured_millis = ?, width = ?, height = ? WHERE id = ?",
+            millis,
+            width,
+            height,
+            photoId
+        )
+    }
+
+    private fun setModel(photoId: Long, model: String) {
+        jdbc.update(
+            "INSERT INTO photo_reco_feature (photo_id, device_model) VALUES (?, ?)",
+            photoId,
+            model
+        )
     }
 
     private fun setFeature(photoId: Long, quality: String? = null, aiStatus: String? = null) {

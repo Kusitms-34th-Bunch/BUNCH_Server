@@ -76,7 +76,11 @@ class RecoPhotoInputBuilder(
             aiStatus = analysis.status,
             analysis = analysis.analysis,
             fingerprint = row.imageFingerprint,
-            dateBatchId = row.dateBatchId
+            dateBatchId = row.dateBatchId,
+            capturedMillis = row.capturedMillis,
+            deviceModel = row.deviceModel,
+            width = row.width,
+            height = row.height
         )
     }
 
