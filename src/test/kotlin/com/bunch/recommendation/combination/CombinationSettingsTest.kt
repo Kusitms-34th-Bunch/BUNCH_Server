@@ -41,7 +41,6 @@ class CombinationSettingsTest {
         assertThat(settings.peopleSplitMinSide).isEqualTo(3)
         assertThat(settings.subBundleMax).isEqualTo(40)
         assertThat(settings.timeBuckets).isEqualTo(4)
-        assertThat(settings.cardMaxSize).isEqualTo(10)
         assertThat(settings.cardSizeSteps).containsExactly(
             CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 6),
             CombinationSettings.CardSizeStep(fromPhotos = 16, cardSize = 8),
@@ -50,21 +49,16 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the ratios and the weights of the card are the ones of the table`() {
-        assertThat(settings.clueMaxRatio).isEqualTo(0.5)
-        assertThat(settings.subjectMaxRatio).isEqualTo(0.5)
+    fun `the member limit and the window of the card are the ones of the table`() {
         assertThat(settings.memberMaxRatio).isEqualTo(0.6)
-        assertThat(settings.representativenessWeight).isEqualTo(0.4)
-        assertThat(settings.qualityWeight).isEqualTo(0.2)
-        assertThat(settings.diversityWeight).isEqualTo(0.4)
+        assertThat(settings.cardWindow).isEqualTo(Duration.ofMinutes(10))
     }
 
     @Test
-    fun `the confidences and the similarities are the ones of the table`() {
+    fun `the confidences are the ones of the table`() {
         assertThat(settings.clueMinConfidence).isEqualTo(0.70)
         assertThat(settings.sensitiveMinConfidence).isEqualTo(0.50)
         assertThat(settings.activityMinConfidence).isEqualTo(0.50)
-        assertThat(settings.sameSceneMinSimilarity).isEqualTo(0.85)
     }
 
     @Test
@@ -147,16 +141,17 @@ class CombinationSettingsTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(nightStartHour = 24) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(diversityWeight = 0.5) }
-            .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(memberMaxRatio = 0.0) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(clueMinConfidence = 1.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(cardMaxSize = 5) }
+        assertThatThrownBy { CombinationSettings(cardWindow = Duration.ZERO) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            CombinationSettings(cardSizeSteps = listOf(CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 7)))
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(cardSizeSteps = emptyList()) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy {
