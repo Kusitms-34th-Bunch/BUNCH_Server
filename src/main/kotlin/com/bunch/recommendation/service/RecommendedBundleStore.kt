@@ -140,6 +140,7 @@ class RecommendedBundleStore(
         photoCount = bundle.photoCount,
         uploaderCount = bundle.uploaderCount,
         hasGroupPhoto = bundle.hasGroupPhoto,
+        coverPhotoId = bundle.coverPhotoId,
         ruleTrace = traceOf(bundle),
         visibleFrom = visibility.visibleFrom(calculatedAt, bundle.dayKey),
         lastPhotoAddedAt = bundle.photos.mapNotNull { photoAddedAt[it.photoId] }.maxOrNull() ?: calculatedAt,
@@ -161,6 +162,7 @@ class RecommendedBundleStore(
             entity.photoCount != bundle.photoCount ||
             entity.uploaderCount != bundle.uploaderCount ||
             entity.hasGroupPhoto != bundle.hasGroupPhoto ||
+            entity.coverPhotoId != bundle.coverPhotoId ||
             canonical.writeValueAsString(entity.ruleTrace) != canonical.writeValueAsString(trace)
         if (!changed) return false
 
@@ -175,6 +177,7 @@ class RecommendedBundleStore(
         entity.photoCount = bundle.photoCount
         entity.uploaderCount = bundle.uploaderCount
         entity.hasGroupPhoto = bundle.hasGroupPhoto
+        entity.coverPhotoId = bundle.coverPhotoId
         entity.ruleTrace = trace
         entity.updatedAt = maxOf(calculatedAt, entity.createdAt)
         return true

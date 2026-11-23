@@ -24,8 +24,9 @@ import java.time.LocalDate
  *
  * When the day is calculated again, a bundle that has the same photos has the same [stableKey] and is updated: its
  * [id], [createdAt] and [visibleFrom] stay (10-3), so the list does not flicker and the bundle is not shown again. What
- * the calculation gives again (the title, the activity, the counts, the trace) is replaced. The cover of the card is
- * the photo with the place 1 ([RecommendedBundlePhoto.cardPosition]).
+ * the calculation gives again (the title, the activity, the counts, the cover, the trace) is replaced. The cover of the
+ * card is [coverPhotoId], one of the photos on the card chosen by the rules of the cover (recommended bundle
+ * specification 4); it is not the photo with the place 1, because the places are in the order of the time.
  *
  * [ruleTrace] is how the bundle was made (11). It is kept to be read and is never calculated from.
  *
@@ -85,6 +86,9 @@ class RecommendedBundle(
 
     @Column(name = "has_group_photo", nullable = false)
     var hasGroupPhoto: Boolean,
+
+    @Column(name = "cover_photo_id")
+    var coverPhotoId: Long? = null,
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "rule_trace", nullable = false, columnDefinition = "jsonb")
