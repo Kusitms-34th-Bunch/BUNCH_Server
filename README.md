@@ -332,12 +332,15 @@ dev/main push는 앱 변경일 때 환경별 SHA 태그를 GHCR에 게시하며,
 ## 개발·운영 서버 분리 (#212)
 
 단일 가비아 서버의 Linux `bunch` 계정 아래 `~/dev`, `~/prod`, `~/monitoring`을 사용한다.
-`dev`는 개발 `dev.bunch.kr`, `main`은 운영 `api.bunch.kr`에 배포한다. 기존 홈에서 실행 중인 환경은 개발이며,
+배포 대상은 `dev` → 개발, `main` → 별도 운영이다. 현재 `api.bunch.kr`은 기존 개발 서버에 유지하며,
+개발용 주소(`dev.bunch.kr` 후보)와 테스트 앱 전환 일정은 추후 확정한다. 기존 홈에서 실행 중인 환경은 개발이며,
 프로젝트 `bunch`와 `bunch-pgdata` / `bunch-redis-data`를 보존한다. 운영은 새 볼륨과 빈 DB로 시작한다.
 
 [환경 분리 계약](docs/specs/environments.md)과 [이전·배포·복구 절차](deploy/README.md)를 따른다.
-기존 홈 자동 배포 중지 → 백업/복구 시험 → 개발 경로 준비 → dev 도메인과 테스트 앱 API/WebSocket 확인 →
-개발 R2 데이터 전환과 경로 활성화(#213) → 독립 운영 검증 → api 운영 전환 → 환경별 자동 배포 활성화 순서다.
+빈 운영 DB·Redis·`bunch-prod`와 R2 앱의 **비공개 준비·내부 검증은 개발 hostname 일정과 독립적**이다.
+현재 개발 환경·데이터를 운영으로 승격하거나 복사하지 않는다. 최종 `api` 라우팅·자동 배포는 사용자 일정 확정과
+실제 테스트 앱 API/WebSocket 주소 변경 확인 후에만 활성화한다. prod의 임시 `/api/v1/auth/dev/token` 차단도 공개 전 필수다.
+기존 개발 데이터의 R2 이전·개발 경로 활성화는 #213의 별도 점검·복구 절차를 따른다.
 준비 표식과 활성화 변수 없이 새 자동 배포는 실행되지 않는다. 앱은 환경별 digest로 고정하고 관측은 한 세트로 환경 라벨을 구분한다.
 
 R2 배포 변수는 `R2_ENDPOINT`(버킷명 제외), `R2_BUCKET`(`bunch-dev` / `bunch-prod`),

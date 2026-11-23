@@ -3,6 +3,9 @@
 계약은 [환경 분리 Spec](../docs/specs/environments.md), 관련 이슈는
 [#212](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/212)다.
 이 안내는 **적용 절차**이며 서버 적용 완료 기록이 아니다. 실제 변경은 조정 채팅에서 순서대로 수행한다.
+현재 개발 환경·데이터는 운영으로 승격하지 않는다. **빈 운영 환경의 비공개 준비와 최종 공개는 별도 단계**다.
+운영 비공개 준비는 개발 hostname 확정을 기다리지 않아도 되며, 기존 개발 서버와 `api.bunch.kr` 연결은 유지한다.
+개발용 주소·테스트 앱 변경과 최종 라우팅은 사용자 일정 확정 전 실행하지 않는다.
 
 ## 배치와 배포 조건
 
@@ -12,7 +15,7 @@
 | Compose 프로젝트 | 기존 `bunch` | `bunch-prod` | 기존 `bunch` |
 | 설정 | `deploy/compose.yaml` | 동일 파일 | `deploy/monitoring/compose.yaml` |
 | 환경 예제 | `deploy/.env.example` | `deploy/environments/.env.example` | `deploy/monitoring/.env.example` |
-| API / WebSocket | `dev.bunch.kr` | `api.bunch.kr` | 관리자 hostname |
+| API / WebSocket | 현재 `api.bunch.kr`, 개발용 주소·일정 추후 확정 | 향후 `api.bunch.kr`, 준비 중 미연결 | 관리자 hostname |
 | 자동 배포 | `dev` | `main` | `main` 변경만, 별도 활성화 |
 
 2026-11-22 조정 채팅의 읽기 전용 확인: 현재 `/home/bunch/compose.yaml`, `/home/bunch/.env`,
@@ -174,7 +177,10 @@ docker compose --env-file .env -f compose.yaml config --quiet
 
 ## 5. 개발 hostname → R2 데이터 전환 → 개발 경로 활성화
 
-1. 기존 개발 Tunnel에 `dev.bunch.kr → http://app:8080`을 연결한다. 기존 `api` 연결은 유지한다.
+이 단계는 사용자 일정 확정 후 수행한다. **6절 운영 비공개 준비의 선행 조건은 아니다.**
+
+1. 개발용 주소와 일정이 확정되면 기존 개발 Tunnel에 해당 hostname → `http://app:8080`을 연결한다.
+   `dev.bunch.kr` 예제는 확정된 연결 상태가 아니다. 기존 `api` 연결은 유지한다.
 2. 실제 테스트 앱의 **API 주소와 WebSocket 주소를 모두** dev hostname으로 변경한다.
 3. 로그인/갱신·사진 조회/업로드/삭제·초대·STOMP 연결/재연결을 실제 iOS/WebView로 검증한다.
    실제 프런트 Origin을 허용한다. API 주소를 무조건 Origin으로 쓰지 않는다.
@@ -267,10 +273,18 @@ docker compose --env-file .env -f compose.yaml up -d --no-deps app cloudflared
 ```
 
 중단 지점 C: 개발 앱·기존 데이터가 `~/dev`에서 정상이고, 테스트 앱이 dev API/WebSocket과 개발 R2를
-실제 사용한다는 근거가 확보돼야 다음으로 간다. 기존 `api.bunch.kr`은 이 확인 전 개발을 계속 가리킨다.
+실제 사용한다는 근거는 **최종 라우팅 전환**의 선행 조건이다. 운영 비공개 준비는 이 확인 전에도 가능하다.
+기존 `api.bunch.kr`은 최종 전환 전 개발을 계속 가리킨다.
 이를 확인하지 않고 `api`를 운영으로 돌리면 기존 테스트 앱이 빈 운영 DB에 접속한다.
 
-## 6. 빈 운영 DB와 독립 서비스 준비
+## 6. 빈 운영 DB와 독립 서비스의 비공개 준비
+
+이 절은 3절의 파일·키·네트워크 준비 후 5절과 독립적으로 진행할 수 있다. 기존 개발 앱의 정지·이전,
+개발 hostname 연결이나 테스트 앱 주소 변경을 요구하지 않는다. `~/prod`의 검토한 설정 파일만 준비하며,
+`prepare-environments.py --apply`를 사용하지 않고 운영 파일만 별도로 배치할 수도 있다.
+현재 validator가 비교할 `~/dev/.env`와 Compose 파일은 사전에 준비해야 하지만 개발 앱·DNS를 활성화할 필요는 없다.
+실제 키를 개별 주입하고 기존 홈 `.env`는 복사하지 않는다. R2 앱 준비에는 #213 통합 이미지가 필요하다.
+**운영 cloudflared 기동·hostname 연결·준비 표식 생성·자동 배포 활성화는 이 절에 포함하지 않는다.**
 
 운영 JWT·DB·R2(bucket=`bunch-prod`)·Tunnel 키를 먼저 독립 발급하고 `.env`에 확정한다.
 운영 이미지 digest도 고정한다. 값이 바뀌면 앱·Tunnel 최초 기동 직전에 다시 검사한다.
@@ -311,23 +325,34 @@ GRANT USAGE, CREATE ON SCHEMA public TO bunch;
 ```bash
 (
 set -euo pipefail
-# Recheck the FINAL credentials immediately before creating either connector/application.
+# Recheck the FINAL credentials before starting the PRIVATE application.
 python3 ~/prod/environment_check.py prod ~/prod --resources
 cd ~/prod
 docker compose --env-file .env -f compose.yaml up -d --no-deps app
-# Configure a distinct production Tunnel; switch api hostname ONLY after step 5 evidence.
-docker compose --env-file .env -f compose.yaml up -d --no-deps cloudflared
+# Keep the production Tunnel stopped and the public hostname unchanged.
 )
 ```
 
-공개 전 관리 health와 내부 API 응답·빈 DB·이미지/환경 라벨·볼륨 격리를 확인하고 `api.bunch.kr`을 운영 Tunnel로 전환한다.
-도메인 전환 중 기존 연결은 재연결이 필요하며 DNS/Tunnel 전파 지연은 별도 확인한다.
-prod의 임시 인증 API(`/api/v1/auth/dev/token`)는 기존 앱 코드에서 열려 있으므로 정식 운영 공개 전 별도 앱 작업으로 차단해야 한다.
-이 작업은 `src/**` 소유 범위 밖이므로 코드를 수정하지 않는다.
+관리 health와 내부 API 응답·빈 DB·이미지/환경 라벨·볼륨 격리를 내부 연결로만 확인한다.
+`bunch-prod`에는 기존 개발 데이터를 복사하지 않는다. 비공개 준비 완료 후에도 기존 개발 서버와 `api.bunch.kr`은 유지한다.
 
-## 7. 자동 배포 활성화와 일상 배포
+**공개 차단 사항:** 임시 인증 API `/api/v1/auth/dev/token`은 현재 prod에서도 열려 있다.
+공개 전에 별도 앱 작업으로 비활성화·제거하고, prod에서 인증 없이 토큰을 발급하지 않는 회귀 검증을 확보해야 한다.
+이 작업은 `src/**` 소유 범위 밖이므로 코드를 수정하지 않는다. 비공개 기동 검증 성공과 공개 가능 판정을 구분한다.
 
-개발 R2/도메인·운영 격리·관측 검증을 마친 환경에만 표식을 만든다.
+중단 지점 D: 빈 운영 DB·Redis·R2 앱이 내부에서 검증됐지만 운영 Tunnel은 중지 상태이고 공개 hostname·자동 배포는 그대로다.
+이 상태로 사용자 일정을 기다릴 수 있다.
+
+## 7. 최종 도메인 전환·자동 배포 활성화와 일상 배포
+
+6절 완료만으로 이 절을 실행하지 않는다. 사용자 일정 확정, 실제 테스트 앱의 API·WebSocket 주소 변경 확인,
+운영 내부 검증과 dev token API 차단을 모두 마친 뒤 조정 채팅이 최종 전환한다.
+초대 URL·실제 frontend Origin·WebSocket 재연결도 확인한다. 그 후에만 독립 운영 Tunnel을 기동하고
+`api.bunch.kr`을 새 운영 환경으로 연결한다. 기존 개발 데이터의 운영 승격·복제는 하지 않는다.
+도메인 전환 중 기존 연결의 재연결과 DNS/Tunnel 전파 지연을 별도 확인한다.
+
+각 환경의 R2·내부 연결·관측 검증과 해당 전환 조건을 마친 환경에만 표식을 만든다.
+개발 자동 배포는 개발 주소·R2 전환 검증 후, 운영 자동 배포는 위 공개 전 조건과 사용자 일정 확인 후에만 활성화한다.
 validator는 표식·R2 준비를 검사한다. 키 중복은 준비 표식과 무관하게 일반 검사부터 대조하며,
 개발 환경 파일이 없으면 운영 최초 기동 검사를 거부한다. JWT/DB/R2/Tunnel 키가 같으면 실패한다.
 
