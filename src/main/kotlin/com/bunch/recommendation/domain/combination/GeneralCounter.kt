@@ -14,6 +14,9 @@ class GeneralCounter(
     fun uploaders(photos: Collection<PreparedPhoto>): Set<Long> =
         eligibility.groupsOf(photos, groups).flatMap { it.uploaderIds }.toSet()
 
-    /** The "ok" of the specification: enough photos and enough members for a bundle (7-4, 7-6, 7-7, 7-8). */
+    /** Enough photos and enough members for a bundle to stand (3-1). */
     fun isEnough(photos: Collection<PreparedPhoto>): Boolean = eligibility.isEnough(photos, groups)
+
+    /** The recommendation condition (3-4): enough, and the members took photos together at least once. */
+    fun isRecommendable(photos: Collection<PreparedPhoto>): Boolean = eligibility.isRecommendable(photos, groups)
 }
