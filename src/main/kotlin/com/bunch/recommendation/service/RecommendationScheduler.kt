@@ -11,11 +11,16 @@ import java.time.Instant
  * Calculates the recommended bundles of the bunches whose photos stopped changing for the quiet time (4.2.9 rule 2:
  * five minutes after the last change, once). It lives outside the service so each bunch is calculated in a
  * transaction of its own through the service.
+ *
+ * It does nothing while `reco.combination.enabled` is on: the new recommended bundles are shown then, and the old ones
+ * are not calculated or deleted any more.
  */
 @Component
 class RecommendationScheduler(
     private val recommendations: RecommendationService,
     private val settings: RecommendationSettings,
+    @Value("\${reco.combination.enabled:false}")
+    private val combinationEnabled: Boolean,
     @Value("\${recommendation.recalculation.batch-size:20}")
     private val batchSize: Int
 ) {
@@ -49,6 +54,8 @@ class RecommendationScheduler(
 
     /** Deletes the expired recommended bundles and returns how many. [now] is a parameter so tests can move time. */
     fun runExpiry(now: Instant = Instant.now()): Int {
+        if (combinationEnabled) return 0
+
         val removed = recommendations.expireCandidates(now)
         if (removed > 0) logger.info("Expired recommended bundles deleted: {}", removed)
         return removed
@@ -59,6 +66,8 @@ class RecommendationScheduler(
      * without sleeping. A bunch that fails keeps its noted dates and is tried again at the next call.
      */
     fun runOnce(now: Instant = Instant.now()): Int {
+        if (combinationEnabled) return 0
+
         val cutoff = now.minus(settings.quietTime)
         val bunchIds = recommendations.quietBunchIds(cutoff, batchSize)
 

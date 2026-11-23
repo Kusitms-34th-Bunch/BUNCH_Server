@@ -77,6 +77,9 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
         assertThat(card.path("endDate").isNull).isTrue()
         assertThat(card.path("photoCount").asInt()).isEqualTo(8)
         assertThat(card.path("coverImageUrl").asText()).isEqualTo(imageUrl)
+        // The time range is only in the new recommended bundles, so the response is the same while the switch is off.
+        assertThat(card.has("startAt")).isFalse()
+        assertThat(card.has("endAt")).isFalse()
     }
 
     @Test

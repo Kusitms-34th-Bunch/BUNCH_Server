@@ -30,6 +30,7 @@ import com.bunch.recommendation.dto.RecommendedBundleListResponse
 import com.bunch.recommendation.dto.RecommendedBundlePhoto
 import com.bunch.recommendation.dto.RecommendedUploader
 import jakarta.persistence.EntityManager
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -43,6 +44,10 @@ class RecommendationService(
     private val entityManager: EntityManager,
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
+    private val uploaders: RecommendedUploaders,
+    private val reader: RecommendedBundleReader,
+    @Value("\${reco.combination.enabled:false}")
+    private val combinationEnabled: Boolean,
     private val clusterer: PhotoClusterer,
     private val cardSelector: CardSelector,
     private val matcher: CandidateMatcher,
@@ -63,6 +68,8 @@ class RecommendationService(
      */
     @Transactional(readOnly = true)
     fun bundleCards(userId: Long, bunchId: Long): RecommendedBundleListResponse {
+        if (combinationEnabled) return reader.cards(userId, bunchId)
+
         accessNotices.requireMemberOrAccessNotice(userId, bunchId)
         val candidates = recommendations.findOrderedCandidates(bunchId)
         if (candidates.isEmpty()) return RecommendedBundleListResponse(emptyList())
@@ -91,6 +98,8 @@ class RecommendationService(
      */
     @Transactional(readOnly = true)
     fun bundlePhotos(userId: Long, bunchId: Long, candidateId: Long): RecommendedBundleDetailResponse {
+        if (combinationEnabled) return reader.photos(userId, bunchId, candidateId)
+
         accessNotices.requireMemberOrAccessNotice(userId, bunchId)
         val candidate = recommendations.findCandidate(bunchId, candidateId)
             ?: throw BusinessException(ErrorCode.RESOURCE_NOT_FOUND)
@@ -119,6 +128,7 @@ class RecommendationService(
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     fun noteChange(event: PhotoChangedEvent) {
+        if (combinationEnabled) return
         val date = event.capturedDate ?: return
         recommendations.markChanged(event.bunchId, date, Instant.now())
     }
@@ -134,6 +144,7 @@ class RecommendationService(
     @EventListener(condition = "#event.type.name() matches 'CREATED|PHOTOS|DELETED'")
     @Transactional(propagation = Propagation.MANDATORY)
     fun noteBundleChange(event: BundleChangedEvent) {
+        if (combinationEnabled) return
         if (event.type == BundleEventType.DELETED) recommendations.releaseUsedPhotosOfBundle(event.bundleId)
         recommendations.markAllChanged(event.bunchId, Instant.now())
     }
@@ -148,6 +159,8 @@ class RecommendationService(
      */
     @Transactional(propagation = Propagation.MANDATORY)
     fun useCandidate(bunchId: Long, candidateId: Long): UsedCandidate? {
+        if (combinationEnabled) return reader.use(bunchId, candidateId)
+
         val candidate = recommendations.findCandidate(bunchId, candidateId) ?: return null
         recommendations.markCandidatePhotosUsed(bunchId, candidate.id)
         recommendations.deleteCandidates(listOf(candidate.id))
@@ -239,20 +252,10 @@ class RecommendationService(
         return clusters.filter { !expiry.isExpired(latestAdded(it, addedAt), now) }
     }
 
-    private fun uploadersOf(photoIds: List<Long>): Map<Long, List<RecommendedUploader>> =
-        recommendations.findUploaderProfiles(photoIds.distinct())
-            .groupBy({ it.photoId }, { RecommendedUploader(it.memberId, it.nickname, it.imageUrl) })
+    private fun uploadersOf(photoIds: List<Long>): Map<Long, List<RecommendedUploader>> = uploaders.of(photoIds)
 
-    // The members of a card, the one who uploaded the most photos of it first and the lower member number first when
-    // they uploaded as many. A photo several members uploaded counts for each of them. The specification does not say
-    // in which order the chips go; this is the order the nicknames of a title are put in.
-    private fun chipsOf(uploadersOfPhotos: List<List<RecommendedUploader>>): List<RecommendedUploader> {
-        val uploaders = uploadersOfPhotos.flatten()
-        val photoCounts = uploaders.groupingBy { it.memberId }.eachCount()
-        val mostPhotosFirst = compareByDescending<RecommendedUploader> { photoCounts.getValue(it.memberId) }
-
-        return uploaders.distinctBy { it.memberId }.sortedWith(mostPhotosFirst.thenBy { it.memberId })
-    }
+    private fun chipsOf(uploadersOfPhotos: List<List<RecommendedUploader>>): List<RecommendedUploader> =
+        uploaders.chipsOf(uploadersOfPhotos)
 
     private fun toSamples(rows: List<MaterialPhotoRow>): List<PhotoSample> =
         rows.groupBy { it.photoId }.map { (photoId, uploads) ->

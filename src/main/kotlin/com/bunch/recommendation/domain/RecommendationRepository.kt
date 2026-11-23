@@ -94,6 +94,28 @@ interface RecommendationRepository : Repository<Photo, Long> {
     )
     fun findCardPhotoRows(@Param("candidateIds") candidateIds: Collection<Long>): List<CardPhotoRow>
 
+    // The photos of the cards of the new recommended bundles in the order of the card (the order of the time). A photo
+    // that was deleted is already gone, and a photo whose date was cleared is left out until the next calculation.
+    @Query(
+        "select rp.bundleId as candidateId, p.id as photoId, a.url as imageUrl, p.capturedDate as capturedDate, " +
+            "p.capturedTime as capturedTime from RecommendedBundlePhoto rp join Photo p on p.id = rp.photoId " +
+            "join p.imageAsset a where rp.bundleId in :bundleIds and rp.cardPosition is not null " +
+            "and p.capturedDate is not null and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
+            "order by rp.bundleId asc, rp.cardPosition asc"
+    )
+    fun findRecommendedCardPhotoRows(@Param("bundleIds") bundleIds: Collection<Long>): List<CardPhotoRow>
+
+    // The photos of a new recommended bundle that a draft is made from are not recommended again until a photo that is
+    // not among them is added (4.2.9 rule 5). The bundle is deleted by the caller, so its photos are noted before.
+    @Modifying
+    @Query(
+        value = """INSERT INTO recommendation_used_photos (photo_id, bunch_id)
+        SELECT rp.photo_id, :bunchId FROM recommended_bundle_photos rp WHERE rp.bundle_id = :bundleId
+        ON CONFLICT (photo_id) DO NOTHING""",
+        nativeQuery = true
+    )
+    fun markRecommendedBundlePhotosUsed(@Param("bunchId") bunchId: Long, @Param("bundleId") bundleId: Long)
+
     // The badge shows the member as they are now, so the nickname and profile image are read from the member.
     @Query(
         "select u.photo.id as photoId, m.id as memberId, m.nickname as nickname, a.url as imageUrl " +
