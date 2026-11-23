@@ -77,8 +77,8 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.memberId").value(target))
-            .andExpect(jsonPath("$.data.imageUrl").value("https://example.com/public.jpg"))
-            .andExpect(jsonPath("$.data.bunches[0].bunch.imageUrl").value("https://example.com/public.jpg"))
+            .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.containsString("/profile.jpg?")))
+            .andExpect(jsonPath("$.data.bunches[0].bunch.imageUrl").value(org.hamcrest.Matchers.containsString("/profile.jpg?")))
             .andExpect(jsonPath("$.data.bunches[0].bunch.visibility").value("PRIVATE"))
             .andExpect(jsonPath("$.data.currentBunchId").value(null as Any?))
             .andExpect(jsonPath("$.data.bunches[0].showFollowButton").value(true))
@@ -288,10 +288,9 @@ class MemberSocialProfileIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun image(): Long = jdbc.queryForObject(
-        "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+        "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
         Long::class.java,
-        "profile-test-${UUID.randomUUID()}",
-        "https://example.com/public.jpg"
+        "profiles/profile-test-${UUID.randomUUID()}/profile.jpg"
     )!!.also { imageIds.add(it) }
 
     private fun bearer(userId: Long): String {

@@ -159,16 +159,16 @@ class BunchProfileService(
                 )
             }!!
             attached = transactionResult.attached
-            if (!attached) images.delete(uploaded?.publicId)
+            if (!attached) images.delete(uploaded?.objectKey)
             return transactionResult.response
         } catch (ex: DataIntegrityViolationException) {
-            images.delete(uploaded?.publicId.takeUnless { attached })
+            images.delete(uploaded?.objectKey.takeUnless { attached })
             if (bunches.existsByNameAndIdNot(input.name, bunchId)) {
                 fail(ErrorCode.BUNCH_NAME_TAKEN)
             }
             throw ex
         } catch (ex: RuntimeException) {
-            if (!attached) images.delete(uploaded?.publicId)
+            if (!attached) images.delete(uploaded?.objectKey)
             throw ex
         }
     }

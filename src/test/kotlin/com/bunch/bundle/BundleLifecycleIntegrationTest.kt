@@ -1127,7 +1127,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, uploadedBy = listOf(owner))
         val draft = createDraft(owner, bunchId, listOf(source.id))
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
 
         val result = photoService.removeUploader(bunchId, source.id, owner)
 
@@ -1435,7 +1435,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, uploadedBy = listOf(owner))
         val draft = publishableDraft(owner, guest, bunchId, source, "publish-delete")
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
         val expectedRevision = bundleService.get(owner, bunchId, draft.id).revision
 
         val results = concurrently(
@@ -1482,7 +1482,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val published = publishReadyBundle(owner, guest, bunchId, source, "published-update")
         val publishedPhoto = published.photos.single()
         val assetId = publishedPhoto.imageAssetId
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
 
         val updated = bundleService.editPublished(
             actor(owner), bunchId, published.id,
@@ -1717,6 +1717,10 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         fun ordered() = bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 2)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         assertThat(ordered().total).isEqualTo(3)
+        assertThat(ordered().items.flatMap { it.photos }.map { it.imageUrl })
+            .allSatisfy { url -> assertThat(url).contains("/thumbnail.jpg?").contains("X-Amz-Expires=1800") }
+        assertThat(bundleService.get(owner, bunchId, first.id).photos.single().imageUrl)
+            .contains("/original.jpg?").contains("X-Amz-Expires=1800")
         bundleService.get(owner, bunchId, first.id)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         bundleService.title(actor(owner), bunchId, first.id,
@@ -1942,10 +1946,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         status: ProcessingStatus = ProcessingStatus.READY
     ): Photo {
         val asset = assets.saveAndFlush(
-            ImageAsset(
-                publicId = "bundle-test/${UUID.randomUUID()}",
-                url = "https://images.example/bundle/${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
         )
         ownedAssetIds += asset.id
         val saved = photos.saveAndFlush(

@@ -14,7 +14,7 @@ import java.util.UUID
 // A photo without a time comes last in its day, so a cursor with a time also reaches the photos without one.
 // The cursor always has a value (see PhotoListCursor.FIRST), so each query has one shape and binds no null.
 private const val LIST_PHOTOS =
-    "select p.id as id, p.capturedDate as capturedDate, p.capturedTime as capturedTime, a.url as imageUrl " +
+    "select p.id as id, p.capturedDate as capturedDate, p.capturedTime as capturedTime, a.objectKey as imageKey " +
         "from Photo p join p.imageAsset a " +
         "where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
         "and p.capturedDate is not null"
@@ -31,7 +31,7 @@ private const val LIST_ORDER = " order by p.capturedDate desc, p.capturedTime de
 private const val READY_IN_BUNCH =
     " where p.bunch.id = :bunchId and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY"
 private const val UNDATED_PHOTOS =
-    "select p.id as id, a.url as imageUrl from Photo p join p.imageAsset a" + READY_IN_BUNCH +
+    "select p.id as id, a.objectKey as imageKey from Photo p join p.imageAsset a" + READY_IN_BUNCH +
         " and p.capturedDate is null"
 private const val UNDATED_COUNT =
     "select count(p) from Photo p" + READY_IN_BUNCH + " and p.capturedDate is null"
@@ -90,14 +90,14 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
 
     // A photo of another bunch or one that is not ready is the same as no photo.
     @Query(
-        "select p.id as id, p.capturedDate as capturedDate, a.url as imageUrl " +
+        "select p.id as id, p.capturedDate as capturedDate, a.objectKey as imageKey " +
             "from Photo p join p.imageAsset a" + READY_IN_BUNCH + " and p.id = :photoId"
     )
     fun findDetail(@Param("bunchId") bunchId: Long, @Param("photoId") photoId: Long): PhotoDetailRow?
 
     // The badge shows the member as they are now, so the nickname and profile image are read from the member.
     @Query(
-        "select m.id as memberId, m.nickname as nickname, a.url as imageUrl from PhotoUploader u " +
+        "select m.id as memberId, m.nickname as nickname, a.objectKey as imageKey from PhotoUploader u " +
             "join u.member m left join m.profileImageAsset a where u.photo.id = :photoId order by u.id asc"
     )
     fun findUploaderProfiles(@Param("photoId") photoId: Long): List<PhotoUploaderProfile>

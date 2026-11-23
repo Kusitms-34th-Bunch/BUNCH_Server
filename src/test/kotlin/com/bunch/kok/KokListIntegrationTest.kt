@@ -56,7 +56,7 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
             statistics.clear()
             val first = pins.list(f.actor)
             val oneSourceQueries = statistics.prepareStatementCount
-            assertThat(first.members.single().imageUrl).isEqualTo("https://example.invalid/$firstImage.jpg")
+            assertThat(first.members.single().imageUrl).contains("/profiles/pin-list-").contains("/profile.jpg?").contains("X-Amz-Expires=1800")
             repeat(4) { index ->
                 val owner = member()
                 val source = create(owner).id
@@ -288,11 +288,10 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
 
     private fun image(bunch: Long): Long {
         val image = jdbc.queryForObject(
-            """INSERT INTO image_assets(public_id, url, created_at)
-                VALUES (?, 'placeholder', CURRENT_TIMESTAMP) RETURNING id""",
-            Long::class.java, "pin-list-$bunch"
+            """INSERT INTO image_assets(object_key, created_at)
+                VALUES (?, CURRENT_TIMESTAMP) RETURNING id""",
+            Long::class.java, "profiles/pin-list-$bunch/profile.jpg"
         )!!
-        jdbc.update("UPDATE image_assets SET url = ? WHERE id = ?", "https://example.invalid/$image.jpg", image)
         jdbc.update("UPDATE bunches SET profile_image_asset_id = ? WHERE id = ?", image, bunch)
         imageIds.add(image)
         return image

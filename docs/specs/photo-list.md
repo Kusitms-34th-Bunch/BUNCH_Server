@@ -36,7 +36,7 @@ GET /api/v1/bunches/{bunchId}/photos
     "photos": [
       {
         "photoId": 5021,
-        "thumbnailUrl": "https://res.cloudinary.com/demo/image/upload/c_fill,w_300,h_300/photos/a.jpg",
+        "thumbnailUrl": "<signed-1800-second-url-for-photos/UUID/thumbnail.jpg>",
         "capturedDate": "2026-10-19",
         "capturedTime": "21:40:12",
         "uploaderIds": [12, 15],
@@ -53,7 +53,7 @@ GET /api/v1/bunches/{bunchId}/photos
 | --- | --- |
 | `totalCount` | **번치 전체** 사진 수. 멤버 필터·날짜 없는 사진·처리 상태와 무관하다. 1,000장이면 앱이 사진 올리기 시트를 열지 않는다(3.2.1) |
 | `photos[].photoId` | 사진 ID |
-| `photos[].thumbnailUrl` | 정사각형 썸네일 URL(#33의 `PhotoImageUrls`, 300px). NEW 같은 표시는 없다(3.1.4) |
+| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 `photos/<UUID>/thumbnail.jpg`의 정확히 1800초 유효한 서명 URL(300px). URL은 저장·재생하지 않으며 만료되면 이 목록 API를 다시 호출한다. NEW 같은 표시는 없다(3.1.4) |
 | `photos[].capturedDate` | 촬영 날짜. 사용자가 조정한 사진은 조정한 날짜(3.1.3 로직 1). 앱이 날짜 섹션으로 묶는다 |
 | `photos[].capturedTime` | 촬영 시각 또는 `null`(시각 없이 날짜만 있는 사진) |
 | `photos[].uploaderIds` | 올린 멤버 ID 목록. 함께 올린 사진은 여러 명이며 올린 순서다. 칩의 선택 수를 앱이 계산한다(3.1.2 상세 5, 4.1.1) |
@@ -93,6 +93,8 @@ GET /api/v1/bunches/{bunchId}/photos
 - 커서는 위치를 담은 불투명한 문자열이다. 해석할 수 없는 값은 400이다.
 - 서버는 `size + 1`장을 읽어 다음 사진이 있으면 `nextCursor`를 만든다.
 - 다른 멤버가 올리거나 지운 사진은 실시간으로 반영하지 않는다. 앱이 진입·복귀·새로고침 때 다시 부른다(3.1.1 로직 2).
+- `thumbnailUrl`은 비공개 R2 객체의 일회성 표시 URL이다. 기존 목록 권한을 통과한 뒤 서명하며,
+  DB·멱등 결과·이벤트에 저장하지 않는다. 서명 만료·실패 시 전용 갱신 API 대신 이 목록 API를 다시 호출한다.
 
 ## 오류
 

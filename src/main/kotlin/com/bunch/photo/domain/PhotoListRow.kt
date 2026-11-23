@@ -8,5 +8,5 @@ interface PhotoListRow {
     val id: Long
     val capturedDate: LocalDate
     val capturedTime: LocalTime?
-    val imageUrl: String
+    val imageKey: String
 }

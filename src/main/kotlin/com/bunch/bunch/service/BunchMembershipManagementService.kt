@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchActionOperation
 import com.bunch.bunch.domain.BunchActionRequest
@@ -38,6 +39,7 @@ import java.util.UUID
 
 @Service
 class BunchMembershipManagementService(
+    private val imageUrls: ImageUrls,
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
     private val actionRequests: BunchActionRequestRepository,
@@ -65,7 +67,7 @@ class BunchMembershipManagementService(
                     membershipId = membership.id,
                     memberId = membership.member.id,
                     nickname = membership.member.nickname,
-                    imageUrl = membership.member.imageUrl,
+                    imageUrl = imageUrls.profile(membership.member.imageKey),
                     role = membership.role,
                     isMe = membership.member.id == userId,
                     joinedAt = membership.joinedAt,

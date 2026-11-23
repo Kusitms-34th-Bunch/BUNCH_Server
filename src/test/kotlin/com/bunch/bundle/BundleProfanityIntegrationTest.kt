@@ -159,7 +159,13 @@ class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
         assertError(ErrorCode.PROHIBITED_WORD) {
             service.editPublished(actor(f.owner), f.bunch, f.id, edit, "reject-edit")
         }
-        assertThat(service.get(f.owner, f.bunch, f.id)).isEqualTo(before)
+        val afterRejectedEdit = service.get(f.owner, f.bunch, f.id)
+        // Re-querying signs again; compare the same object URL while retaining every persisted field assertion.
+        assertThat(afterRejectedEdit.copy(
+            photos = afterRejectedEdit.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) }
+        )).isEqualTo(before.copy(
+            photos = before.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) }
+        ))
         doReturn(ProfanityDictionary(listOf("여행기록"))).`when`(profanity).current()
         assertThat(service.publish(actor(f.owner), f.bunch, f.id, key, request).revision).isEqualTo(published.revision)
         assertThat(service.get(f.owner, f.bunch, f.id).publishBlockers).isEmpty()
@@ -271,8 +277,7 @@ class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun photo(bunch: Long): Photo {
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "profanity/${UUID.randomUUID()}",
-            url = "https://example.test/profanity.jpg"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(asset.id)
         return photos.saveAndFlush(Photo(bunch = bunchRows.findById(bunch).orElseThrow(), imageAsset = asset,
             fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2), processingStatus = ProcessingStatus.READY))

@@ -6,5 +6,5 @@ import java.time.LocalDate
 interface PhotoDetailRow {
     val id: Long
     val capturedDate: LocalDate?
-    val imageUrl: String
+    val imageKey: String
 }

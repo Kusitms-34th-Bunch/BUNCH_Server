@@ -44,7 +44,7 @@ GET /api/v1/bunches/{bunchId}/photos/undated
     "photos": [
       {
         "photoId": 5021,
-        "thumbnailUrl": "https://res.cloudinary.com/demo/image/upload/c_fill,w_300,h_300/photos/a.jpg",
+        "thumbnailUrl": "<signed-1800-second-url-for-photos/UUID/thumbnail.jpg>",
         "uploaderIds": [12, 15],
         "usedInDraftBundle": false
       }
@@ -59,7 +59,7 @@ GET /api/v1/bunches/{bunchId}/photos/undated
 | --- | --- |
 | `totalCount` | **멤버 필터를 적용한** 날짜 미확인 사진 수. 「촬영 날짜를 확인할 사진 N장」의 N이다(3.1.2 로직 3, 3.1.5 상세 1). `size`와 무관하다 |
 | `photos[].photoId` | 사진 ID |
-| `photos[].thumbnailUrl` | 정사각형 썸네일 URL(300px). 별도 배지는 붙이지 않는다(3.1.4) |
+| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 비공개 R2 `thumbnail.jpg`의 정확히 1800초 유효한 서명 URL(300px). 별도 배지는 붙이지 않는다(3.1.4) |
 | `photos[].uploaderIds` | 올린 멤버 ID 목록. 함께 올린 사진은 여러 명이며 올린 순서다. 닉네임·프로필은 `GET /api/v1/bunches/{bunchId}/members`(#43)를 쓴다 |
 | `photos[].usedInDraftBundle` | 작성 중인(초안) 번들에 들어 있는 사진이면 `true`. 발행된 번들에만 쓰였거나 안 쓰였으면 `false`. 선택 모드에서 삭제할 때 확인 창의 문구를 고르는 데 쓴다(3.1.5 상세 4, 3.3.5) |
 | `nextCursor` | 다음 페이지 시작 위치. 마지막 페이지면 `null` |
@@ -102,6 +102,10 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
 - 인증이 필요하다. 가입을 완료한 그 번치의 ACTIVE 멤버만 조회할 수 있다.
 - 선택 모드에서는 사진을 눌러도 상세로 가지 않는다(3.3.1 상세 4). 앱의 동작이다.
 
+사진 원본·프로필 객체는 모두 비공개다. 이 상세 조회의 기존 권한 확인을 통과한 뒤에만 각 URL을
+정확히 1800초 서명하며, 서명 URL을 DB·멱등 재생 결과·이벤트에 저장하지 않는다. 만료되면 같은
+기존 상세 API를 다시 호출한다. 전용 URL 갱신 API는 제공하지 않는다.
+
 ### 응답
 
 ```json
@@ -109,13 +113,13 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
   "success": true,
   "data": {
     "photoId": 5021,
-    "imageUrl": "https://res.cloudinary.com/demo/image/upload/photos/a.jpg",
+    "imageUrl": "<signed-1800-second-url-for-photos/UUID/original.jpg>",
     "capturedDate": "2026-10-19",
     "uploaders": [
       {
         "memberId": 12,
         "nickname": "멤버 A",
-        "imageUrl": "https://res.cloudinary.com/demo/image/upload/profile/k.jpg"
+        "imageUrl": "<signed-1800-second-url-for-profiles/UUID/profile.jpg>"
       },
       {
         "memberId": 15,
@@ -132,12 +136,12 @@ GET /api/v1/bunches/{bunchId}/photos/{photoId}
 | 항목 | 설명 |
 | --- | --- |
 | `photoId` | 사진 ID |
-| `imageUrl` | 사진함에 보관된 원본 이미지(긴 변 2560px). 앱이 화면 너비에 맞춰 보여준다(3.5.1 상세 2, 3.3.3 로직 2) |
+| `imageUrl` | 사진함의 `original.jpg` 보관본을 가리키는 정확히 1800초 유효한 서명 URL. 권한 확인 뒤 생성하며 앱이 화면 너비에 맞춰 보여준다(3.5.1 상세 2, 3.3.3 로직 2) |
 | `capturedDate` | 촬영 날짜. 사용자가 조정한 사진은 조정한 날짜. 날짜를 알 수 없으면 `null`이며 앱이 「날짜 미확인」만 보여준다(3.5.1 예외) |
 | `uploaders[]` | 올린 멤버, 올린 순서. 함께 올린 사진이면 여러 명이고 앱이 올린 사람 수만큼 배지를 세로로 나열한다(3.5.1 상세 4) |
 | `uploaders[].memberId` | 멤버 ID |
 | `uploaders[].nickname` | 멤버의 **현재** 닉네임. 프로필 배지는 현재 프로필을 따른다(3.5.1 로직 2) |
-| `uploaders[].imageUrl` | 멤버의 **현재** 프로필 이미지 또는 `null`. `null`이면 앱이 기본 프로필 이미지를 쓴다(3.5.1 상세 3) |
+| `uploaders[].imageUrl` | 멤버의 **현재** `profiles/<UUID>/profile.jpg` 서명 URL 또는 `null`. URL은 저장·재생하지 않으며 만료되면 이 상세 API를 다시 호출한다. `null`이면 앱이 기본 프로필 이미지를 쓴다(3.5.1 상세 3) |
 | `usedInDraftBundle` | 작성 중인(초안) 번들에 들어 있는 사진이면 `true`. 발행된 번들에만 쓰였거나 안 쓰였으면 `false`. 앱이 「삭제」 확인 창의 문구를 고르는 데 쓴다(3.5.2, 3.3.5). 사진이 사라지면 서버가 초안에서도 빼므로 삭제 전에 따로 확인하는 API는 없다 |
 
 ### 규칙

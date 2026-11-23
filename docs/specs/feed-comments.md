@@ -31,6 +31,8 @@ HTTP 400 `COMMON_003`/`error.prohibited_word`와 `detail.fields: ["content"]`로
 
 항목: id/bundleId/parentId/content/deleted/createdAt/author/badge/replyCount/canDelete/canReply/canReport.
 author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성 시 배지 이름·분위기).
+`author.imageUrl`은 기존 댓글 접근 확인 뒤 정확히 1800초 유효한 `profile.jpg` signed URL이며,
+없거나 삭제된 작성자는 기존 `null` 계약을 유지한다. URL은 저장하지 않으며 만료되면 댓글 목록 API를 다시 호출한다.
 닉네임·사진은 현재 계정에서 읽고 탈퇴 계정은 작성자/null로 익명화한다.
 삭제 자리는 content=삭제된 댓글입니다, author=작성자, 사진·회원ID·배지·날짜=null,
 쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다. 삭제된 부모 placeholder의

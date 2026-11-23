@@ -523,7 +523,7 @@ class BunchDeletionIntegrationTest : BunchIntegrationSupport() {
         memberships.findByMemberIdAndBunchIdAndStatus(memberId, bunchId, MembershipStatus.ACTIVE)!!
 
     private fun asset(prefix: String, url: String) = assets.saveAndFlush(
-        ImageAsset(publicId = "$prefix/${UUID.randomUUID()}", url = url)
+        ImageAsset(objectKey = "profiles/${UUID.randomUUID()}/profile.jpg")
     )
 
     private fun countWhere(sql: String, vararg args: Any): Long =

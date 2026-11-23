@@ -1,5 +1,6 @@
 package com.bunch.photo.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
@@ -12,7 +13,6 @@ import com.bunch.global.image.ImageQuality
 import com.bunch.global.image.ImageQualityGrade
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
-import com.bunch.global.image.PhotoImageUrls
 import com.bunch.global.image.StoredImage
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.image.service.ImageAssetService
@@ -62,6 +62,7 @@ import java.util.UUID
  */
 @Service
 class PhotoService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val memberships: BunchMembershipRepository,
     private val bunches: BunchRepository,
@@ -161,7 +162,7 @@ class PhotoService(
             throw ex
         }
         // Someone stored the same file while this one was uploading; the new copy is not used.
-        if (result.kind != PhotoUploadKind.STORED) storage.delete(file.publicId)
+        if (result.kind != PhotoUploadKind.STORED) storage.delete(file.objectKey)
         return result
     }
 
@@ -298,9 +299,9 @@ class PhotoService(
     // A failed commit can still have succeeded, so the file is removed only when no asset row owns it.
     private fun discardUnlessSaved(file: StoredImage) {
         try {
-            if (!imageAssetRepository.existsByPublicId(file.publicId)) storage.delete(file.publicId)
+            if (!imageAssetRepository.existsByObjectKey(file.objectKey)) storage.delete(file.objectKey)
         } catch (_: RuntimeException) {
-            logger.warn("Uploaded photo file cleanup skipped: publicId={}", file.publicId)
+            logger.warn("Uploaded photo file cleanup skipped: objectKey={}", file.objectKey)
         }
     }
 
@@ -339,7 +340,7 @@ class PhotoService(
             photos = page.map {
                 PhotoListItem(
                     photoId = it.id,
-                    thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
+                    thumbnailUrl = imageUrls.thumbnail(it.imageKey),
                     capturedDate = it.capturedDate,
                     capturedTime = it.capturedTime,
                     uploaderIds = uploaderIds[it.id].orEmpty(),
@@ -382,7 +383,7 @@ class PhotoService(
             photos = page.map {
                 PhotoUndatedItem(
                     photoId = it.id,
-                    thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
+                    thumbnailUrl = imageUrls.thumbnail(it.imageKey),
                     uploaderIds = uploaderIds[it.id].orEmpty(),
                     usedInDraftBundle = it.id in inDraft
                 )
@@ -398,10 +399,10 @@ class PhotoService(
         val photo = photos.findDetail(bunchId, photoId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         return PhotoDetailResponse(
             photoId = photo.id,
-            imageUrl = photo.imageUrl,
+            imageUrl = imageUrls.full(photo.imageKey),
             capturedDate = photo.capturedDate,
             uploaders = photos.findUploaderProfiles(photoId)
-                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) },
+                .map { PhotoDetailUploader(it.memberId, it.nickname, imageUrls.profile(it.imageKey)) },
             usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty()
         )
     }

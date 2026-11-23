@@ -90,12 +90,13 @@ class MemberHttpIntegrationTest @Autowired constructor(
                   "data": {
                     "memberId": ${member.id},
                     "nickname": "${member.nickname}",
-                    "imageUrl": "https://example.com/profile.jpg",
                     "defaultBunch": null
                   },
                   "error": null
                 }
-            """.trimIndent(), JsonCompareMode.STRICT))
+            """.trimIndent(), JsonCompareMode.LENIENT))
+            .andExpect(jsonPath("$.data.length()").value(4))
+            .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.containsString("/bunch-test/${member.imageKey}?")))
     }
 
     @Test
@@ -173,7 +174,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.data.defaultBunch.id").value(first.id))
             .andExpect(jsonPath("$.data.defaultBunch.name").value(first.name))
             .andExpect(jsonPath("$.data.defaultBunch.characterType").value(first.characterType.name))
-            .andExpect(jsonPath("$.data.defaultBunch.imageUrl").value("https://example.com/bunch.jpg"))
+            .andExpect(jsonPath("$.data.defaultBunch.imageUrl").value(org.hamcrest.Matchers.containsString("/bunch-test/${firstImage.objectKey}?")))
             .andExpect(jsonPath("$.data.signupStatus").doesNotExist())
         mvc.perform(get("/api/v1/members/me/onboarding").header("Authorization", "Bearer ${pair.accessToken}"))
             .andExpect(status().isOk)
@@ -256,10 +257,7 @@ class MemberHttpIntegrationTest @Autowired constructor(
     }
 
     private fun imageAsset(publicId: String, url: String): ImageAsset = imageAssets.saveAndFlush(
-        ImageAsset(
-            publicId = "$publicId/${UUID.randomUUID()}",
-            url = url
-        )
+        ImageAsset(objectKey = "profiles/${UUID.randomUUID()}/profile.jpg")
     ).also { imageAssetIds += it.id }
 
     private fun bunch(member: Member): BunchResponse = bunches.create(

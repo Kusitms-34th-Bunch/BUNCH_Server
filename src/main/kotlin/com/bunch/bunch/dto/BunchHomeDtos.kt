@@ -16,10 +16,10 @@ data class BunchCardResponse(
     val visibility: Visibility
 ) {
     companion object {
-        fun from(bunch: Bunch) = BunchCardResponse(
+        fun from(bunch: Bunch, imageUrl: String?) = BunchCardResponse(
             id = bunch.id,
             name = bunch.name,
-            imageUrl = bunch.imageUrl,
+            imageUrl = imageUrl,
             characterType = bunch.characterType,
             visibility = bunch.visibility
         )
@@ -35,10 +35,10 @@ data class BunchHomeProfileResponse(
     val introduction: String
 ) {
     companion object {
-        fun from(bunch: Bunch) = BunchHomeProfileResponse(
+        fun from(bunch: Bunch, imageUrl: String?) = BunchHomeProfileResponse(
             id = bunch.id,
             name = bunch.name,
-            imageUrl = bunch.imageUrl,
+            imageUrl = imageUrl,
             characterType = bunch.characterType,
             visibility = bunch.visibility,
             introduction = bunch.introduction

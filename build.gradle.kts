@@ -9,6 +9,7 @@ group = "com.bunch"
 version = "0.0.1-SNAPSHOT"
 repositories { mavenCentral() }
 dependencies {
+    implementation("software.amazon.awssdk:s3:2.57.3")
     implementation("org.automerge:automerge:0.0.9")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
@@ -49,4 +50,12 @@ tasks.withType<Test> {
 }
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveFileName.set("app.jar")
+}
+
+// Used only by scripts/r2; migration sources and Cloudinary credentials are excluded from app.jar.
+tasks.register("printR2MigrationClasspath") {
+    dependsOn("classes")
+    doLast {
+        println(sourceSets.main.get().runtimeClasspath.asPath)
+    }
 }

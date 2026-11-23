@@ -59,9 +59,6 @@ class Bunch(
     @Column(nullable = false)
     var membershipVersion: Long = 0
 ) {
-    val imagePublicId: String?
-        get() = profileImageAsset?.publicId
-
-    val imageUrl: String?
-        get() = profileImageAsset?.url
+    val imageKey: String?
+        get() = profileImageAsset?.objectKey
 }

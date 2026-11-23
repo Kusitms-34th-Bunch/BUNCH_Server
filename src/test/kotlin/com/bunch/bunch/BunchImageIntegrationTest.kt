@@ -4,13 +4,13 @@ import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.ErrorCode
+import com.bunch.global.image.ImageUrls
 import com.bunch.global.image.ProfileImageStorage
+import com.bunch.global.image.R2TestServer
 import com.bunch.global.profanity.ProfanityFilter
 import com.bunch.image.domain.ImageAsset
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.image.service.ImageAssetService
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -25,10 +25,6 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
-import java.net.InetSocketAddress
-import java.net.URLDecoder
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.UUID
 import javax.imageio.ImageIO
 
@@ -40,40 +36,21 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     @Autowired private lateinit var assetRepository: ImageAssetRepository
     @Autowired private lateinit var profanity: ProfanityFilter
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
-    private lateinit var server: HttpServer
+    private lateinit var server: R2TestServer
     private lateinit var imageBunches: BunchService
-    private val uploaded = CopyOnWriteArrayList<String>()
-    private val deleted = CopyOnWriteArrayList<String>()
-    private var onUpload: () -> Unit = {}
-    private var failDeletion = false
-    private var failUpload = false
+    private val uploaded: List<String>
+        get() = server.requests.filter { it.method == "PUT" && it.path.endsWith("/profile.jpg") }
+            .map(::objectKey)
+    private val deleted: List<String>
+        get() = server.requests.filter { it.method == "DELETE" && it.path.endsWith("/profile.jpg") }
+            .map(::objectKey)
 
     @BeforeEach
     fun startImageStub() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/v1_1/test/image/upload") { exchange ->
-            try {
-                val body = exchange.requestBody.readAllBytes().toString(StandardCharsets.ISO_8859_1)
-                val publicId = Regex("name=\"public_id\"[^\\r\\n]*\\r\\n(?:[^\\r\\n]+\\r\\n)*\\r\\n([^\\r\\n]+)")
-                    .find(body)?.groupValues?.get(1)
-                    ?: error("Missing public id in image upload")
-                uploaded.add(publicId)
-                onUpload()
-                if (failUpload) reply(exchange, 503, "{}") else reply(exchange, 200,
-                    """{"public_id":"$publicId","secure_url":"https://images.example/$publicId.jpg","resource_type":"image","format":"jpg","width":8,"height":8}""")
-            } catch (_: Exception) {
-                reply(exchange, 500, "{}")
-            }
-        }
-        server.createContext("/v1_1/test/image/destroy") { exchange ->
-            val fields = exchange.requestBody.readAllBytes().toString(StandardCharsets.UTF_8).split('&')
-                .associate { part -> part.substringBefore('=') to URLDecoder.decode(part.substringAfter('='), StandardCharsets.UTF_8) }
-            fields["public_id"]?.let { deleted.add(it) }
-            reply(exchange, if (failDeletion) 503 else 200, """{"result":"ok"}""")
-        }
-        server.start()
-        val storage = ProfileImageStorage("test", "test-key", "test-secret", "http://127.0.0.1:${server.address.port}")
+        server = R2TestServer()
+        val storage = ProfileImageStorage(server.storage)
         imageBunches = BunchService(
+            ImageUrls(server.storage),
             bunchRepository,
             membershipRepository,
             members,
@@ -86,7 +63,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
 
     @AfterEach
     fun stopImageStub() {
-        if (::server.isInitialized) server.stop(0)
+        if (::server.isInitialized) server.close()
     }
 
     @Test
@@ -94,8 +71,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val bunch = create(owner)
         val oldImage = attachImage(bunch.id, "old", "https://images.example/old.jpg")
-        onUpload = {
-            // This independent connection must acquire both locks while HTTP upload is in flight.
+        server.onPut = {
             TransactionTemplate(transactionManager).execute {
                 jdbc.execute("SET LOCAL lock_timeout = '500ms'")
                 jdbc.queryForObject("SELECT id FROM members WHERE id = ? FOR UPDATE", Long::class.java, owner)
@@ -103,18 +79,18 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
             }
         }
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
-        assertThat(result.imageUrl).isEqualTo("https://images.example/${uploaded.single()}.jpg")
-        assertThat(deleted).containsExactly(oldImage.publicId)
+        assertThat(result.imageUrl).contains("/bunch-test/${uploaded.single()}")
+        assertThat(deleted).containsExactly(oldImage.objectKey)
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(1)
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(uploaded.single())
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageKey).isEqualTo(uploaded.single())
         val reset = imageBunches.resetProfileImage(owner, bunch.id)
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(2)
         imageBunches.resetProfileImage(owner, bunch.id)
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isEqualTo(2)
         assertThat(reset.imageUrl).isNull()
         assertThat(reset.characterType).isEqualTo(bunch.characterType)
-        assertThat(deleted).containsExactly(oldImage.publicId, uploaded.single())
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isNull()
+        assertThat(deleted).containsExactly(oldImage.objectKey, uploaded.single())
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageKey).isNull()
     }
 
     @Test
@@ -126,8 +102,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         assertThatThrownBy { imageBunches.updateProfileImage(owner, bunch.id, photo()) }.isInstanceOf(DataAccessException::class.java)
         assertThat(uploaded).hasSize(1)
         assertThat(deleted).containsExactly(uploaded.single())
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(oldImage.publicId)
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(oldImage.url)
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageKey).isEqualTo(oldImage.objectKey)
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isZero()
     }
 
@@ -135,11 +110,11 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
     fun `permission changed during upload causes compensation after locked recheck`() {
         val owner = member()
         val bunch = create(owner)
-        onUpload = { jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?", bunch.id, owner) }
+        server.onPut = { jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?", bunch.id, owner) }
         assertError(ErrorCode.FORBIDDEN) { imageBunches.updateProfileImage(owner, bunch.id, photo()) }
         assertThat(uploaded).hasSize(1)
         assertThat(deleted).containsExactly(uploaded.single())
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isNull()
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageKey).isNull()
     }
 
     @Test
@@ -161,14 +136,14 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val bunch = create(owner)
         val oldImage = attachImage(bunch.id, "old", "https://images.example/old.jpg")
-        failUpload = true
+        server.failPuts = true
         assertError(ErrorCode.PROFILE_IMAGE_FAILED) { imageBunches.updateProfileImage(owner, bunch.id, photo()) }
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imagePublicId).isEqualTo(oldImage.publicId)
-        failUpload = false
-        failDeletion = true
+        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageKey).isEqualTo(oldImage.objectKey)
+        server.failPuts = false
+        server.failDeletes = true
         val result = imageBunches.updateProfileImage(owner, bunch.id, photo())
-        assertThat(bunchRepository.findById(bunch.id).orElse(null)?.imageUrl).isEqualTo(result.imageUrl)
-        assertThat(deleted).contains(oldImage.publicId)
+        assertThat(result.imageUrl).contains("/bunch-test/${uploaded.last()}")
+        assertThat(deleted).contains(oldImage.objectKey)
     }
 
     @Test
@@ -183,7 +158,7 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         val current = bunchRepository.findById(bunch.id).orElseThrow()
         assertThat(current.profileImageAsset).isNull()
         assertThat(current.profileVersion).isEqualTo(1)
-        assertThat(deleted).containsExactly(previous.publicId)
+        assertThat(deleted).containsExactly(previous.objectKey)
     }
 
     @Test
@@ -194,25 +169,24 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("UPDATE members SET profile_image_asset_id = ? WHERE id = ?", shared.id, owner)
 
         imageBunches.updateProfileImage(owner, bunch.id, photo())
-        assertThat(deleted).doesNotContain(shared.publicId)
+        assertThat(deleted).doesNotContain(shared.objectKey)
         assertThat(jdbc.queryForObject(
             "SELECT profile_image_asset_id FROM members WHERE id = ?",
             Long::class.java,
             owner
         )).isEqualTo(shared.id)
-        assertThat(members.findById(owner).orElseThrow().imagePublicId).isEqualTo(shared.publicId)
+        assertThat(members.findById(owner).orElseThrow().imageKey).isEqualTo(shared.objectKey)
 
         imageBunches.resetProfileImage(owner, bunch.id)
-        assertThat(deleted).doesNotContain(shared.publicId)
+        assertThat(deleted).doesNotContain(shared.objectKey)
         assertThat(assetRepository.existsById(shared.id)).isTrue()
-        assertThat(members.findById(owner).orElseThrow().imageUrl).isEqualTo(shared.url)
+        assertThat(members.findById(owner).orElseThrow().imageKey).isEqualTo(shared.objectKey)
     }
 
     private fun attachImage(bunchId: Long, prefix: String, url: String): ImageAsset {
         val image = assetRepository.saveAndFlush(
             ImageAsset(
-                publicId = "$prefix/${UUID.randomUUID()}",
-                url = url
+                objectKey = "profiles/${UUID.randomUUID()}/profile.jpg"
             )
         )
         jdbc.update("UPDATE bunches SET profile_image_asset_id = ? WHERE id = ?", image.id, bunchId)
@@ -224,10 +198,5 @@ class BunchImageIntegrationTest : BunchIntegrationSupport() {
         return MockMultipartFile("photo", "photo.jpg", "image/jpeg", bytes)
     }
 
-    private fun reply(exchange: HttpExchange, status: Int, body: String) {
-        val bytes = body.toByteArray(StandardCharsets.UTF_8)
-        exchange.responseHeaders.add("Content-Type", "application/json")
-        exchange.sendResponseHeaders(status, bytes.size.toLong())
-        exchange.responseBody.use { it.write(bytes) }
-    }
+    private fun objectKey(request: R2TestServer.Request): String = request.path.substringAfter("/bunch-test/")
 }

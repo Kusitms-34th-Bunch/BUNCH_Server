@@ -53,7 +53,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(result.kind).isEqualTo(PhotoUploadKind.STORED)
         val row = jdbc.queryForMap(
             """SELECT p.bunch_id, p.file_hash, p.processing_status, p.captured_date, p.captured_time,
-                p.date_source, a.public_id FROM photos p JOIN image_assets a ON a.id = p.image_asset_id
+                p.date_source, a.object_key FROM photos p JOIN image_assets a ON a.id = p.image_asset_id
                 WHERE p.id = ?""",
             result.photoId
         )
@@ -63,7 +63,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(row["captured_date"].toString()).isEqualTo("2026-10-03")
         assertThat(row["captured_time"].toString()).isEqualTo("14:05:09")
         assertThat(row["date_source"]).isEqualTo("EXIF")
-        assertThat(row["public_id"].toString()).startsWith("photos/test-")
+        assertThat(row["object_key"].toString()).matches("photos/test-[A-Za-z0-9-]+/original\\.jpg")
         val uploader = jdbc.queryForMap(
             "SELECT member_id, upload_batch_id FROM photo_uploaders WHERE photo_id = ?",
             result.photoId
@@ -331,7 +331,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
 
         assertThat(photoCount(bunchId)).isZero()
         assertThat(count("photo_uploaders")).isZero()
-        assertThat(count("image_assets WHERE public_id LIKE 'photos/test-%'")).isZero()
+        assertThat(count("image_assets WHERE object_key LIKE 'photos/test-%/original.jpg'")).isZero()
         verify(storage, never()).delete(org.mockito.ArgumentMatchers.anyString())
     }
 
@@ -339,7 +339,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
     fun `leaving the bunch during the upload stops the save and deletes the uploaded file`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val memberId = joined(ownerId, bunchId)
-        val uploadedFile = stored("photos/test-left-during-upload")
+        val uploadedFile = stored("photos/test-left-during-upload/original.jpg")
         `when`(storage.upload(anyImage())).thenAnswer {
             jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE member_id = ?", memberId)
             uploadedFile
@@ -348,8 +348,8 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertError(ErrorCode.FORBIDDEN) { uploads.upload(command(bunchId, memberId), image("leaver")) }
 
         assertThat(photoCount(bunchId)).isZero()
-        assertThat(count("image_assets WHERE public_id = 'photos/test-left-during-upload'")).isZero()
-        verify(storage, times(1)).delete(uploadedFile.publicId)
+        assertThat(count("image_assets WHERE object_key = 'photos/test-left-during-upload/original.jpg'")).isZero()
+        verify(storage, times(1)).delete(uploadedFile.objectKey)
     }
 
     @Test
@@ -357,7 +357,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         val (ownerId, bunchId) = bunchWithOwner()
         val otherId = joined(ownerId, bunchId)
         val shared = image("raced")
-        val uploadedFile = stored("photos/test-raced-upload")
+        val uploadedFile = stored("photos/test-raced-upload/original.jpg")
         var winnerPhotoId = 0L
         `when`(storage.upload(anyImage())).thenAnswer {
             winnerPhotoId = insertPhoto(bunchId, hashOf(shared), uploaderId = otherId)
@@ -370,7 +370,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(result.photoId).isEqualTo(winnerPhotoId)
         assertThat(photoCount(bunchId)).isEqualTo(1)
         assertThat(uploaderCount(winnerPhotoId)).isEqualTo(2)
-        verify(storage, times(1)).delete(uploadedFile.publicId)
+        verify(storage, times(1)).delete(uploadedFile.objectKey)
     }
 
     @Test

@@ -179,7 +179,7 @@ DB·공유 Redis key를 사용하지 않는다.
 - Photo 최종 삭제 callback 또는 notification/notice/action/push 저장 실패를
   주입하면 번치·소속·하위 데이터·안내·요청 결과가 모두 rollback된다.
 - 외부 storage delete가 실패해도 이미 커밋된 DB 업무와 접근 안내는 rollback하지
-  않으며, 실패한 public ID만 기존 정리 경계에 남는다.
+  않는다. 실패한 object key는 재시도·정리 경계에서만 관리하며 응답·정책 문서에 노출하지 않는다.
 - 삭제 성공 후 request 결과·AccessNotice·push job은 본체 FK 없이 남고, 새
   `defaultBunchId`는 현재 활성 소속에서 즉시 재계산된다.
 

@@ -33,7 +33,7 @@ class PhotoRecoFeatureQualityMigrationIntegrationTest @Autowired constructor(pri
             val version = MigrationVersion.fromVersion("48")
             val previous = configure(schema).info().all().mapNotNull { it.version }.filter { it < version }.max()
             configure(schema, previous.toString()).migrate()
-            val photo = insertOldPhoto(schema)
+            val photo = insertOldPhoto(schema, legacyImageAsset = true)
             jdbc.update("INSERT INTO $schema.photo_reco_feature (photo_id, source) VALUES (?, 'CAMERA')", photo)
 
             val current = configure(schema, version.toString())
@@ -94,7 +94,7 @@ class PhotoRecoFeatureQualityMigrationIntegrationTest @Autowired constructor(pri
         }
     }
 
-    private fun insertOldPhoto(schema: String): Long {
+    private fun insertOldPhoto(schema: String, legacyImageAsset: Boolean = false): Long {
         val member = jdbc.queryForObject(
             "INSERT INTO $schema.members(role) VALUES ('ROLE_USER') RETURNING id",
             Long::class.java
@@ -108,12 +108,21 @@ class PhotoRecoFeatureQualityMigrationIntegrationTest @Autowired constructor(pri
             member,
             UUID.randomUUID()
         )!!
-        val asset = jdbc.queryForObject(
-            """INSERT INTO $schema.image_assets(public_id, url, created_at)
-                VALUES (?, 'https://images.example/migration.jpg', CURRENT_TIMESTAMP) RETURNING id""",
-            Long::class.java,
-            "quality-migration-${UUID.randomUUID()}"
-        )!!
+        val asset = if (legacyImageAsset) {
+            jdbc.queryForObject(
+                """INSERT INTO $schema.image_assets(public_id, url, created_at)
+                    VALUES (?, 'https://images.example/migration.jpg', CURRENT_TIMESTAMP) RETURNING id""",
+                Long::class.java,
+                "quality-migration-${UUID.randomUUID()}"
+            )!!
+        } else {
+            jdbc.queryForObject(
+                """INSERT INTO $schema.image_assets(object_key, created_at)
+                    VALUES (?, CURRENT_TIMESTAMP) RETURNING id""",
+                Long::class.java,
+                "photos/quality-migration-${UUID.randomUUID()}/original.jpg"
+            )!!
+        }
         return jdbc.queryForObject(
             """INSERT INTO $schema.photos(bunch_id, image_asset_id, file_hash, processing_status, date_source,
                 created_at)

@@ -36,7 +36,7 @@ class ImageQuality(
 
     /** What was measured of the image, or null when the image cannot be read. */
     fun measure(image: PhotoImage): Measure? = try {
-        grey(image.bytes)?.let { measureOf(it, min(image.width, image.height)) }
+        ImageDecodeLimiter.withPermit { grey(image.bytes)?.let { measureOf(it, min(image.width, image.height)) } }
     } catch (_: IOException) {
         null
     } catch (_: RuntimeException) {

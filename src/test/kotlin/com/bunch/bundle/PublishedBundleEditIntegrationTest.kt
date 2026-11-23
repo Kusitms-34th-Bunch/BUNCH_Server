@@ -76,6 +76,7 @@ import java.util.concurrent.TimeUnit
 @ActiveProfiles("test")
 @Import(PublishedBundleEditIntegrationTest.EventsConfiguration::class)
 class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
+
     @Autowired
     private lateinit var memberships: BunchMembershipRepository
 
@@ -221,8 +222,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         val persisted = snapshot(f)
         val same = save(f, edit(saved))
         assertThat(same.revision).isEqualTo(saved.revision)
-        assertThat(same).isEqualTo(persisted)
-        assertThat(snapshot(f)).isEqualTo(persisted)
+        assertSameState(same, persisted)
+        assertSameState(snapshot(f), persisted)
         assertThat(recorder.edits).hasSize(1)
         assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { save(f, request) }
     }
@@ -274,7 +275,14 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             }
             check(changed.await(10, TimeUnit.SECONDS))
             val during = publicService.bundle(reader, f.bunchId, f.id)
-            assertThat(during).isEqualTo(before)
+            // Both reads may issue a different signature; the addressed object and all bundle state stay old.
+            assertThat(during.copy(
+                coverImageUrl = during.coverImageUrl?.substringBefore('?'),
+                photos = during.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) }
+            )).isEqualTo(before.copy(
+                coverImageUrl = before.coverImageUrl?.substringBefore('?'),
+                photos = before.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) }
+            ))
             assertThat(recorder.edits).isEmpty()
             commit.countDown()
             writer.get(15, TimeUnit.SECONDS)
@@ -303,7 +311,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
                 PublishedBundlePhotoInput(photoId = addition.id)),
                 locations = listOf(place("replacement", 0))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
-        assertThat(snapshot(f)).isEqualTo(persisted)
+        assertSameState(snapshot(f), persisted)
         assertThat(recorder.edits).isEmpty()
         assertThat(assets.existsById(initial.photos.first().imageAssetId)).isTrue()
         assertThat(photos.existsById(initial.photos.first().photoId!!)).isTrue()
@@ -320,7 +328,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         recorder.rejectRemoval = true
         assertThatThrownBy { save(f, edit(reordered).copy(title = "rollback", locations = emptyList())) }
             .hasMessageContaining("source listener failure")
-        assertThat(snapshot(f)).isEqualTo(persisted)
+        assertSameState(snapshot(f), persisted)
         recorder.rejectRemoval = false
         val saved = save(f, edit(reordered).copy(locations = listOf(place("a", 0))))
         assertThat(saved.locations.single().id).isEqualTo(initial.locations[0].id)
@@ -369,7 +377,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         )
         requests.forEach { request ->
             assertThatThrownBy { save(f, request) }.isInstanceOf(BusinessException::class.java)
-            assertThat(snapshot(f)).isEqualTo(before)
+            assertSameState(snapshot(f), before)
         }
         assertThat(recorder.edits).isEmpty()
     }
@@ -520,7 +528,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             { service.leave(actor, f.bunchId, f.id, "leave") }
         )
         calls.forEach { assertError(ErrorCode.BUNDLE_STATE_CONFLICT, it) }
-        assertThat(snapshot(f)).isEqualTo(before)
+        assertSameState(snapshot(f), before)
     }
 
     @Test
@@ -539,11 +547,11 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertThat(public.contributors.last().profileAvailable).isFalse()
         assertThat(public.comments.last().content).isEqualTo("삭제된 코멘트입니다")
         val edited = save(f, edit(masked).copy(title = "departed participant allowed"))
-        assertThat(edited.comments).isEqualTo(masked.comments)
+        assertThat(edited.withImagePaths().comments).isEqualTo(masked.withImagePaths().comments)
         join(f.guest, issue(f.owner, f.bunchId))
         val restored = snapshot(f)
-        assertThat(restored.participants).isEqualTo(before.participants)
-        assertThat(restored.comments).isEqualTo(before.comments)
+        assertThat(restored.withImagePaths().participants).isEqualTo(before.withImagePaths().participants)
+        assertThat(restored.withImagePaths().comments).isEqualTo(before.withImagePaths().comments)
         mvc.perform(get("/api/v1/members/${f.guest}/social-profile").header("Authorization", credential(visitor)))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.memberId").value(f.guest))
@@ -660,9 +668,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     @Test
     fun `published attribution batches fifty bundles including profile images in three queries`() {
         val f = fixture()
-        val profileAsset = assets.saveAndFlush(ImageAsset(
-            publicId = "profile/${UUID.randomUUID()}", url = "https://images.example/profile.jpg"
-        ))
+        val profileAsset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(profileAsset.id)
         jdbc.update("UPDATE members SET profile_image_asset_id=? WHERE id=?", profileAsset.id, f.owner)
         val additional = (1..49).map {
@@ -683,7 +689,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             assertThat(result).hasSize(50)
             assertThat(result.getValue(f.id).participants).hasSize(2)
             assertThat(result.values).allSatisfy { value ->
-                assertThat(value.participants.first().imageUrl).isEqualTo(profileAsset.url)
+                assertThat(value.participants.first().imageUrl).contains("/bunch-test/${profileAsset.objectKey}?")
                 assertThat(value.participants.first().profileAvailable).isTrue()
             }
             assertThat(statistics.prepareStatementCount).isEqualTo(3)
@@ -739,7 +745,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             save(f, edit(initial).copy(title = "failed edit", locations = emptyList(),
                 photos = listOf(PublishedBundlePhotoInput(photoId = addition.id))))
         }.rootCause().hasMessageContaining("injected bunch write failure")
-        assertThat(snapshot(f)).isEqualTo(persisted)
+        assertSameState(snapshot(f), persisted)
         val preserved = pinRows.findById(pin.id).orElseThrow()
         assertThat(preserved.sourceBundleId).isEqualTo(f.id)
         assertThat(preserved.sourceLocationId).isEqualTo(initial.locations.single().id)
@@ -791,18 +797,18 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertThat(saved.visibilityVersion).isEqualTo(before.visibilityVersion + 1)
         assertThat(saved.revision).isEqualTo(before.revision + 1)
         assertThat(saved.updatedAt).isAfter(before.updatedAt)
-        assertThat(saved.copy(
+        assertSameState(saved.copy(
             visibility = before.visibility, visibilityVersion = before.visibilityVersion,
             revision = before.revision, updatedAt = before.updatedAt,
             likeCount = before.likeCount, commentCount = before.commentCount
-        )).isEqualTo(before)
+        ), before)
         assertThat(service.get(f.guest, f.bunchId, f.id).id).isEqualTo(f.id)
         assertThat(feedAccess.visibleBundleIds(visitor, listOf(f.id))).isEmpty()
         assertThat(feed.get(visitor).items.filterIsInstance<FeedBundleItem>().map { it.bundle.id }).doesNotContain(f.id)
         assertThat(publicService.bundles(visitor, f.bunchId, 0, 20).items).isEmpty()
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { publicService.bundle(visitor, f.bunchId, f.id) }
         val persisted = snapshot(f)
-        assertThat(visibility(f, Visibility.PRIVATE, saved.visibilityVersion)).isEqualTo(persisted)
+        assertSameState(visibility(f, Visibility.PRIVATE, saved.visibilityVersion), persisted)
         assertThat(recorder.visibilities).hasSize(1)
         assertError(ErrorCode.BUNDLE_VERSION_CONFLICT) { visibility(f, Visibility.PRIVATE) }
         val restored = visibility(f, Visibility.PUBLIC, saved.visibilityVersion)
@@ -811,8 +817,8 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
         assertThat(external.likeCount).isEqualTo(1)
         assertThat(external.commentCount).isEqualTo(1)
         assertThat(external.publishedAt).isEqualTo(before.publishedAt)
-        assertThat(restored.photos).isEqualTo(before.photos)
-        assertThat(restored.comments).isEqualTo(before.comments)
+        assertThat(restored.withImagePaths().photos).isEqualTo(before.withImagePaths().photos)
+        assertThat(restored.withImagePaths().comments).isEqualTo(before.withImagePaths().comments)
         assertThat(count("notifications")).isEqualTo(notifications)
         assertThat(count("push_jobs")).isEqualTo(pushes)
         assertThat(memberships.findByMemberIdAndBunchIdAndStatus(f.owner, f.bunchId)!!.lastActivityAt)
@@ -938,7 +944,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
                 .andExpect(status().isBadRequest)
                 .andExpect(jsonPath("$.error.code").value(ErrorCode.INVALID_JSON.code))
         }
-        assertThat(snapshot(f)).isEqualTo(before)
+        assertSameState(snapshot(f), before)
         assertThat(recorder.visibilities).isEmpty()
     }
 
@@ -965,9 +971,29 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
             assertThat(recorder.visibilities).isEmpty()
             tx.setRollbackOnly()
         }
-        assertThat(snapshot(f)).isEqualTo(before)
+        assertSameState(snapshot(f), before)
         assertThat(recorder.visibilities).isEmpty()
     }
+
+    // A read re-signs URLs. Compare every DTO field, retaining the full object URL except its signature query.
+    private fun assertSameState(actual: BundleSnapshot, expected: BundleSnapshot) {
+        assertThat(actual.withImagePaths()).isEqualTo(expected.withImagePaths())
+    }
+
+    private fun BundleSnapshot.withImagePaths() = copy(
+        photos = photos.map { photo ->
+            photo.copy(
+                imageUrl = photo.imageUrl.substringBefore('?'),
+                picks = photo.picks?.let { picks ->
+                    picks.copy(members = picks.members.map {
+                        it.copy(imageUrl = it.imageUrl?.substringBefore('?'))
+                    })
+                }
+            )
+        },
+        participants = participants.map { it.copy(imageUrl = it.imageUrl?.substringBefore('?')) },
+        comments = comments.map { it.copy(imageUrl = it.imageUrl?.substringBefore('?')) }
+    )
 
     private fun fixture(photoCount: Int = 1): Fixture {
         val owner = member()
@@ -1003,10 +1029,7 @@ class PublishedBundleEditIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun photo(bunchId: Long, status: ProcessingStatus = ProcessingStatus.READY): Photo {
-        val asset = assets.saveAndFlush(ImageAsset(
-            publicId = "published/${UUID.randomUUID()}",
-            url = "https://images.example/test.jpg"
-        ))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(asset.id)
         return photos.saveAndFlush(Photo(bunch = bunchRows.findById(bunchId).orElseThrow(), imageAsset = asset,
             fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2), processingStatus = status))
