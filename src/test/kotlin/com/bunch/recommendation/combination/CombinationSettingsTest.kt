@@ -3,7 +3,6 @@ package com.bunch.recommendation.combination
 import com.bunch.global.image.ImageQualityCriteria
 import com.bunch.recommendation.domain.combination.CombinationSettings
 import com.bunch.recommendation.domain.combination.DayPart
-import com.bunch.recommendation.domain.combination.Pace
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -28,8 +27,9 @@ class CombinationSettingsTest {
 
     @Test
     fun `the gaps are the ones of the table`() {
-        assertThat(settings.continuityShort).isEqualTo(Duration.ofHours(2))
-        assertThat(settings.continuityLong).isEqualTo(Duration.ofHours(4))
+        assertThat(settings.peopleChangeGap).isEqualTo(Duration.ofHours(1))
+        assertThat(settings.slotChangeGap).isEqualTo(Duration.ofHours(2))
+        assertThat(settings.sameSlotGap).isEqualTo(Duration.ofHours(4))
         assertThat(settings.minBoundaryGap).isEqualTo(Duration.ofMinutes(20))
         assertThat(settings.eventSamePlaceGap).isEqualTo(Duration.ofHours(2))
     }
@@ -129,13 +129,6 @@ class CombinationSettingsTest {
     @CsvSource("5,", "6,6", "15,6", "16,8", "25,8", "26,10", "300,10")
     fun `the card has the size of the step the bundle has reached`(photoCount: Int, expected: Int?) {
         assertThat(settings.cardSizeFor(photoCount)).isEqualTo(expected)
-    }
-
-    @Test
-    fun `a short pace is two hours, a long pace four, and a day pace is not cut by time`() {
-        assertThat(settings.continuityOf(Pace.SHORT)).isEqualTo(Duration.ofHours(2))
-        assertThat(settings.continuityOf(Pace.LONG)).isEqualTo(Duration.ofHours(4))
-        assertThat(settings.continuityOf(Pace.DAY)).isNull()
     }
 
     @Test

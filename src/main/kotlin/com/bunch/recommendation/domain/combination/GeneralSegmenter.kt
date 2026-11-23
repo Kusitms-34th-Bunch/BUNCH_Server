@@ -4,14 +4,13 @@ import java.time.Duration
 
 /**
  * Cuts a chunk into segments at the gaps of [CombinationSettings.minBoundaryGap] or more (recommended bundle
- * specification 7-3). The gaps are measured between the photos that have a time, whether they are usable or not
- * (5-1). Cutting here does not decide to separate anything: the later rules decide, and only at these gaps.
+ * specification 3-1). The gaps are measured between the photos that have a time, whether they are usable or not.
+ * Cutting here does not decide to separate anything: the later rules decide, and only at these gaps.
  */
 class GeneralSegmenter(
-    private val settings: CombinationSettings = CombinationSettings(),
-    private val activities: GeneralActivities = GeneralActivities(settings)
+    private val settings: CombinationSettings = CombinationSettings()
 ) {
-    fun segment(photos: List<PreparedPhoto>, counter: GeneralCounter): List<GeneralSegment> {
+    fun segment(photos: List<PreparedPhoto>): List<GeneralSegment> {
         val runs = mutableListOf<MutableList<PreparedPhoto>>()
         for (photo in photos) {
             val previous = runs.lastOrNull()?.last()
@@ -23,12 +22,7 @@ class GeneralSegmenter(
             }
         }
         return runs.map {
-            GeneralSegment(
-                photos = it,
-                activity = activities.representative(it),
-                slot = activities.slotOf(it),
-                uploaders = counter.uploaders(it)
-            )
+            GeneralSegment(photos = it, slot = settings.mainDayPartOf(it))
         }
     }
 }
