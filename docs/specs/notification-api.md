@@ -14,16 +14,25 @@
 - 형식 오류는 `COMMON_001`(400), 본인 소유가 아니거나 없는 notification은 `RESOURCE_001`(404), session·가입 완료 오류는 기존 AUTH 오류를 사용한다.
 - 읽음·open에는 새 Idempotency-Key나 읽음 token을 요구하지 않는다. 업무 producer의 원래 request replay는 알림을 다시 만들지 않는다.
 
-`NotificationTarget`은 `kind,bunchId,bundleId?,noticeId?,targetBunchId?,sourceBunchId?,commentId?`를 가진다.
-소셜 번들·댓글 알림의 `bunchId`는 수신 inbox 번치, `targetBunchId`는 실제 번들 소유 번치,
-`sourceBunchId`는 좋아요·댓글·답글 행동 번치다. 과거 JSON에서 없는 필드는 null로 읽는다.
+`NotificationTarget`은 `kind,bunchId,bundleId?,noticeId?,targetBunchId?,sourceBunchId?,commentId?,parentCommentId?`를 가진다.
+`bunchId`는 수신 inbox 번치이고, 번들 소유 번치는 `targetBunchId ?? bunchId`로 결정한다.
+`sourceBunchId`는 좋아요·댓글·답글 행동 번치다. `commentId`는 실제 원댓글 또는 답글 ID이며,
+원댓글·댓글이 아닌 target의 `parentCommentId`는 null, 답글의 `parentCommentId`는 원댓글 ID다.
+과거 JSON에서 없는 필드는 null로 읽는다.
 답글 수신 inbox가 번들 소유 번치와 달라도 공개 범위를 충족하면 이동할 수 있다.
 open은 서버 current 번치, 푸시 전송은 저장된 수신 inbox 번치 문맥으로 번들 공개 범위와
-차단·신고·운영 숨김을 재검사한다. 행동 번치의 차단·신고·숨김도 반영하며, open 불가여도 읽음은 유지한다.
+차단·호환용 전역 BUNCH/BUNDLE 숨김을 재검사한다. 행동 번치도 차단·호환용 전역 BUNCH 숨김을 반영하며,
+open 불가여도 읽음은 유지한다. 2026-11-22 사용자 결정(#207)에 따라 신고 이력과 reporter가 non-null인
+과거 숨김 행은 이동·전송을 막지 않는다([공통 접근](feed-api.md)).
 푸시를 받을 때 사용자가 다른 번치를 선택하고 있다는 이유만으로 적격한 inbox 알림을 취소하지 않는다.
-소셜 댓글·답글의 `commentId`는 `social_comments`의 실제 ID다. 열기와 푸시 전송 전에 해당 댓글과
-원댓글의 차단·신고·운영 숨김을 다시 검사하며, 삭제된 해당 댓글은 사용할 수 없다.
-원댓글이 삭제되어도 정상 답글의 접근은 유지한다. 과거 commentId 없는 알림은 기존 번들 검사로 처리한다.
+소셜 댓글·답글의 `commentId`는 `social_comments`의 실제 ID다. 답글 target은 원댓글 ID를
+`parentCommentId`에 함께 담는다. 열기와 푸시 전송 전에 해당 댓글과
+원댓글의 작성 번치 차단·호환용 전역 BUNCH 숨김과 실제 삭제 상태를 다시 검사하며, 삭제된 해당 댓글은 사용할 수 없다.
+원댓글이 삭제되어도 placeholder와 정상 답글의 접근은 유지한다. 과거 commentId 없는 알림은 기존 번들 검사로 처리한다.
+과거 전역 COMMENT 숨김은 V52에서 실제 소프트 삭제로 전환하는 [신고 계약](feed-reports.md)을 따른다.
+신고 결과·검토·삭제 조치의 inbox·푸시는 생성하지 않는다.
+운영 삭제된 댓글의 기존 `SOCIAL_COMMENT_CREATED` 목록 미리보기는 「삭제된 댓글입니다」로 반환한다.
+이는 기존 본문 교체이며 새 알림이 아니다([저장 계약](notification-schema.md)).
 명시적 open은 알림 소유자를 확인한 뒤 현재 공개 조회 자격으로 판정한다. 과거 inbox 번치에서
 나갔더라도 가입 완료자의 공개 번들 접근을 막지 않는다. 소속 0개도 같은 규칙이며 PRIVATE는 허용하지 않는다.
 푸시 전송의 유효한 inbox Membership 조건은 유지한다.
@@ -31,6 +40,10 @@ kind 호환 값은 `BUNCH_HOME`, `MEMBERS`, `ROLE_PERMISSIONS`, `DRAFT`, `DRAFT_
 `CANDIDATES`, `OTHER_BUNCH_PROFILE`, `ACCESS_NOTICE`다. 저장된 target 자체는 접근 권한의 증거가 아니다.
 저장된 `bunchId`는 inbox 행의 소유·읽음 범위를 식별할 뿐, 프로필을 여는 current 명의나
 대상 접근 권한을 고정하지 않는다.
+
+푸시에서 inbox를 열 때 앱은 payload의 `target.bunchId`를 `{bunchId}`로, top-level
+`notificationId`를 `{notificationId}`로 사용해 open을 호출한다. `targetBunchId`를 inbox 경로에
+사용하지 않으며, `notificationId`가 null인 detached push는 inbox open 대상이 아니다.
 
 ## 2. type 호환성
 
@@ -63,8 +76,10 @@ wire enum의 번호와 이름은 저장 계약과 동일하다. 실제 inbox 생
 
 ### open
 
-open은 먼저 수신 회원이 소유한 해당 inbox 행의 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·참여·공개 상태를 검사한다.
-대상이 삭제됐거나 현재 접근할 수 없으면 다음처럼 200을 반환한다.
+open은 `{bunchId}` inbox 범위와 `{notificationId}` persisted inbox ID로 해당 행을 찾는다.
+먼저 수신 회원이 소유한 행의 읽음을 저장한 뒤 현재 대상의 존재·번치 소속·참여·공개 상태를 검사한다.
+응답의 `available`과 `target`이 현재 상태의 권위 있는 결과이며, 대상이 삭제됐거나 현재 접근할 수 없으면
+`available:false,target:null`을 200으로 반환한다.
 
 ```json
 {"success":true,"data":{"notificationId":801,"readAt":"2026-10-29T09:10:00Z","available":false,"target":null},"error":null}
@@ -80,8 +95,8 @@ open은 먼저 수신 회원이 소유한 해당 inbox 행의 읽음을 저장�
 target이다.
 초안 target은 현재 DRAFT이고 참여 중인지, 번들 target은 현재 공개 상태인지 다시 확인한다.
 `BUNDLE`·`BUNDLE_COMMENTS` 발행 알림의 open은 대상 번들 소유 번치에 대해 수신 회원의
-활성 미확인 AccessNotice를 먼저 확인한다. 소유 번치는 `target.targetBunchId`를 우선하고,
-값이 없으면 수신 inbox의 `target.bunchId`를 fallback으로 사용한다. 해당 notice가 있으면
+활성 미확인 AccessNotice를 먼저 확인한다. 소유 번치는 `target.targetBunchId ?? target.bunchId`로
+결정한다. 해당 notice가 있으면
 `available:false,target:null`을 반환하지만 먼저 저장한 `readAt`은 커밋한다. 만료되었거나
 삭제된 notice는 active notice로 보지 않으며, 수신 회원이 해당 번치에 다시 ACTIVE로 참여한
 경우에도 open을 막지 않는다. 푸시 `canDeliver`는 수신자별 AccessNotice 검사를 하지 않고

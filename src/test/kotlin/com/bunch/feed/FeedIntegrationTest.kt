@@ -93,14 +93,14 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     fun `following then public fill one page and emit the boundary at its actual position`() {
         val user = member()
         val current = publicBunch(user)
-        val owner = member()
-        val followed = publicBunch(owner)
-        val stranger = publicBunch(owner)
+        val followed = publicBunch(user)
+        val stranger = publicBunch(user)
+        bunches.updateLastUsed(user, current)
         follow(current, followed)
-        val recentFollowed = published(followed, owner, at)
-        val olderFollowed = published(followed, owner, at.minusSeconds(1))
-        val oldFollowed = published(followed, owner, at.minusSeconds(30 * 86_400L))
-        val publicNewest = published(stranger, owner, at.plusSeconds(1))
+        val recentFollowed = published(followed, user, at)
+        val olderFollowed = published(followed, user, at.minusSeconds(1))
+        val oldFollowed = published(followed, user, at.minusSeconds(30 * 86_400L))
+        val publicNewest = published(stranger, user, at.plusSeconds(1))
 
         val page = feed.get(user, 3)
         assertThat(page.bundleIds()).containsExactly(recentFollowed, olderFollowed, publicNewest)
@@ -162,20 +162,23 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `all active memberships are excluded and zero memberships read public without actions`() {
+    fun `only current bunch is excluded and zero memberships read public without actions`() {
         val user = member()
         val current = publicBunch(user)
         val other = publicBunch(user)
-        published(current, user)
-        published(other, user)
+        val currentBundle = published(current, user)
+        val otherBundle = published(other, user, at.minusSeconds(1))
+        bunches.updateLastUsed(user, current)
         val owner = member()
         val target = publicBunch(owner)
         val visible = published(target, owner)
         val private = published(target, owner, visibility = "PRIVATE")
         val privateBunch = published(create(owner).id, owner)
         val page = feed.get(user)
-        assertThat(page.bundleIds()).containsExactly(visible)
+        assertThat(page.bundleIds()).containsExactly(visible, otherBundle)
         assertThat(page.canInteract).isTrue()
+        bunches.updateLastUsed(user, other)
+        assertThat(feed.get(user).bundleIds()).containsExactly(visible, currentBundle)
         val visitor = member()
         val guest = feed.get(visitor)
         assertThat(guest.currentBunchId).isNull()
@@ -183,6 +186,27 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         assertThat(guest.bundleIds()).contains(visible).doesNotContain(private, privateBunch)
         assertThat(guest.bundles()).allMatch { it.segment == FeedSegment.PUBLIC }
         assertThat(guest.items.filterIsInstance<FeedFollowingCaughtUpItem>()).isEmpty()
+    }
+
+    @Test
+    fun `membership in another private bunch grants no feed access without current bunch approval`() {
+        val user = member()
+        val current = publicBunch(user)
+        val other = create(user).id
+        val visibleAfterApproval = published(other, user)
+        published(other, user, visibility = "PRIVATE")
+        bunches.updateLastUsed(user, current)
+
+        assertThat(feed.get(user).items).isEmpty()
+        follow(current, other)
+        jdbc.update("UPDATE bunch_follows SET status='PENDING', approved_at=NULL WHERE follower_bunch_id=?", current)
+        assertThat(feed.get(user).items).isEmpty()
+        jdbc.update("UPDATE bunch_follows SET status='APPROVED', approved_at=now() WHERE follower_bunch_id=?", current)
+
+        val page = feed.get(user)
+        assertThat(page.bundleIds()).containsExactly(visibleAfterApproval)
+        assertThat(page.bundles().single().segment).isEqualTo(FeedSegment.FOLLOWING)
+        assertThat(page.endReached).isTrue()
     }
 
     @Test
@@ -205,7 +229,7 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `public page refills before limit after block report ops private and deletion changes`() {
+    fun `public page retains reports while refilling after block moderation private and deletion changes`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -226,10 +250,11 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         reports.bundle(user, reported, SocialContentReportRequest(BunchReportReason.SPAM))
         block(blockedTarget, current)
         val next = feed.get(user, 20, page.nextCursor)
-        assertThat(next.bundleIds()).containsExactly(surviving)
+        assertThat(next.bundleIds()).containsExactly(reported, surviving)
         assertThat(next.bundleIds()).doesNotContain(blocked)
         assertThat(next.endReached).isTrue()
         hide("BUNDLE", surviving)
+        hide("BUNDLE", reported)
         val nowEmpty = feed.get(user, 20, page.nextCursor)
         assertThat(nowEmpty.items).isEmpty()
         assertThat(nowEmpty.hasNext).isFalse()
@@ -342,7 +367,7 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `actual reaction batches include deleted slots and exclude blocked reported and moderated actors and comments`() {
+    fun `actual reaction batches retain reported actors and comments while excluding blocks and moderation`() {
         val user = member()
         val current = publicBunch(user)
         val owner = member()
@@ -369,9 +394,9 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         hide("BUNCH", actors[3].second)
         reports.comment(user, bundle, hiddenRoot, SocialContentReportRequest(BunchReportReason.SPAM))
         val card = feed.get(user).bundles().single().bundle
-        assertThat(card.likeCount).isEqualTo(2)
+        assertThat(card.likeCount).isEqualTo(3)
         assertThat(card.likedByCurrentBunch).isTrue()
-        assertThat(card.commentCount).isEqualTo(4)
+        assertThat(card.commentCount).isEqualTo(7)
         assertThat(card.commentCount).isEqualTo(comments.counts(user, listOf(bundle)).getValue(bundle))
         assertThat(card.likeCount).isEqualTo(likes.summaries(user, listOf(bundle)).getValue(bundle).likeCount)
     }

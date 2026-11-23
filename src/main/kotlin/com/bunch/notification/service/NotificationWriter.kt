@@ -32,6 +32,13 @@ class NotificationWriter(
     private val clock: Clock
 ) {
     @Transactional(propagation = Propagation.MANDATORY)
+    fun redactModeratedComment(commentId: Long) {
+        val body = "삭제된 댓글입니다"
+        notifications.redactCommentBody(commentId, body)
+        pushJobs.redactCommentBody(commentId, body)
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     fun followCreated(follower: Bunch, target: Bunch, follow: BunchFollow, actorId: Long) {
         val approved = follow.status == BunchFollowStatus.APPROVED
         socialNotification(
@@ -240,6 +247,7 @@ class NotificationWriter(
         actorId: Long,
         actorNickname: String,
         content: String,
+        parentCommentId: Long?,
         parentAuthorId: Long?,
         parentBunchId: Long?,
         now: Instant
@@ -272,7 +280,8 @@ class NotificationWriter(
                     bundleId = bundle.id,
                     targetBunchId = bundle.bunchId,
                     sourceBunchId = sourceBunch.id,
-                    commentId = commentId
+                    commentId = commentId,
+                    parentCommentId = parentCommentId
                 ),
                 createdAt = now
             )

@@ -2,6 +2,7 @@ package com.bunch.social.service
 
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bundle.domain.BundleRepository
+import com.bunch.bundle.domain.BundleStatus
 import com.bunch.feed.service.FeedAccessService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -105,6 +106,7 @@ class SocialCommentService(
             actorId = userId,
             actorNickname = author.nickname ?: "작성자",
             content = content,
+            parentCommentId = row.parentId,
             parentAuthorId = parent?.authorMemberId,
             parentBunchId = parent?.actingBunchId,
             now = now
@@ -121,11 +123,30 @@ class SocialCommentService(
         val row = comments.findLocked(bundleId, commentId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         val interaction = access.requireInteraction(userId, bundleId)
         if (row.authorMemberId != userId) fail(ErrorCode.FORBIDDEN)
+        markDeleted(row)
+        return items(userId, interaction.actor.bunch.id, listOf(row)).single()
+    }
+
+    /** Trusted operations only; callers must authenticate operators before invoking this method. */
+    @Transactional
+    fun deleteForModeration(commentId: Long) {
+        positive(commentId)
+        val target = comments.findById(commentId).orElseThrow { BusinessException(ErrorCode.RESOURCE_NOT_FOUND) }
+        val bunchId = bundles.findBunchId(target.bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        bunches.findLocked(bunchId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        val bundle = bundles.findLocked(target.bundleId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        if (bundle.status != BundleStatus.PUBLISHED) fail(ErrorCode.BUNDLE_STATE_CONFLICT)
+        val row = comments.findLocked(bundle.id, commentId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
+        entityManager.refresh(row)
+        markDeleted(row)
+        notifications.redactModeratedComment(commentId)
+    }
+
+    private fun markDeleted(row: SocialComment) {
         if (row.deletedAt == null) {
             row.content = ""
             row.deletedAt = clock.instant().truncatedTo(ChronoUnit.MICROS)
         }
-        return items(userId, interaction.actor.bunch.id, listOf(row)).single()
     }
 
     // Called when the account is withdrawn: every comment and reply reads as a deleted one (6.2.7 rule 6).
@@ -181,7 +202,7 @@ class SocialCommentService(
     fun requireReportable(userId: Long, bundleId: Long, commentId: Long) {
         positive(commentId)
         val interaction = access.requireInteraction(userId, bundleId)
-        val row = comments.reportable(bundleId, commentId, interaction.actor.bunch.id)
+        val row = comments.visible(bundleId, commentId, interaction.actor.bunch.id)
             ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         if (row.authorMemberId == userId) fail(ErrorCode.FORBIDDEN)
         if (row.deletedAt != null) fail(ErrorCode.RESOURCE_NOT_FOUND)

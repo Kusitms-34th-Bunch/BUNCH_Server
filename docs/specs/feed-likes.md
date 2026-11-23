@@ -28,7 +28,9 @@ acting/viewer 번치는 클라이언트가 선택할 수 없으며 서버 curren
 - current의 ACTIVE 멤버는 OWNER/CO_OWNER/MEMBER 모두 설정·취소할 수 있다.
   누른 개인은 외부에 노출하지 않고, 다른 멤버도 취소할 수 있다.
 - 우리 번들의 멤버 전용 발행본에도 상세 접근이 허용되면 가능하다.
-  피드의 모든 ACTIVE 소속 제외는 적용하지 않는다. 다른 소속의 권한은 current에 빌려주지 않는다.
+  피드 전용 현재 번치 제외는 적용하지 않는다. 2026-11-21 정책에 따라 다른 ACTIVE 소속 번들도
+  피드 후보가 될 수 있지만, PUBLIC 발행 번들·공개 번치/현재 번치의 APPROVED 팔로우와
+  차단·레거시 전역 BUNCH/BUNDLE 숨김 등 외부 접근 조건을 통과해야 한다. 소속만으로 비공개 접근을 허용하지 않는다.
 - 가입 완료·활성 계정의 소속 0개 GET은 허용하며 `currentBunchId:null`,
   `likedByCurrentBunch:false`다. PUT/DELETE는 `409 BUNCH_010`이다.
 - 공통 접근 검사는 반복 요청·취소에도 매번 적용한다. 숨김·삭제·미발행·외부 멤버 전용은
@@ -44,7 +46,9 @@ C의 상세 및 B의 카드 조립에서 한 번 호출한다. 입력은 최대 
 좋아요 0개 번들은 0/false를 채운다. 상세 접근 오류가 필요한 단건 API는 `summary`를 사용한다.
 
 집계는 DB GROUP BY와 A의 `VISIBLE_BUNCH` 조건을 재사용하므로 반응한 번치 자체의
-양방향 차단·프로필 신고·번치 운영/신고 숨김을 count 이전에 제외한다.
+양방향 차단·레거시 전역 BUNCH 숨김을 count 이전에 제외한다.
+2026-11-22 사용자 결정(#207)에 따라 프로필·콘텐츠 신고와 non-null reporter 숨김은
+집계·조회·상호작용에 영향을 주지 않는다([신고 계약](feed-reports.md)).
 이는 `visibleBunchIds`와 같은 정책이며 반응한 비공개 번치의 승인 팔로우는 요구하지 않는다.
 대상 번들 자체의 접근 검사와 별개다. active=true만 센다. 요청 간 결과를 캐시하지 않는다.
 조회는 REPEATABLE_READ로 current·접근 후보·집계를 같은 snapshot에서 읽는다.
@@ -84,7 +88,7 @@ target은 BUNDLE, bunchId/targetBunchId는 소유 번치, sourceBunchId는 행�
 ## 검증 기준
 
 실제 PostgreSQL/Redis에서 역할별 공동 상태·다른 멤버 취소·서버 current·소속 0개,
-가입·양방향 차단·공개/승인·신고/운영 숨김·배치 집계·동시 PUT/취소,
+가입·양방향 차단·공개/승인·레거시 전역 숨김·신고 전후 집계 불변·배치 집계·동시 PUT/취소,
 참여자 수신 범위·기기별 job·설정·원자 롤백·재알림 금지·FK 정리와 migration 재실행을 검증한다.
 기존 공통·알림·번들 회귀는 전체 clean build로 검증한다.
 실제 iOS/WebView·APNs 수신/복귀는 수동 검증 대상으로 남는다.

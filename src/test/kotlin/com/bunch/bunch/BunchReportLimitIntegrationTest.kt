@@ -201,6 +201,8 @@ class BunchReportLimitIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val viewer = create(owner).id
         val target = create(member()).id
+        val beforeNotifications = count("notifications")
+        val beforePushJobs = count("push_jobs")
         assertThatThrownBy {
             TransactionTemplate(transactionManager).executeWithoutResult {
                 social.report(owner, viewer, request(target))
@@ -208,6 +210,8 @@ class BunchReportLimitIntegrationTest : BunchIntegrationSupport() {
             }
         }.isInstanceOf(IllegalStateException::class.java)
         assertThat(count("bunch_profile_reports")).isZero()
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
 
         val later = start.plusSeconds(3_600)
         at(later)
@@ -215,6 +219,9 @@ class BunchReportLimitIntegrationTest : BunchIntegrationSupport() {
         val second = social.report(owner, viewer, request(target))
         assertThat(windowStart(first.reportId)).isEqualTo(later)
         assertThat(windowStart(second.reportId)).isEqualTo(later)
+        quotaFailure { social.report(owner, viewer, request(target)) }
+        assertThat(count("notifications")).isEqualTo(beforeNotifications)
+        assertThat(count("push_jobs")).isEqualTo(beforePushJobs)
     }
 
     @Test

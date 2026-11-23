@@ -7,7 +7,8 @@ data class PushPayload(
     val aps: PushAps,
     val eventId: UUID,
     val type: NotificationType,
-    val target: Map<String, Any?>
+    val target: Map<String, Any?>,
+    val notificationId: Long? = null
 )
 
 data class PushAps(

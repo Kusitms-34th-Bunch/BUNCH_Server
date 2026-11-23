@@ -2,6 +2,7 @@
 
 FEED-05, NOTI-02 / #90. 선행 #87, PR #96. 공통 접근은 [feed-api](feed-api.md),
 정책 기준은 승인된 6.2.6~9와 2026-11-07 보완 결정이다.
+신고·운영 삭제는 2026-11-22 사용자 결정(#207)과 [신고 계약](feed-reports.md)이 우선한다.
 기존 `bundle_comments`는 참여자 코멘트이며 이 API와 무관하다.
 소셜 댓글·답글의 `content` 저장 시 금칙어 검사는 [공통 금칙어 검사 계약](profanity.md)을
 따른다. 기존 페이지·작성자·삭제·멱등 계약과 `COMMON_001` 등 오류는 유지하며, 위반은
@@ -25,12 +26,15 @@ HTTP 400 `COMMON_003`/`error.prohibited_word`와 `detail.fields: ["content"]`로
 답글을 내장해 잘라내지 않는다. `totalCount`는 번들의 원댓글+답글 전체 수다.
 정렬 키는 createdAt/id이고 커서는 번들·부모·현재 번치에 묶인다. 번치 전환 후 커서는 400.
 각 페이지는 최신 접근·비노출 조건을 LIMIT 전에 재확인한다. 커서는 접근 권한을 부여하지 않는다.
+댓글 단건 조회나 position/offset 기반 이동 API는 제공하지 않는다. 알림 deep link도 기존 원댓글·답글
+페이지 조회를 호출해 `commentId`를 찾으며, 답글은 `parentCommentId`를 부모 경로로 사용한다.
 
 항목: id/bundleId/parentId/content/deleted/createdAt/author/badge/replyCount/canDelete/canReply/canReport.
 author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성 시 배지 이름·분위기).
 닉네임·사진은 현재 계정에서 읽고 탈퇴 계정은 작성자/null로 익명화한다.
 삭제 자리는 content=삭제된 댓글입니다, author=작성자, 사진·회원ID·배지·날짜=null,
-쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다.
+쓰기 메뉴 없음. 답글 없는 원댓글도 남고 원댓글 삭제 시 기존 답글은 유지한다. 삭제된 부모 placeholder의
+기존 답글 페이지와 답글 알림 open은 정상 접근하며, 삭제된 부모에 새 답글을 쓰는 기존 conflict는 유지한다.
 
 주요 오류: 입력/커서 오류 COMMON_001(400), 금칙어 content `COMMON_003`(400), payload가 다른 멱등 키 REQUEST_001(409),
 삭제된 부모/2단계 답글 BUNDLE_002(409), 없는/숨긴/다른 번들의 댓글 RESOURCE_001(404),
@@ -41,7 +45,10 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 - trim 후 1~200 grapheme(\X), 내부 줄바꿈 보존. 수정 API 없음.
 - `social_comments`(V25)에 개인 작성자, acting Bunch, 작성 시 배지, 부모, 삭제 시각을 저장한다.
   부모는 같은 번들의 원댓글만 가능하며 DB FK/트리거로 강제한다.
-- 작성자만 soft delete하며 본문을 비운다. 번치 관리자도 타인 삭제 불가.
+- 일반 삭제는 작성자만 soft delete하며 본문을 비운다. 번치 관리자도 타인 삭제 불가.
+  신뢰된 운영 검토 후에는 내부 `SocialCommentService.deleteForModeration(commentId)`가
+  같은 삭제 처리를 재사용한다. 호출자는 운영자를 사전에 인증해야 하며 메서드 자체는 인증을 제공하지 않는다.
+  본문 제거·`deletedAt` 설정 외에 답글·집계 자리는 유지한다.
 - 이미 삭제된 부모는 BUNDLE_STATE_CONFLICT(409). 검증 성공 후 삭제가 경합하면 답글 허용:
   부모를 삭제 상태로 조건부 삽입하거나 부모 행 쓰기 잠금으로 재검증하지 않는다.
 - Idempotency-Key는 작성자+작성 번치+번들 범위에서 유일하다. 같은 정규화 내용·부모는
@@ -50,19 +57,22 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 - 생성은 member → 관련 Bunch ID 오름차순 → bundle 잠금 후 현재 번치·소속·접근 재확인.
   삭제는 작성자 계정과 댓글 잠금 후 현재 접근을 재확인하며 부모 삭제와 답글 삽입을 분리한다.
 - 번들 영구 삭제 시 댓글은 FK cascade로 제거한다. 작성 번치 삭제는 acting FK를 null로
-  바꾸고 외부 번들의 개인 댓글·답글을 보존하며 배지를 숨긴다. 숨김 기록은 A 보존 정책을 따른다.
+  바꾸고 외부 번들의 개인 댓글·답글을 보존하며 배지를 숨긴다.
 
 ## 비노출·집계·내부 인터페이스
 
-삭제 자리도 전체 댓글 수와 replyCount에 포함한다. acting Bunch의 양방향 차단·프로필 신고·
-운영 숨김, 댓글 자체의 현재 번치 신고·운영 숨김은 제외한다. 숨겨진 원댓글의 하위는 모두
-제외한다. 같은 조건을 목록·답글·집계에 적용한다. 비공개 acting Bunch의 팔로우는 요구하지 않는다.
+삭제 자리도 전체 댓글 수와 replyCount에 포함한다. acting Bunch의 양방향 차단·레거시 전역
+BUNCH 숨김은 제외하고, 이 조건으로 보이지 않는 원댓글의 하위도 제외한다.
+신고 이력·non-null reporter 숨김·댓글 타깃 숨김은 목록·답글·집계의 제외 근거가 아니다.
+전역 COMMENT 숨김은 V52에서 실제 soft delete로 전환한다([전환 계약](feed-reports.md)).
+같은 조건을 목록·답글·집계에 적용하며 비공개 acting Bunch의 팔로우는 요구하지 않는다.
 
 `SocialCommentService.counts(userId, bundleIds): Map<Long, Long>`은 최대500개를 받아
 상세 접근 가능한 번들만 집계하고 0도 반환한다. 피드 전용 ACTIVE 소속 제외는 하지 않는다.
 `SocialCommentService.requireReportable(userId, bundleId, commentId)`는 F 전용으로 자기댓글을
-거부하고 댓글의 reporter 숨김만 무시해 재신고를 허용한다. 번들 접근·작성 번치 차단/프로필신고·
-전역 운영 숨김과 원댓글 숨김은 계속 확인한다. 성공 시 Unit을 반환하며 호출자는 검증된 입력 commentId로
+거부하고 일반 조회와 같은 접근 조건으로 재신고를 검증한다. 번들 접근·작성 번치 차단·
+레거시 전역 BUNCH/BUNDLE 숨김과 댓글 삭제 상태는 계속 확인한다.
+성공 시 Unit을 반환하며 호출자는 검증된 입력 commentId로
 신고를 저장한다. 신고 저장·quota는 F 소유이며 이 메서드는 본문 조회에 사용하지 않는다.
 
 ## 알림
@@ -71,15 +81,21 @@ author는 memberId/nickname/imageUrl, badge는 bunchId/name/characterType(작성
 원댓글 작성자는 원댓글 acting Bunch의 ACTIVE 소속일 때 받는다. 행동자는 제외하고 겹치는
 수신자는 답글 알림 한 건만 받는다. `SOCIAL_COMMENT_CREATED` 타입을 재사용하므로 답글도
 댓글 푸시 설정을 따른다. 같은 번치 댓글은 참여자 알림이 없지만 답글 알림은 적용한다.
-각 target은 bunchId=수신 inbox, targetBunchId=실제 번들 소유 Bunch,
-sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다.
+각 target은 bunchId=수신 inbox, targetBunchId=실제 번들 소유 Bunch(없으면 `bunchId`),
+sourceBunchId=이번 댓글 작성 Bunch, bundleId=실제 번들이다. `commentId`는 실제 원댓글·답글 ID이며,
+원댓글 target의 `parentCommentId`는 null, 답글 target의 `parentCommentId`는 원댓글 ID다.
 5.12.3의 댓글 알림 제목은 `{번치 이름} 번치 {닉네임}님이 '{번들 제목}' 번들에 댓글을 남겼어요`이며,
 행동 번치와 작성자 닉네임을 함께 표시한다. 닉네임은 등록 트랜잭션에서 잠근 작성자 계정의 값이다.
 댓글·답글 원문의 줄바꿈은 보존하고, 알림 본문은 연속된 CR/LF 줄바꿈을 공백 하나로 바꾼 전체 내용으로
 저장한다. 앱 내 목록은 이 본문을 반환하며 최대 2줄 표시는 클라이언트가 처리한다. 푸시는 기존 50자 제한을 따른다.
 target의 commentId는 실제 소셜 댓글·답글 ID다. 공통 열기·푸시 접근 검사에 댓글 저장소의 동일한
-비노출 조건을 연결해, 알림 생성 후 해당 댓글이 삭제·신고·운영 숨김된 경우 본문을 전송하지 않는다.
-원댓글 숨김도 하위 답글 알림에 적용하고, 원댓글의 삭제 자리만 남은 경우 정상 답글은 유지한다.
+접근 조건을 연결해, 알림 생성 후 해당 댓글이 삭제되거나 작성 번치 차단·레거시 전역 숨김으로
+접근할 수 없으면 본문을 전송하지 않는다. 원댓글의 작성 번치 접근 제한도 하위 답글 알림에 적용하되,
+원댓글의 삭제 자리만 남은 경우에도 placeholder·정상 답글·답글 알림 open은 유지한다. 신고 자체는
+이동·전송을 막지 않는다.
+신고 접수·운영 검토 결과·운영 삭제 조치의 새 알림은 만들지 않는다.
+운영 삭제된 댓글의 기존 알림·푸시 미리보기는 삭제와 같은 트랜잭션에서
+「삭제된 댓글입니다」로 교체한다([미리보기 정리 계약](feed-reports.md)).
 
 ## 검증 기준·한계
 

@@ -57,15 +57,6 @@ interface SocialCommentRepository : JpaRepository<SocialComment, Long> {
     @Query("select c from SocialComment c where c.bundleId = :bundleId and c.id = :id and " + VISIBLE)
     fun visible(bundleId: Long, id: Long, currentBunchId: Long?): SocialComment?
 
-    // F must accept a permitted re-report after the first reporter hide. Never use this for list content.
-    @Query("select c from SocialComment c where c.bundleId = :bundleId and c.id = :id and " +
-        AUTHOR_VISIBLE + PARENT_VISIBLE + """
-        and not exists (select h.id from FeedContentHide h where
-            h.targetKind = com.bunch.feed.domain.FeedContentKind.COMMENT and h.targetId = c.id
-            and h.reporterBunchId is null)
-        """)
-    fun reportable(bundleId: Long, id: Long, currentBunchId: Long?): SocialComment?
-
     @Query("select c.bundleId as bundleId, count(c.id) as total from SocialComment c " +
         "where c.bundleId in :bundleIds and " + VISIBLE + " group by c.bundleId")
     fun counts(bundleIds: Collection<Long>, currentBunchId: Long?): List<BundleCount>
@@ -90,24 +81,15 @@ interface SocialCommentRepository : JpaRepository<SocialComment, Long> {
                 where bunch.id = c.actingBunchId and
             """ + FeedAccessRepository.VISIBLE_BUNCH + ")) "
 
-        const val NOT_HIDDEN = """
-            and not exists (select h.id from FeedContentHide h where
-                h.targetKind = com.bunch.feed.domain.FeedContentKind.COMMENT and h.targetId = c.id
-                and (h.reporterBunchId is null or h.reporterBunchId = :currentBunchId))
-        """
-
         const val PARENT_VISIBLE = """
             and (c.parentId is null or exists (select parent.id from SocialComment parent
                 where parent.id = c.parentId
                 and (parent.actingBunchId is null or exists (select bunch.id from Bunch bunch
                     where bunch.id = parent.actingBunchId and
             """ + FeedAccessRepository.VISIBLE_BUNCH + """
-                ))
-                and not exists (select ph.id from FeedContentHide ph where
-                    ph.targetKind = com.bunch.feed.domain.FeedContentKind.COMMENT and ph.targetId = parent.id
-                    and (ph.reporterBunchId is null or ph.reporterBunchId = :currentBunchId))))
+                ))))
         """
 
-        const val VISIBLE = AUTHOR_VISIBLE + NOT_HIDDEN + PARENT_VISIBLE
+        const val VISIBLE = AUTHOR_VISIBLE + PARENT_VISIBLE
     }
 }

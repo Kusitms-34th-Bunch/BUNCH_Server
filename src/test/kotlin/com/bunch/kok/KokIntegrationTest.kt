@@ -12,8 +12,6 @@ import com.bunch.bundle.dto.BundleLocationInput
 import com.bunch.bundle.service.BundleLocationService
 import com.bunch.bundle.dto.BundleLocationsRemovedEvent
 import com.bunch.bundle.service.BundleService
-import com.bunch.feed.domain.FeedContentHideRepository
-import com.bunch.feed.domain.FeedContentKind
 import com.bunch.global.exception.ErrorCode
 import com.bunch.kok.domain.KokRepository
 import com.bunch.kok.domain.KokSource
@@ -58,9 +56,6 @@ class KokIntegrationTest : BunchIntegrationSupport() {
 
     @Autowired
     private lateinit var social: BunchSocialService
-
-    @Autowired
-    private lateinit var hides: FeedContentHideRepository
 
     @Autowired
     private lateinit var listener: KokLocationListener
@@ -311,14 +306,14 @@ class KokIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
-    fun `profile reports reporter hide and global moderation deny source without preventing unpin`() {
+    fun `profile reports and legacy reporter hides preserve pins while global moderation denies access`() {
         val f = fixture()
         val saved = pins.pinBundleLocation(f.actor, f.bundle, f.location)
         social.report(f.actor, f.bunch, BunchReportRequest(f.sourceBunch, BunchReportReason.SPAM, null))
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { pins.pinBundleLocation(f.actor, f.bundle, f.location) }
-        jdbc.update("DELETE FROM bunch_profile_reports")
-        tx { hides.hideForReporter(FeedContentKind.BUNDLE, f.bundle, f.bunch) }
-        assertError(ErrorCode.RESOURCE_NOT_FOUND) { pins.pinBundleLocation(f.actor, f.bundle, f.location) }
+        assertThat(pins.pinBundleLocation(f.actor, f.bundle, f.location).id).isEqualTo(saved.id)
+        jdbc.update("INSERT INTO feed_content_hides(target_kind,target_id,reporter_bunch_id,reason) " +
+            "VALUES ('BUNDLE',?,?,'LEGACY')", f.bundle, f.bunch)
+        assertThat(pins.pinBundleLocation(f.actor, f.bundle, f.location).id).isEqualTo(saved.id)
         jdbc.update("DELETE FROM feed_content_hides")
         jdbc.update("INSERT INTO feed_content_hides(target_kind, target_id, reason) VALUES ('BUNDLE', ?, 'test')", f.bundle)
         assertError(ErrorCode.RESOURCE_NOT_FOUND) { pins.forBundle(f.actor, f.bundle) }
