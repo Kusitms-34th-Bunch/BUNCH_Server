@@ -27,8 +27,8 @@
 | F4 | 업로드 시각 | `uploads[].uploadedAt`(`photo_uploaders.uploaded_at`) | `RecoPhotoInputIntegrationTest` | 구현됨 | X5가 쓴다 |
 | F5 | 원본 유형 | `PhotoSourceType`, 업로드 필드 `sourceType`, 입력 만들기에서 한 곳에서 판정 | `PhotoUploadOriginIntegrationTest` | 구현됨 | 값이 없으면 날짜·시각이 있을 때 카메라, 없으면 저장 이미지 |
 | F6 | 품질 | `ImageQuality`(긴 변 1024px 회색조, 흔들림·노출·해상도), `PhotoRecoFeature.quality` | `PhotoUploadQualityIntegrationTest`, `PhotoRecoFeatureQualityMigrationIntegrationTest` | 구현됨 | D3·L3 법무 확인 대기. 업로드 때 동기 계산, 비동기 분리는 별도 이슈 |
-| F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 업로드 필드 `deviceModel`(`photo_reco_feature.device_model`), `capturedMillis`(3자리, `photos.captured_millis`). R1용 해상도는 서버가 읽어 `photos.width`·`height`에 저장 | `PhotoUploadMillisModelIntegrationTest`, `PhotoMillisModelMigrationIntegrationTest` | 부분 구현(#204) | 렌즈·연사 ID·EXIF 고유 ID는 받지 않는다(D4·L2 법무 대기). 추천 입력(`RecoPhoto`)에 연결하는 것은 후속. 앱 협의 필요 |
-| R1 | 중복 묶음 | `DuplicateGrouper`(해시 + 이미지 지문 유사도 기반) | `DuplicateGrouperTest`, `ImageSimilarityTest` | 교체 예정 | 새 기준은 해시·EXIF·같은 업로더 연사. 이미지 지문은 쓰지 않는다. 후속 |
+| F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 업로드 필드 `deviceModel`(`photo_reco_feature.device_model`), `capturedMillis`(3자리, `photos.captured_millis`). R1용 해상도는 서버가 읽어 `photos.width`·`height`에 저장 | `PhotoUploadMillisModelIntegrationTest`, `PhotoMillisModelMigrationIntegrationTest` | 부분 구현(#204 저장, #218 추천 입력 연결) | 렌즈·연사 ID·EXIF 고유 ID는 받지 않는다(D4·L2 법무 대기). 추천 입력(`RecoPhoto`)에 연결하는 것은 후속. 앱 협의 필요 |
+| R1 | 중복 묶음 | `DuplicateGrouper(TimeNormalizer, burstMaxGap)`: 밀리초+기기 모델+해상도가 모두 있고 같음, 같은 업로더·같은 기기 모델·2초 안의 연사. 이미지 지문은 쓰지 않는다. 같은 파일은 업로드 때 한 사진으로 합쳐짐 | `DuplicateGrouperTest`, `RecoPhotoInputIntegrationTest` | 구현됨(#218) | 값이 없으면 같다고 보지 않음(C8). 지문은 날짜 빌리기·시계 보정·카드 점수가 아직 써서 입력에 남아 있고, 그 단계의 재작성 이슈에서 삭제 |
 | R2 | 함께 찍은 순간 | 없음 | — | 미구현 | 후속 |
 
 ### 시간 기준 (새 기준 「시간 기준」)
