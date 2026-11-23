@@ -17,10 +17,11 @@ import kotlin.math.abs
  * morning starts at [dayStartHour], the afternoon at [afternoonStartHour] and the night at [nightStartHour], and the
  * night goes on to the start of the next day.
  *
- * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds). The
- * similarities of the fingerprint are for [FingerprintSimilarity], the share of equal bits of two 64-bit fingerprints
- * (0.90 is 6 different bits, 0.95 is 3). The duplicate group does not use them any more; the steps that borrow a date,
- * correct a clock and score a card still do, until those steps are rewritten for the new standard.
+ * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds).
+ *
+ * [clockErrorMargin] is how far later than its upload a photo without an offset may be taken before its upload batch is
+ * taken for a wrong clock (exception X5, 14 hours: the biggest difference between two time zones). A photo with an
+ * offset is compared without it.
  *
  * The numbers of the quality table (4-4) are [quality]. The photo box calculates the quality when a photo is uploaded,
  * so the type of the numbers is in the shared image code and this class only holds them with the others (12).
@@ -59,10 +60,7 @@ data class CombinationSettings(
     val activityMinConfidence: Double = 0.50,
     val sameSceneMinSimilarity: Double = 0.85,
     val burstMaxGap: Duration = Duration.ofSeconds(2),
-    val fingerprintBurstMinSimilarity: Double = 0.90,
-    val fingerprintSameCompositionMinSimilarity: Double = 0.95,
-    val clockCorrectionMinPairs: Int = 2,
-    val clockCorrectionMinMedian: Duration = Duration.ofMinutes(10),
+    val clockErrorMargin: Duration = Duration.ofHours(14),
     val representativenessWeight: Double = 0.4,
     val qualityWeight: Double = 0.2,
     val diversityWeight: Double = 0.4,
@@ -110,9 +108,7 @@ data class CombinationSettings(
                 clueMinConfidence,
                 sensitiveMinConfidence,
                 activityMinConfidence,
-                sameSceneMinSimilarity,
-                fingerprintBurstMinSimilarity,
-                fingerprintSameCompositionMinSimilarity
+                sameSceneMinSimilarity
             ).all { it in 0.0..1.0 }
         ) {
             "a confidence and a similarity are from 0 to 1"

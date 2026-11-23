@@ -24,7 +24,7 @@ class BundleCombiner(
     similarity: ImageSimilarity = FingerprintSimilarity,
     private val clock: Clock = Clock.system(settings.defaultZone)
 ) {
-    private val preparer = DayPreparer(settings, similarity)
+    private val preparer = DayPreparer(settings)
     private val general = GeneralBundleFinder(settings)
     private val attacher = DateOnlyAttacher()
     private val cards = CardSelector(settings, similarity = similarity)
@@ -34,8 +34,7 @@ class BundleCombiner(
         val prepared = preparer.prepare(photos)
         return CombinationResult(
             days = prepared.days.map(::combineDay),
-            excludedPhotoIds = prepared.excludedPhotoIds,
-            movedDays = prepared.movedDays
+            excludedPhotoIds = prepared.excludedPhotoIds
         )
     }
 

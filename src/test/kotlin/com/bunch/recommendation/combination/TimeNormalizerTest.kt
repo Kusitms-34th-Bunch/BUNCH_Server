@@ -6,10 +6,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 /** The clocks of a photo and its day (recommended bundle specification 5-2). */
@@ -63,18 +61,19 @@ class TimeNormalizerTest {
     }
 
     @Test
-    fun `a move of the clock moves the local time and the absolute time together`() {
-        val timed = times.start(photo(1, time = "10:00")).copy(shift = Duration.ofMinutes(30))
+    fun `the exact time has the milliseconds and is null when the date, the time or the milliseconds is not known`() {
+        val withMillis = photo(1, time = "10:00:05", millis = 123)
 
-        assertThat(times.localTime(timed)).isEqualTo(LocalDateTime.of(2026, 10, 19, 10, 30))
-        assertThat(times.instant(timed)).isEqualTo(Instant.parse("2026-10-19T01:30:00Z"))
+        assertThat(times.exactInstant(withMillis)).isEqualTo(Instant.parse("2026-10-19T01:00:05.123Z"))
+        assertThat(times.exactInstant(photo(2, time = "10:00:05"))).isNull()
+        assertThat(times.exactInstant(photo(3, time = null))).isNull()
+        assertThat(times.exactInstant(photo(4, date = null, time = null))).isNull()
     }
 
     @Test
-    fun `a move of the clock can take a photo to another day`() {
-        val timed = times.start(photo(1, time = "04:45")).copy(shift = Duration.ofMinutes(30))
+    fun `the exact time is read with the offset of the photo, and zero milliseconds is a value`() {
+        val paris = photo(1, time = "10:00:05", offset = ZoneOffset.ofHours(1), millis = 0)
 
-        assertThat(times.dayKey(timed)).isEqualTo(LocalDate.of(2026, 10, 19))
-        assertThat(times.dayKey(times.start(photo(1, time = "04:45")))).isEqualTo(LocalDate.of(2026, 10, 18))
+        assertThat(times.exactInstant(paris)).isEqualTo(Instant.parse("2026-10-19T09:00:05Z"))
     }
 }

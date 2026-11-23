@@ -224,7 +224,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         val (ownerId, bunchId) = bunchWithOwner()
         store.replace(bunchId, combine(lunch(bunchId, ownerId)), evening)
 
-        val blocked = CombinationResult(listOf(DayCombination.Blocked(day, emptyList())), emptyList(), emptySet())
+        val blocked = CombinationResult(listOf(DayCombination.Blocked(day, emptyList())), emptyList())
         val outcome = store.replace(bunchId, blocked, evening.plusSeconds(60))
 
         assertThat(outcome.removed).isEqualTo(1)
@@ -237,7 +237,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         store.replace(bunchId, combine(lunch(bunchId, ownerId)), evening)
         val before = bundles.findByBunchId(bunchId).single()
 
-        val held = CombinationResult(listOf(DayCombination.Held(day, listOf(99))), emptyList(), emptySet())
+        val held = CombinationResult(listOf(DayCombination.Held(day, listOf(99))), emptyList())
         val outcome = store.replace(bunchId, held, evening.plusSeconds(60))
 
         assertThat(outcome.removed).isZero()
@@ -251,7 +251,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         val (ownerId, bunchId) = bunchWithOwner()
         store.replace(bunchId, combine(lunch(bunchId, ownerId)), evening)
 
-        val outcome = store.replace(bunchId, CombinationResult(emptyList(), emptyList(), emptySet()), evening)
+        val outcome = store.replace(bunchId, CombinationResult(emptyList(), emptyList()), evening)
 
         assertThat(outcome.removed).isEqualTo(1)
         assertThat(bundles.findByBunchId(bunchId)).isEmpty()
@@ -266,8 +266,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
 
         val result = CombinationResult(
             listOf(DayCombination.Held(day, listOf(99)), DayCombination.Bundled(nextDay, listOf(second))),
-            emptyList(),
-            emptySet()
+            emptyList()
         )
         val outcome = store.replace(bunchId, result, evening.plusSeconds(60))
 
@@ -288,8 +287,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
                 DayCombination.Held(day, listOf(99)),
                 DayCombination.Bundled(nextDay, listOf(manual(nextDay, listOf(moving) + extra(bunchId, ownerId, 5))))
             ),
-            emptyList(),
-            emptySet()
+            emptyList()
         )
         val outcome = store.replace(bunchId, result, evening.plusSeconds(60))
 
@@ -376,7 +374,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         val other = bundles.findByBunchId(otherBunch).single()
 
         store.replace(bunchId, combine(lunch(bunchId, ownerId)), evening)
-        store.replace(bunchId, CombinationResult(emptyList(), emptyList(), emptySet()), evening)
+        store.replace(bunchId, CombinationResult(emptyList(), emptyList()), evening)
 
         assertThat(bundles.findByBunchId(otherBunch).single().id).isEqualTo(other.id)
         assertThat(bundlePhotos.findByBundleIdIn(listOf(other.id))).hasSize(8)
@@ -387,7 +385,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
     private fun combine(photos: List<RecoPhoto>): CombinationResult = BundleCombiner(clock = CLOCK).combine(photos)
 
     private fun bundled(dayKey: LocalDate, vararg bundles: RecoBundle) =
-        CombinationResult(listOf(DayCombination.Bundled(dayKey, bundles.toList())), emptyList(), emptySet())
+        CombinationResult(listOf(DayCombination.Bundled(dayKey, bundles.toList())), emptyList())
 
     private fun photoId(bunchId: Long, ownerId: Long, time: String, date: String = "2026-10-19"): Long =
         insertPhoto(bunchId, date, time, uploaders = listOf(ownerId))

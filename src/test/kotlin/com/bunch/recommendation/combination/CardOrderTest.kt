@@ -5,7 +5,6 @@ import com.bunch.recommendation.domain.combination.CardOrder
 import com.bunch.recommendation.domain.combination.PreparedPhoto
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -21,14 +20,12 @@ class CardOrderTest {
             photo(id, date = local.toLocalDate().toString(), time = local.toLocalTime().toString()),
             LocalDate.parse("2026-10-19"),
             local,
-            local.toInstant(ZoneOffset.UTC),
-            null,
-            Duration.ZERO
+            local.toInstant(ZoneOffset.UTC)
         )
     }
 
     private fun dateOnly(id: Long, date: String): PreparedPhoto =
-        PreparedPhoto(photo(id, date = date), LocalDate.parse("2026-10-19"), null, null, null, Duration.ZERO)
+        PreparedPhoto(photo(id, date = date), LocalDate.parse("2026-10-19"), null, null)
 
     private fun ids(photos: List<PreparedPhoto>) = photos.map { it.photoId }
 
