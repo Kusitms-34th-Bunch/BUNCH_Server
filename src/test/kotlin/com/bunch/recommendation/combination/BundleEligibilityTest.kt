@@ -11,6 +11,7 @@ import com.bunch.recommendation.domain.combination.RecoPhoto
 import com.bunch.recommendation.domain.combination.SourceType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 /** The photos that count for a bundle and the size a bundle needs (recommended bundle specification 3-1, 5-1). */
 class BundleEligibilityTest {
@@ -97,6 +98,56 @@ class BundleEligibilityTest {
         }
 
         assertThat(enough(burst)).isFalse()
+    }
+
+    private fun recommendable(photos: List<RecoPhoto>): Boolean {
+        val day = prepared(*photos.toTypedArray())
+        return eligibility.isRecommendable(day.photos, day.duplicateGroups)
+    }
+
+    @Test
+    fun `3-4 a bundle is recommended when it is enough and the members took photos together`() {
+        assertThat(recommendable(sixPhotos(listOf(1, 2)))).isTrue()
+    }
+
+    @Test
+    fun `3-4 G5 six photos of two members who took none of them near each other are enough but not recommended`() {
+        val alone = (1..5).map { photo(it.toLong(), time = "09:0$it", members = listOf(1)) } +
+            photo(9, time = "22:00", members = listOf(2))
+
+        assertThat(enough(alone)).isTrue()
+        assertThat(recommendable(alone)).isFalse()
+    }
+
+    @Test
+    fun `3-4 together photos are not enough for a bundle of five photos`() {
+        val five = (1..5).map { photo(it.toLong(), time = "10:0$it", members = listOf(1L + it % 2)) }
+
+        assertThat(recommendable(five)).isFalse()
+    }
+
+    @Test
+    fun `3-4 two members who uploaded the same photos are two members but took no photo together`() {
+        val first = Instant.parse("2030-01-01T00:00:00Z")
+        val again = Instant.parse("2030-01-02T00:00:00Z")
+        val photos = (1..6).map {
+            val uploads = mapOf(1L to first, 2L to again)
+            photo(it.toLong(), time = "10:0$it", members = listOf(1, 2), memberUploadedAt = uploads)
+        }
+
+        assertThat(enough(photos)).isTrue()
+        assertThat(recommendable(photos)).isFalse()
+    }
+
+    @Test
+    fun `the moments of a set of photos are the ones among those photos only`() {
+        val day = prepared(photo(1, time = "10:00", members = listOf(1)), photo(2, time = "10:05", members = listOf(2)))
+
+        val moments = eligibility.togetherMoments(day.photos, day.duplicateGroups)
+        val ofOne = eligibility.togetherMoments(day.photos.take(1), day.duplicateGroups)
+
+        assertThat(moments.photoIds).containsExactlyInAnyOrder(1L, 2L)
+        assertThat(ofOne.exists).isFalse()
     }
 
     @Test

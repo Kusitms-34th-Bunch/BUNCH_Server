@@ -68,6 +68,17 @@ class CombinationSettingsTest {
     }
 
     @Test
+    fun `the together window is 30 minutes, the new standard R2, and it must be above zero`() {
+        assertThat(settings.togetherWindow).isEqualTo(Duration.ofMinutes(30))
+        assertThat(CombinationSettings(togetherWindow = Duration.ofMinutes(45)).togetherWindow)
+            .isEqualTo(Duration.ofMinutes(45))
+        assertThatThrownBy { CombinationSettings(togetherWindow = Duration.ZERO) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(togetherWindow = Duration.ofMinutes(-1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `the burst of one member with one device is two seconds, the new standard R1`() {
         assertThat(settings.burstMaxGap).isEqualTo(Duration.ofSeconds(2))
         assertThat(CombinationSettings(burstMaxGap = Duration.ofSeconds(3)).burstMaxGap)
