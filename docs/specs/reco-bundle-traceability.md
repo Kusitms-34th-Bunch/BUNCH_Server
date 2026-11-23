@@ -61,9 +61,9 @@
 | 4순위 구성 | 함께 찍은 순간 1장 이상, 10분 구간 최대 절반, 4등분 | `CardPicker.composition`, `CardQuarters`, `TogetherMoments`(#222) | `CardSelectorTest`(C3·C6·C7), `CardQuartersTest` | 구현됨(#229) | 단서·피사체·단체사진 규칙은 삭제 |
 | 5순위 | 시각 간격 10분 → 멤버 많은 순간 → 품질 | `CardPicker.prefer`, `MomentMembers`, `CardSelector` | `CardSelectorTest`, `MomentMembersTest` | 구현됨(#229) | `CardScorer`·`ImageSimilarity`(이미지 지문)·`EventClues` 삭제 |
 | 장 수 | 6~15장 6, 16~25장 8, 26장 이상 10 | `CardSelector`(`CombinationSettings.cardSizeFor`) | `CardSelectorTest` | 구현됨(#229) | 기능명세서(후보 10장 이하면 전부)와 달라 1119를 따름. 기획 확인 대기 |
-| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | `CardCover`(전면 카메라 단계는 렌즈 정보가 입력에 없어 제외), `recommended_bundles.cover_photo_id`(V55) | `CardCoverTest`, `CardSelectorTest`, `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchemaIntegrationTest` | 구현됨(#229) | 읽어서 내려주고 적용 때 맨 앞에 두는 것은 목록·적용 API 이슈. D4 법무 대기 |
+| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | `CardCover`(전면 카메라 단계는 렌즈 정보가 입력에 없어 제외), `recommended_bundles.cover_photo_id`(V55) | `CardCoverTest`, `CardSelectorTest`, `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchemaIntegrationTest` | 구현됨(#229) | 목록·상세에서 읽어 내려주고 상세 응답에서 커버를 맨 앞에 둔다(#234). D4 법무 대기 |
 | 이름 | 「날짜 + 시간대」, 70% 이상인 시간대(없으면 두 시간대), 같은 날 같은 제목이면 시작 시각 | `BundleNamer`, `BundleNames`(시간대 이름), `CombinationSettings.dayPartMainShare` | `BundleNamerTest`, `CombinationSettingsTest` | 구현됨(#232) | 날짜는 시작 시각의 달력 날짜(D7). 이벤트·활동 이름과 「(1)」 번호 삭제. 제목 길이(15자)는 기획 확인 대기 |
-| 카드 정보(D5) | 장 수·멤버 수·시간 범위 | 기존 흐름의 응답에 장 수·멤버 칩·날짜. 새 저장소 연결(#184 PR)도 같은 필드 | `RecommendationApiIntegrationTest`(기존 흐름) | 부분 | 시간 범위 없음. 기획 확정 대기 |
+| 카드 정보(D5) | 장 수·멤버 수·시간 범위 | 목록 응답의 `photoCount`(카드 장 수), `uploaders`(멤버), `startAt`·`endAt`(시간 범위, 새 저장소만) | `RecommendedBundleReaderIntegrationTest`, `RecommendationApiIntegrationTest`(꺼진 상태에는 새 필드가 없음) | 구현됨(#234) | 시간대는 서버 기본 시간대. 문장 만들기는 앱 |
 
 ### 예외 처리 (새 기준 「예외 처리」)
 
@@ -86,7 +86,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 저장·안정 키·재계산 | 하루 단위, 5분 디바운스 | `RecommendedBundleStore`, `RecommendedBundleRecalcTrigger`, `RecommendedBundleScheduler` | `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchedulerTest` | 구현됨 | #183 |
 | 30일 만료 | 마지막 사진 추가일부터 30일 | `RecommendedBundleExpiration`, `BundleExpiry` | `BundleExpiryTest` | 구현됨 | #183 |
-| 목록·상세·적용 | 최근 순 | `RecommendedListRules`. 목록·상세·적용 연결(`RecommendedBundleReader`, `RecommendedBundleApplication`)은 #184 PR에 있고 `dev` 반영 전 | `RecommendedListRulesTest`. 연결 테스트(`RecommendedBundleApiIntegrationTest`)는 #184 PR | 부분 | #184 머지 뒤 갱신. 목록 순서는 기능명세서 4.2.9 규칙 6을 따름 |
+| 목록·상세·적용 | 최근 사진이 추가된 순, 올린 멤버 수, 사진 수. 상세는 커버가 맨 앞. 적용 뒤 남은 사진은 다시 추천하지 않음 | `RecommendedBundleReader`(목록·상세·`use`), `RecommendationService`(스위치 분기), `RecommendedListRules`, `RecommendedBundleRecalculation.withoutUsed`, `RecommendationScheduler`(켜지면 멈춤) | `RecommendedBundleReaderIntegrationTest`, `RecommendedBundleRecalculationIntegrationTest`, `RecommendedListRulesTest`, `RecommendationApiIntegrationTest`(꺼진 상태) | 구현됨(#234) | 새 엔드포인트 없음. 개수 제한·정렬·시간대·상세 순서는 확정 대기 |
 | 이벤트·활동 필드 | 없음 | 저장 컬럼 `kind`, `event_type`, `established_by`, `activity`, 응답 선택 필드 | `RecommendedBundleSchemaIntegrationTest` | 교체 예정 | 마이그레이션과 함께 정리. 후속 |
 
 ### 케이스 시나리오 (새 기준 「케이스」, V10)
