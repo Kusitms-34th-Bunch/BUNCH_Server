@@ -4,7 +4,6 @@ import com.bunch.recommendation.combination.CardTestSupport.bundle
 import com.bunch.recommendation.combination.CardTestSupport.run
 import com.bunch.recommendation.combination.CardTestSupport.shot
 import com.bunch.recommendation.combination.EventTestSupport.ready
-import com.bunch.recommendation.combination.PreparationTestSupport.scene
 import com.bunch.recommendation.domain.combination.BundleKind
 import com.bunch.recommendation.domain.combination.CardCandidate
 import com.bunch.recommendation.domain.combination.CardPool
@@ -21,6 +20,11 @@ import java.time.Instant
 /** The pictures a card is made of: the usable photos, one for each group of duplicates (specification 8-2, 8-5). */
 class CardPoolTest {
     private val pool = CardPool()
+
+    // Duplicates of the new standard (R1): a burst is one member with one device within two seconds, and the same
+    // original saved again is the same moment to the millisecond with the same model and size.
+    private val phone = "iPhone15,2"
+    private val size = 4032 to 3024
 
     private fun candidates(
         photos: List<RecoPhoto>,
@@ -49,9 +53,9 @@ class CardPoolTest {
     @Test
     fun `a group of duplicates is one picture, and the better one stands for it`() {
         val shots = listOf(
-            shot(1, "10:00:00", fingerprint = scene(0), quality = PhotoQuality.NORMAL),
-            shot(2, "10:00:01", fingerprint = scene(0), quality = PhotoQuality.GOOD),
-            shot(3, "10:00:02", fingerprint = scene(0), quality = PhotoQuality.NORMAL)
+            shot(1, "10:00:00", model = phone, quality = PhotoQuality.NORMAL),
+            shot(2, "10:00:01", model = phone, quality = PhotoQuality.GOOD),
+            shot(3, "10:00:02", model = phone, quality = PhotoQuality.NORMAL)
         )
 
         assertThat(ids(candidates(shots + run(10, 2)))).containsExactly(10L, 11L, 2L)
@@ -60,8 +64,8 @@ class CardPoolTest {
     @Test
     fun `of two copies as good the one of the member with fewer pictures stands for the group`() {
         val burst = listOf(
-            shot(1, "10:00:00", member = 1, fingerprint = scene(0)),
-            shot(2, "10:00:01", member = 2, fingerprint = scene(0))
+            shot(1, "10:00:00", member = 1, model = phone, millis = 5, size = size),
+            shot(2, "10:00:00", member = 2, model = phone, millis = 5, size = size)
         )
         val more = run(10, 4, members = listOf(1))
 
@@ -71,8 +75,8 @@ class CardPoolTest {
     @Test
     fun `of two copies as good that are of members with as many pictures the one stored first stands`() {
         val burst = listOf(
-            shot(5, "10:00:00", member = 1, fingerprint = scene(0)),
-            shot(4, "10:00:01", member = 2, fingerprint = scene(0))
+            shot(5, "10:00:00", member = 1, model = phone, millis = 5, size = size),
+            shot(4, "10:00:00", member = 2, model = phone, millis = 5, size = size)
         )
 
         assertThat(ids(candidates(burst))).containsExactly(4L)
@@ -102,9 +106,9 @@ class CardPoolTest {
     @Test
     fun `the pictures of a member are counted by groups, a burst being one picture`() {
         val burst = listOf(
-            shot(1, "10:00:00", member = 1, fingerprint = scene(0)),
-            shot(2, "10:00:01", member = 1, fingerprint = scene(0)),
-            shot(3, "10:00:02", member = 1, fingerprint = scene(0))
+            shot(1, "10:00:00", member = 1, model = phone),
+            shot(2, "10:00:01", member = 1, model = phone),
+            shot(3, "10:00:02", member = 1, model = phone)
         )
         val shared = shot(10, "11:00", members = listOf(1, 2))
         val own = run(20, 2, members = listOf(2), start = "12:00")
@@ -118,8 +122,8 @@ class CardPoolTest {
     @Test
     fun `a picture is a clue when a photo of its group is a clue of the event, or of an event that was not a bundle`() {
         val cakes = listOf(
-            shot(1, "10:00:00", clue = CANDLE_WHOLE_CAKE, fingerprint = scene(0), quality = PhotoQuality.NORMAL),
-            shot(2, "10:00:01", fingerprint = scene(0), quality = PhotoQuality.GOOD)
+            shot(1, "10:00:00", clue = CANDLE_WHOLE_CAKE, model = phone, quality = PhotoQuality.NORMAL),
+            shot(2, "10:00:01", model = phone, quality = PhotoQuality.GOOD)
         )
         val others = run(10, 2)
 

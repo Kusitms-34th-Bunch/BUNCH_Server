@@ -116,13 +116,13 @@ class DayPreparerTest {
 
     @Test
     fun `X4 members in other time zones have the day by the local clock and the gap by the absolute one`() {
-        val seoul = photo(1, time = "10:00:00", offset = ZoneOffset.ofHours(9), fingerprint = scene(0))
+        // One member with one device shoots in two places: a burst on the absolute clock (R1), two seconds apart.
+        val seoul = photo(1, time = "10:00:00", offset = ZoneOffset.ofHours(9), model = "iPhone15,2")
         val tokyoSide = photo(
             2,
             time = "09:00:02",
-            members = listOf(2),
             offset = ZoneOffset.ofHours(8),
-            fingerprint = scene(0, bitsApart = 1)
+            model = "iPhone15,2"
         )
         val newYork = photo(3, date = "2026-10-18", time = "19:00:00", offset = ZoneOffset.ofHours(-5))
 
@@ -139,7 +139,7 @@ class DayPreparerTest {
     }
 
     @Test
-    fun `X5 a clock that is slow is corrected and the photos of the same scene then belong together`() {
+    fun `X5 a clock that is slow is corrected before the day is prepared`() {
         val result = prepare(
             photo(1, time = "10:00", members = listOf(1), fingerprint = scene(0, bitsApart = 1)),
             photo(2, time = "10:10", members = listOf(1), fingerprint = scene(1, bitsApart = 1)),
@@ -150,7 +150,9 @@ class DayPreparerTest {
         val prepared = ready(result, "2026-10-19")
         assertThat(prepared.photos.single { it.photoId == 3L }.clockShift).isEqualTo(Duration.ofMinutes(30))
         assertThat(prepared.photos.single { it.photoId == 3L }.photo.capturedTime).isEqualTo(LocalTime.of(9, 30))
-        assertThat(prepared.duplicateGroups.map { it.photoIds }).containsExactly(listOf(1L, 3L), listOf(2L, 4L))
+        // The scenes are not looked at any more: the same scene of two members is not a duplicate group (R1).
+        assertThat(prepared.duplicateGroups.map { it.photoIds })
+            .containsExactly(listOf(1L), listOf(3L), listOf(2L), listOf(4L))
         assertThat(result.movedDays).isEmpty()
     }
 
@@ -243,9 +245,10 @@ class DayPreparerTest {
 
     @Test
     fun `C1 the same photo uploaded by several members is one photo and all of them count`() {
+        // The same original saved again by another member: the same moment to the millisecond, model and size (R1).
         val result = prepare(
-            photo(1, time = "10:00:00", members = listOf(1, 2), fingerprint = scene(0)),
-            photo(2, time = "10:00:10", members = listOf(3), fingerprint = scene(0, bitsApart = 1))
+            photo(1, time = "10:00:00", members = listOf(1, 2), millis = 120, model = "A", size = 4032 to 3024),
+            photo(2, time = "10:00:00", members = listOf(3), millis = 120, model = "A", size = 4032 to 3024)
         )
 
         val group = ready(result, "2026-10-19").duplicateGroups.single()

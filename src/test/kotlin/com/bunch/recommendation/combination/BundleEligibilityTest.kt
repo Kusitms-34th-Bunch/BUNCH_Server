@@ -2,7 +2,6 @@ package com.bunch.recommendation.combination
 
 import com.bunch.recommendation.combination.EventTestSupport.ready
 import com.bunch.recommendation.combination.PreparationTestSupport.photo
-import com.bunch.recommendation.combination.PreparationTestSupport.scene
 import com.bunch.recommendation.domain.combination.AiAnalysis
 import com.bunch.recommendation.domain.combination.BundleEligibility
 import com.bunch.recommendation.domain.combination.PhotoQuality
@@ -52,9 +51,10 @@ class BundleEligibilityTest {
     @Test
     fun `the photos are counted by their groups of duplicates and the members by the uploaders of those groups`() {
         val day = prepared(
-            photo(1, time = "10:00:00", members = listOf(1), fingerprint = scene(0)),
-            photo(2, time = "10:00:02", members = listOf(2), fingerprint = scene(0, bitsApart = 1)),
-            photo(3, time = "11:00:00", members = listOf(1), fingerprint = scene(1))
+            // The same original saved again by another member (R1): the same moment, model and size.
+            photo(1, time = "10:00:00", members = listOf(1), millis = 5, model = "iPhone15,2", size = 4032 to 3024),
+            photo(2, time = "10:00:00", members = listOf(2), millis = 5, model = "iPhone15,2", size = 4032 to 3024),
+            photo(3, time = "11:00:00", members = listOf(1))
         )
 
         assertThat(eligibility.photoCount(day.photos, day.duplicateGroups)).isEqualTo(2)
@@ -90,7 +90,10 @@ class BundleEligibilityTest {
     @Test
     fun `six photos that are one picture are not six`() {
         val burst = (1..6).map {
-            photo(it.toLong(), time = "10:00:0$it", members = listOf(1L + it % 2), fingerprint = scene(0))
+            photo(
+                it.toLong(), time = "10:00:00", members = listOf(1L + it % 2),
+                millis = 5, model = "iPhone15,2", size = 4032 to 3024
+            )
         }
 
         assertThat(enough(burst)).isFalse()

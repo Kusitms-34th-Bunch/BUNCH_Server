@@ -44,13 +44,19 @@ internal object CardTestSupport {
         fingerprint: Long? = null,
         members: List<Long> = listOf(member),
         date: String = DAY,
-        uploaded: Map<Long, Instant> = emptyMap()
+        uploaded: Map<Long, Instant> = emptyMap(),
+        model: String? = null,
+        millis: Int? = null,
+        size: Pair<Int, Int>? = null
     ): RecoPhoto = photo(
         id,
         date = date,
         time = time,
         members = members,
         fingerprint = fingerprint,
+        model = model,
+        millis = millis,
+        size = size,
         analysis = AiAnalysis(
             clues = listOfNotNull(clue?.let { Reading(it, 0.9) }),
             subject = subject,
