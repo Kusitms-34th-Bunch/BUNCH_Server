@@ -4,10 +4,11 @@ package com.bunch.recommendation.domain.combination
  * The general bundles of a day (recommended bundle specification 3). It takes a day that is ready and makes bundles of
  * its photos, in this order: the photos of the day that have a time are one chunk, the chunk is cut into segments at
  * the gaps of 20 minutes or more (3-1), the first rule cuts it where the members change (3-2), the pieces are cut by
- * the second and the third rule where the part of the day changes or the gap is long, and a piece over the limit is
- * cut into sub bundles. A part is a bundle when it is recommended (3-4): enough photos and members, and the members
+ * the second and the third rule where the part of the day changes or the gap is long, the first and the last segment of
+ * a piece that one member alone took are taken off (the edge trimming, 3-3), and a piece over the limit is cut into sub
+ * bundles (the fifth rule). A part is a bundle when it is recommended (3-4): enough photos and members, and the members
  * took photos together at least once. The others are not saved and stay in the photo box. There are no event bundles,
- * so every photo of the day that has a time is a photo of a part, a bundle or not.
+ * so every photo of the day that has a time is a photo of a part, a bundle or not (3-5).
  *
  * The bundles have no activity (the AI read it, and the combination does not use the AI any more), so it is `null` and
  * the trace has no stretches of activities.
@@ -23,6 +24,7 @@ class GeneralBundleFinder(
     private val chunker = GeneralChunker()
     private val segmenter = GeneralSegmenter(settings)
     private val splitter = GeneralPeopleTimeSplitter(settings)
+    private val trimmer = GeneralEdgeTrimmer()
     private val bigSplitter = GeneralBigSplitter(settings)
     private val facts = BundleFacts(settings, eligibility)
 
@@ -35,7 +37,7 @@ class GeneralBundleFinder(
         val notBundled = mutableListOf<Long>()
         for (chunk in chunker.chunks(day)) {
             val pieces = splitter.split(segmenter.segment(chunk.photos), listOf(chunk.origin), counter)
-            for (piece in pieces) {
+            for (piece in pieces.flatMap { trimmer.trim(it, counter) }) {
                 val parts = bigSplitter.split(piece, counter)
                 parts.forEachIndexed { index, part ->
                     if (counter.isRecommendable(part.photos)) {
