@@ -60,7 +60,18 @@ class Photo(
     val originalFileHash: String? = null,
 
     @Column(name = "captured_utc_offset", length = 6)
-    val capturedUtcOffset: String? = null
+    val capturedUtcOffset: String? = null,
+
+    @Column(name = "captured_millis")
+    val capturedMillis: Int? = null,
+
+    // The size of the stored image in pixels, the resolution that the duplicate check of the recommendation compares
+    // (F7, R1). A photo stored before the columns existed has none.
+    @Column(name = "width")
+    val width: Int? = null,
+
+    @Column(name = "height")
+    val height: Int? = null
 ) {
     init {
         require(isSha256Hex(fileHash)) {
@@ -87,10 +98,17 @@ class Photo(
         require(capturedUtcOffset.let { it == null || UtcOffset.isValid(it) }) {
             "capturedUtcOffset must be a UTC offset from -12:00 to +14:00"
         }
+        require(capturedMillis == null || (capturedMillis in 0..MAX_MILLIS && capturedTime != null)) {
+            "capturedMillis must be from 0 to 999 and needs a capturedTime"
+        }
+        require((width == null) == (height == null) && (width ?: 1) > 0 && (height ?: 1) > 0) {
+            "width and height must be given together and be positive"
+        }
     }
 
     companion object {
         private val SHA256_HEX = Regex("[0-9a-f]{64}")
+        const val MAX_MILLIS = 999
 
         /** Whether the value is a SHA-256 in lowercase hexadecimal, the form of every photo hash. */
         fun isSha256Hex(value: String): Boolean = SHA256_HEX.matches(value)

@@ -64,7 +64,9 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         capturedTime: LocalTime? = null,
         originalFileHash: String? = null,
         capturedUtcOffset: String? = null,
-        sourceType: PhotoSourceType? = null
+        sourceType: PhotoSourceType? = null,
+        capturedMillis: Int? = null,
+        deviceModel: String? = null
     ) = PhotoUploadCommand(
         bunchId = bunchId,
         memberId = memberId,
@@ -73,7 +75,9 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
         capturedTime = capturedTime,
         originalFileHash = originalFileHash,
         capturedUtcOffset = capturedUtcOffset,
-        sourceType = sourceType
+        sourceType = sourceType,
+        capturedMillis = capturedMillis,
+        deviceModel = deviceModel
     )
 
     protected fun image(seed: String) = PhotoImage(seed.toByteArray(), 1200, 800)
