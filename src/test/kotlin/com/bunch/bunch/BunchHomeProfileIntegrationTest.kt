@@ -250,6 +250,33 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `profile replacement fingerprint includes bytes after the first buffer`() {
+        val owner = member()
+        val bunch = create(owner)
+        val bytes = ByteArray(8193) { 1 }
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", bytes)
+        val stored = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
+        `when`(images.upload(photo)).thenReturn(stored)
+        val request = profile("사진 지문", "소개", 0, imageAction = ProfileImageAction.REPLACE)
+        val key = UUID.randomUUID()
+
+        val first = profiles.update(owner, bunch.id, key, request, photo)
+        assertThat(profiles.update(owner, bunch.id, key, request, photo)).isEqualTo(first)
+
+        val changed = bytes.copyOf().also { it[it.lastIndex] = 2 }
+        assertError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            profiles.update(
+                owner,
+                bunch.id,
+                key,
+                request,
+                MockMultipartFile("photo", "profile.jpg", "image/jpeg", changed)
+            )
+        }
+        verify(images).upload(photo)
+    }
+
+    @Test
     fun `profile final save rechecks profanity and compensates uploaded file`() {
         val dictionaries = java.util.concurrent.atomic.AtomicReference(
             ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))

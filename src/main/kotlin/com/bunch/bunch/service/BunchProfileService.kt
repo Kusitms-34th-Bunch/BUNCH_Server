@@ -188,7 +188,7 @@ class BunchProfileService(
             }
         }
         val imageHash = if (request.imageAction == ProfileImageAction.REPLACE) {
-            digest(readProfileImageBytes(requireNotNull(photo)))
+            profileImageHash(requireNotNull(photo))
         } else {
             "-"
         }
@@ -211,10 +211,21 @@ class BunchProfileService(
         )
     }
 
-    private fun readProfileImageBytes(photo: MultipartFile): ByteArray {
-        val bytes = photo.inputStream.use { it.readNBytes(MAX_PROFILE_IMAGE_BYTES + 1) }
-        if (bytes.size !in 1..MAX_PROFILE_IMAGE_BYTES) fail(ErrorCode.INVALID_INPUT)
-        return bytes
+    private fun profileImageHash(photo: MultipartFile): String {
+        val hash = MessageDigest.getInstance("SHA-256")
+        var total = 0
+        photo.inputStream.use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer, 0, minOf(buffer.size, MAX_PROFILE_IMAGE_BYTES + 1 - total))
+                if (count < 0) break
+                total += count
+                if (total > MAX_PROFILE_IMAGE_BYTES) fail(ErrorCode.INVALID_INPUT)
+                hash.update(buffer, 0, count)
+            }
+        }
+        if (total == 0) fail(ErrorCode.INVALID_INPUT)
+        return hash.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun preflight(
