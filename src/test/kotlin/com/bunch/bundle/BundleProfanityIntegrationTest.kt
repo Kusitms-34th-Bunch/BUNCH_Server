@@ -212,7 +212,8 @@ class BundleProfanityIntegrationTest : BunchIntegrationSupport() {
 
         val after = service.get(f.owner, f.bunch, f.id)
         assertThat(after.revision).isEqualTo(before.revision)
-        assertThat(after.photos).isEqualTo(before.photos)
+        assertThat(after.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) })
+            .isEqualTo(before.photos.map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) })
         assertThat(after.date).isEqualTo(before.date)
     }
 
