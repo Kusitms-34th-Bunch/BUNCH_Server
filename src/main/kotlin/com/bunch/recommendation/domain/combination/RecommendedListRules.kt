@@ -1,15 +1,17 @@
 package com.bunch.recommendation.domain.combination
 
 /**
- * Which recommended bundles the list shows, and in what order (recommended bundle specification 10-5). The bundles that
- * are not shown are still kept: only what is shown is made less, the rules of the grouping stay as they are.
+ * Which recommended bundles the list shows, and in what order (photo box 4.2.9 rule 6, recommended bundle specification
+ * X8). The order is:
  *
- * - Of the general bundles of the same activity, the most recent [CombinationSettings.sameActivityGeneralMax] are
- *   shown, so a bunch that does the same thing every week, or a bunch that uploads the photos of a year at once, does
- *   not fill the list. The ones with a group photo are chosen first, and among them, and among the others, the more
- *   recent day first. An event bundle is never cut by this.
- * - The list is in the order of the kind (the events first), then the more recent day, then the later start.
- * - The list has at most [CombinationSettings.listMax] bundles.
+ * 1. the bundle whose last photo was added most recently first (a photo of August that was uploaded in October puts its
+ *    bundle on top);
+ * 2. when that is the same, the one with the most members who uploaded the photos of its card;
+ * 3. when that is the same, the one with the most photos on its card.
+ *
+ * The list has at most [CombinationSettings.listMax] bundles, so a bunch that uploads the photos of a year at once does
+ * not fill the list (X8). A bundle is not cut for being of the same activity as another: there are no activities, and
+ * the repeated gatherings are all shown (D2).
  *
  * Bundles that cannot be told apart by these rules come in the order of their numbers, the greater first, so the same
  * bundles are always listed the same way.
@@ -18,28 +20,13 @@ class RecommendedListRules(
     private val settings: CombinationSettings = CombinationSettings()
 ) {
     /** The numbers of the bundles that are shown, in the order they are listed. */
-    fun select(candidates: List<ListCandidate>): List<Long> {
-        val events = candidates.filter { it.kind == BundleKind.EVENT }
-        val generals = candidates.filter { it.kind == BundleKind.GENERAL }
-            .groupBy { it.activity }
-            .values
-            .flatMap { sameActivity -> sameActivity.sortedWith(chosenFirst).take(settings.sameActivityGeneralMax) }
-
-        return (events + generals)
-            .sortedWith(listOrder)
+    fun select(candidates: List<ListCandidate>): List<Long> =
+        candidates.sortedWith(listOrder)
             .take(settings.listMax)
             .map { it.id }
-    }
 
-    // The group photo first, then the more recent day, then the later start, then the greater number.
-    private val chosenFirst: Comparator<ListCandidate> = compareByDescending<ListCandidate> { it.hasGroupPhoto }
-        .thenByDescending { it.dayKey }
-        .thenByDescending { it.startAt }
-        .thenByDescending { it.id }
-
-    // The events first, then the more recent day, then the later start, then the greater number.
-    private val listOrder: Comparator<ListCandidate> = compareBy<ListCandidate> { it.kind.ordinal }
-        .thenByDescending { it.dayKey }
-        .thenByDescending { it.startAt }
+    private val listOrder: Comparator<ListCandidate> = compareByDescending<ListCandidate> { it.lastPhotoAddedAt }
+        .thenByDescending { it.uploaderCount }
+        .thenByDescending { it.photoCount }
         .thenByDescending { it.id }
 }

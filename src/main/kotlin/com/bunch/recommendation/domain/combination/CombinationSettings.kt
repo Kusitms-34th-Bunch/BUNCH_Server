@@ -77,7 +77,6 @@ data class CombinationSettings(
     val quality: ImageQualityCriteria = ImageQualityCriteria(),
     val recalculationDebounce: Duration = Duration.ofMinutes(5),
     val listMax: Int = 20,
-    val sameActivityGeneralMax: Int = 3,
     val expireDays: Int = 30,
     val yearEndWindows: List<MonthDayWindow> = listOf(
         MonthDayWindow(MonthDay.of(12, 24), MonthDay.of(12, 25)),
