@@ -46,8 +46,8 @@
 | 항목 | 새 기준 | 현재 구현 | 테스트 | 상태 | 이슈 / 비고 |
 | --- | --- | --- | --- | --- | --- |
 | 묶기·나누기 1~4순위 | 사람 바뀜 → 시간대 바뀜 → 같은 시간대 4시간 → 묶음 | `GeneralBundleFinder`, `GeneralChunker`, `GeneralSegmenter`, `GeneralPeopleTimeSplitter` | `GeneralBundleFinderTest`, `GeneralPeopleTimeSplitterTest`, `GeneralSegmenterTest`, `GeneralChunkerTest` | 구현됨(#223) | 활동 라벨 기반 클래스(`GeneralActivities`, `GeneralActivitySections`, `GeneralSectionBalancer`, `GeneralSection`) 삭제 |
-| 묶기·나누기 5순위 | 40장 초과 시 서브 번들 | `GeneralBigSplitter` | `GeneralBigSplitterTest` | 부분(#223) | 나누는 곳의 판단이 아직 "양쪽 성립"(추천 조건이 아님). 추천 조건으로 바꾸는 것은 #227 |
-| 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄 | 없음 | — | 미구현 | #227 |
+| 묶기·나누기 5순위 | 40장 초과 시 서브 번들(나눈 양쪽이 추천 조건일 때, 공백이 가장 긴 곳) | `GeneralBigSplitter` | `GeneralBigSplitterTest`, `GeneralScenarioTest` | 구현됨(#227) | 공백이 같으면 양쪽 장 수 차이가 작은 곳, 이른 곳(X9) |
+| 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄(남은 쪽이 추천 조건일 때만, 새 가장자리에 반복) | `GeneralEdgeTrimmer`, `GeneralCounter.togetherPhotoIds` | `GeneralEdgeTrimmerTest`, `GeneralScenarioTest`(G18·G23·G25) | 구현됨(#227) | 떼어 낼 가장자리 전체의 업로더가 1명일 때만(기획 확인 대기) |
 | 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility.isRecommendable`(성립 조건 `isEnough` + 함께 찍은 순간 1번 이상), `GeneralCounter.isRecommendable` | `BundleEligibilityTest`, `TogetherMomentsTest`, `GeneralBundleFinderTest` | 구현됨(#222 계산, #223 번들 반영) | 번들 판단과 2·3순위 나누기가 쓴다. "활동 미상은 번들이 아님" 규칙은 삭제됨 |
 | 이벤트 번들 | 만들지 않음 | `EventFinder` 등 | `EventFinderTest` 등 | 삭제됨 | #199 |
 
@@ -91,12 +91,12 @@
 
 ### 케이스 시나리오 (새 기준 「케이스」, V10)
 
-새 기준의 케이스 G1~G25, R1~R5(R4-1 포함), C1~C8, X1~X10은 테스트 시나리오로 옮긴다. 일반 번들은 1~4순위가 정하는 케이스를 `GeneralBundleFinderTest`가 새 기준으로 확인한다(#223). 나머지 케이스를 한곳에 모은 시나리오 테스트는 아직 없다.
+새 기준의 케이스 G1~G25, R1~R5(R4-1 포함), C1~C8, X1~X10은 테스트 시나리오로 옮긴다. 일반 번들의 G·R 케이스와 3-5 점검(모든 사진이 정확히 한 묶음, 입력 순서와 무관한 같은 결과)은 `GeneralScenarioTest`가 확인한다(#227).
 
 | 묶음 | 케이스 | 상태 | 이슈 |
 | --- | --- | --- | --- |
-| 일반 번들 | G1~G25 | 일부: 1~4순위가 정하는 케이스(G1~G17, G22, G24, G25)는 `GeneralBundleFinderTest` | 가장자리 정리(G18·G23)·5순위 확인과 G1~G25 시나리오 전체는 #227 |
-| 반복 활동 | R1~R5 | 일부: R1·R2·R4·R4-1은 `GeneralBundleFinderTest` | 시나리오 전체는 #227 |
+| 일반 번들 | G1~G25 | 구현됨(#227): `GeneralScenarioTest` | |
+| 반복 활동 | R1~R5 | 구현됨(#227): `GeneralScenarioTest`(R5는 노출 정책이라 규칙이 날마다 같은지만 확인) | |
 | 사진 고르기 | C1~C8 | 미구현 | 사진 고르기 이슈에서 함께 |
 | 예외 | X1~X10 | 일부(위 표) | 각 이슈에서 함께 |
 
