@@ -55,13 +55,13 @@
 
 | 항목 | 새 기준 | 현재 구현 | 테스트 | 상태 | 이슈 / 비고 |
 | --- | --- | --- | --- | --- | --- |
-| 1순위 제외 | 계산 제외·스크린샷·저장 이미지·품질 낮음 | `CardPool`, `BundleEligibility` | `CardPoolTest`, `BundleEligibilityTest` | 부분 | 스크린샷·저장 이미지 제외 확인 필요 |
-| 2순위 중복 | 묶음당 1장 | `CardPool` | `CardPoolTest` | 교체 예정 | R1과 함께 |
-| 3순위 멤버 | 업로더 1장 이상, 한 멤버 최대 60% | `CardPicker`(`memberMaxRatio` 0.6) | `CardSelectorTest` | 부분 | 「최대 장 수 − 2명」 규칙 확인 필요 |
-| 4순위 구성 | 함께 찍은 순간 1장 이상, 10분 구간 최대 절반, 4등분 | `CardQuarters`(4등분은 있음), 단서·피사체 상한은 AI 기반 | `CardQuartersTest`, `CardSelectorTest` | 교체 예정 | 후속 |
-| 5순위 | 시각 간격 10분 → 멤버 많은 순간 → 품질 | `CardScorer`(대표성·다양성·품질 점수) | `CardScorerTest` | 교체 예정 | 후속 |
-| 장 수 | 6~15장 6, 16~25장 8, 26장 이상 10 | `CardSelector`(후보가 10장 이하면 전부, 넘으면 10장. 기능명세서를 따름) | `CardSelectorTest` | 교체 예정 | 후속 |
-| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | 시각 순서의 첫 사진 | `CardOrderTest` | 교체 예정 | 후속. D4 법무 대기 |
+| 1순위 제외 | 계산 제외·스크린샷·저장 이미지·품질 낮음 | `CardPool`, `BundleEligibility` | `CardPoolTest`, `BundleEligibilityTest` | 구현됨(#229) | |
+| 2순위 중복 | 묶음당 1장(품질 좋은 쪽, 같으면 사진이 적은 멤버 쪽) | `CardPool` | `CardPoolTest`(C1·C2·C8) | 구현됨(#229) | |
+| 3순위 멤버 | 업로더 1장 이상(최대 장 수 − 2명, 사진 많은 멤버부터), 한 멤버 최대 60% | `CardPicker.members`(`memberMaxRatio` 0.6) | `CardSelectorTest`(C5) | 구현됨(#229) | 기능명세서(적게 올린 멤버부터)와 반대라 1119를 따름 |
+| 4순위 구성 | 함께 찍은 순간 1장 이상, 10분 구간 최대 절반, 4등분 | `CardPicker.composition`, `CardQuarters`, `TogetherMoments`(#222) | `CardSelectorTest`(C3·C6·C7), `CardQuartersTest` | 구현됨(#229) | 단서·피사체·단체사진 규칙은 삭제 |
+| 5순위 | 시각 간격 10분 → 멤버 많은 순간 → 품질 | `CardPicker.prefer`, `MomentMembers`, `CardSelector` | `CardSelectorTest`, `MomentMembersTest` | 구현됨(#229) | `CardScorer`·`ImageSimilarity`(이미지 지문)·`EventClues` 삭제 |
+| 장 수 | 6~15장 6, 16~25장 8, 26장 이상 10 | `CardSelector`(`CombinationSettings.cardSizeFor`) | `CardSelectorTest` | 구현됨(#229) | 기능명세서(후보 10장 이하면 전부)와 달라 1119를 따름. 기획 확인 대기 |
+| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | `CardCover`(전면 카메라 단계는 렌즈 정보가 입력에 없어 제외), `recommended_bundles.cover_photo_id`(V55) | `CardCoverTest`, `CardSelectorTest`, `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchemaIntegrationTest` | 구현됨(#229) | 읽어서 내려주고 적용 때 맨 앞에 두는 것은 목록·적용 API 이슈. D4 법무 대기 |
 | 이름 | 「날짜 + 시간대」 | `BundleNamer`, `BundleNames`(이벤트·활동 이름) | `BundleNamerTest` | 교체 예정 | 후속 |
 | 카드 정보(D5) | 장 수·멤버 수·시간 범위 | 기존 흐름의 응답에 장 수·멤버 칩·날짜. 새 저장소 연결(#184 PR)도 같은 필드 | `RecommendationApiIntegrationTest`(기존 흐름) | 부분 | 시간 범위 없음. 기획 확정 대기 |
 
@@ -97,7 +97,7 @@
 | --- | --- | --- | --- |
 | 일반 번들 | G1~G25 | 구현됨(#227): `GeneralScenarioTest` | |
 | 반복 활동 | R1~R5 | 구현됨(#227): `GeneralScenarioTest`(R5는 노출 정책이라 규칙이 날마다 같은지만 확인) | |
-| 사진 고르기 | C1~C8 | 미구현 | 사진 고르기 이슈에서 함께 |
+| 사진 고르기 | C1~C8 | 구현됨(#229): `CardSelectorTest`·`CardPoolTest`. C6은 알려진 한계라 한 순간 쏠림 방지(10분 구간)만 확인 | |
 | 예외 | X1~X10 | 일부(위 표) | 각 이슈에서 함께 |
 
 ## 기능명세서(사진)와의 충돌·변경
