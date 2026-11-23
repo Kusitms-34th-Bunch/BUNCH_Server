@@ -373,12 +373,20 @@ GitHub repository variables `DEPLOY_DEV_ENABLED=true`, `DEPLOY_PROD_ENABLED=true
 
 새 CI는 PR과 dev/main push에서 변경을 감지한다. 문서만 변경하면 `build`는 skipped다.
 앱·배포 구성 변경은 실제 DB/Redis 전체 build, 배포 검사, 관측 검증을 실행한다.
-검증 성공 후 앱 변경 시만 `dev-<SHA>` / `prod-<SHA>`를 게시하고 서버에서 digest로 해석한다.
+검증 성공 후 앱 변경 시만 `dev-<SHA>` / `prod-<SHA>`를 게시한다. publish 단계는 `docker push --quiet`가
+반환한 digest로 `image@sha256:...`를 확정하고 job output → `EXPECTED_APP_IMAGE`로 배포에 전달한다.
+전송·서버 양쪽에서 고정 GHCR 저장소와 64자리 소문자 hex를 검사하고 해당 digest만 pull·검증·실행한다.
+서버에서 태그를 다시 해석하지 않으므로 이후 재태그나 workflow 재실행으로 게시물이 바뀌어도 전달된 이미지를 유지한다.
 두 환경의 배포 job은 공통 concurrency group으로 직렬화하고 `queue: max`로 최대 100개 대기 작업을 유지한다.
 100개를 넘는 추가 대기는 GitHub가 취소하므로 해당 상황은 실행 이력을 확인해 재배포한다.
-후보 설정은 `.incoming-<SHA>`에서 검증한 뒤 반영한다. `.env`는 전송하거나 덮어쓰지 않는다.
+SHA는 추적 태그와 `.incoming-<SHA>` 경로에 사용하며 배포 이미지 선택에는 사용하지 않는다.
+후보 설정은 이 staging 경로에서 검증한 뒤 반영한다. `.env`는 전송하거나 덮어쓰지 않는다.
 앱만 `--no-deps`로 재생성하고 실제 관리 health를 확인한 뒤 환경별 `.release.env`에 digest를 기록한다.
 CI는 PostgreSQL·Redis·Tunnel을 재시작하지 않는다. 모니터링만 바뀌면 네 관측 서비스만 갱신하며 dev에서는 공용 관측을 배포하지 않는다.
+
+수동 `ci-deploy.sh` / `release.sh --check` 실행도 해당 publish 실행의 `EXPECTED_APP_IMAGE`를 지정해야 한다.
+이 값은 비밀값이 아니며 `ghcr.io/kusitms-34th-bunch/bunch_server@sha256:<64hex>`만 허용한다.
+모니터링 경로에는 앱 digest가 필요 없다.
 
 앱 배포에는 단일 컨테이너 교체와 health 대기 구간의 짧은 중단이 있다. 무중단 배포를 보장하지 않는다.
 일상 수동 Compose 명령은 CI가 기록한 release 파일을 함께 사용한다.

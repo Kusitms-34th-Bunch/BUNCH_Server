@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# App releases require the publish job's EXPECTED_APP_IMAGE digest.
 # Candidate-only validation: release.sh <dev|prod|monitoring> <40-character SHA> --check
 # --check may pull/cache the app image; it does not replace live files or start services.
 set -euo pipefail
@@ -10,6 +11,9 @@ sha=$2
 mode=${3:-}
 [[ "$environment" =~ ^(dev|prod|monitoring)$ && "$sha" =~ ^[0-9a-f]{40}$ ]] || fail 'Invalid environment or SHA.'
 [[ -z "$mode" || "$mode" == --check ]] || fail 'Unknown option.'
+if [[ "$environment" != monitoring ]]; then
+  [[ "${EXPECTED_APP_IMAGE:-}" =~ ^ghcr\.io/kusitms-34th-bunch/bunch_server@sha256:[0-9a-f]{64}$ ]] || fail 'Invalid expected application digest.'
+fi
 envdir="$HOME/$environment"
 stage=$(cd -- "$(dirname -- "$0")" && pwd -P)
 [[ "$stage" == "$envdir/.incoming-$sha" ]] || fail 'Candidate must be inside the approved environment directory.'
@@ -25,14 +29,10 @@ compose=(docker compose --project-directory "$envdir" --env-file "$envdir/.env")
 compose+=(-f "$stage/compose.yaml")
 
 if [[ "$environment" != monitoring ]]; then
-  image="ghcr.io/kusitms-34th-bunch/bunch_server:$environment-$sha"
-  docker pull "$image" >/dev/null 2>&1 || fail 'Cannot pull candidate application image.'
-  digest=$(docker image inspect "$image" --format '{{range .RepoDigests}}{{println .}}{{end}}' | \
-    sed -n '/^ghcr\.io\/kusitms-34th-bunch\/bunch_server@sha256:[0-9a-f]\{64\}$/p' | head -n 1)
-  [[ "$digest" =~ ^ghcr.io/kusitms-34th-bunch/bunch_server@sha256:[0-9a-f]{64}$ ]] || fail 'Cannot resolve immutable application digest.'
-  export APP_IMAGE="$digest"
+  docker pull "$EXPECTED_APP_IMAGE" >/dev/null 2>&1 || fail 'Cannot pull expected application image.'
+  export APP_IMAGE="$EXPECTED_APP_IMAGE"
   python3 "$stage/environment_check.py" "$environment" "$envdir" \
-    --compose "$stage/compose.yaml" --image "$digest" --ready --resources
+    --compose "$stage/compose.yaml" --image "$EXPECTED_APP_IMAGE" --ready --resources
 else
   # Never print interpolated config: it contains Grafana/Tunnel credentials.
   "${compose[@]}" config --quiet >/dev/null 2>&1 || fail 'Monitoring candidate configuration is invalid.'
@@ -120,7 +120,7 @@ PY
   install -m 600 "$stage/compose.yaml" "$envdir/compose.yaml"
   install -m 700 "$stage/release.sh" "$envdir/release.sh"
   install -m 700 "$stage/environment_check.py" "$envdir/environment_check.py"
-  printf 'APP_IMAGE=%s\n' "$digest" > "$stage/.release.env"
+  printf 'APP_IMAGE=%s\n' "$EXPECTED_APP_IMAGE" > "$stage/.release.env"
   mv "$stage/.release.env" "$envdir/.release.env"
 else
   # Pull the candidate images while the existing monitoring services still run.

@@ -11,6 +11,7 @@ sha=$2
 port=${SSH_PORT:-22}
 [[ "$port" =~ ^[0-9]+$ && "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$SSH_HOST" =~ ^[a-zA-Z0-9.:-]+$ ]] || fail 'Invalid SSH target.'
 if [[ "$environment" != monitoring ]]; then
+  [[ "${EXPECTED_APP_IMAGE:-}" =~ ^ghcr\.io/kusitms-34th-bunch/bunch_server@sha256:[0-9a-f]{64}$ ]] || fail 'Invalid expected application digest.'
   : "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
   [[ "$GITHUB_ACTOR" =~ ^[a-zA-Z0-9_-]+(\[bot\])?$ ]] || fail 'Invalid registry actor.'
 fi
@@ -40,5 +41,5 @@ else
     mkdir -m 700 -p \"\$DOCKER_CONFIG\"; \
     trap 'rm -rf -- \"\$DOCKER_CONFIG\"' EXIT; \
     docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin >/dev/null 2>&1; \
-    bash \"\$HOME/$stage/release.sh\" '$environment' '$sha'"
+    EXPECTED_APP_IMAGE='$EXPECTED_APP_IMAGE' bash \"\$HOME/$stage/release.sh\" '$environment' '$sha'"
 fi

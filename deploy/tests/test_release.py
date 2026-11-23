@@ -15,6 +15,9 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[2]
 SHA = "a" * 40
 DIGEST = "ghcr.io/kusitms-34th-bunch/bunch_server@sha256:" + "b" * 64
+INVALID_IMAGES = ("", DIGEST[:-1], DIGEST.replace("bunch_server@", "other@"),
+                  DIGEST.split("@", 1)[0] + ":latest", DIGEST[:-64] + "B" * 64,
+                  DIGEST + "; touch invalid", DIGEST + "\n")
 
 
 class ReleaseSafetyTest(unittest.TestCase):
@@ -29,7 +32,7 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.bin.mkdir()
         self.log = self.home / "events"
         self.env = dict(os.environ, HOME=str(self.home), PATH=f"{self.bin}:{os.environ['PATH']}",
-                        EVENTS=str(self.log), DIGEST=DIGEST)
+                        EVENTS=str(self.log), DIGEST=DIGEST, EXPECTED_APP_IMAGE=DIGEST)
         self.script("docker", '''import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["EVENTS"], "a") as log: log.write("docker " + " ".join(args) + "\\n")
@@ -92,6 +95,7 @@ sys.exit(int(os.environ.get("VALIDATOR_FAIL", "0")))
 
     def monitoring_candidate(self):
         self.change_environment("monitoring")
+        self.env.pop("EXPECTED_APP_IMAGE", None)
         for filename in ("config.alloy", "loki.yaml", "prometheus.yaml"):
             (self.stage / filename).write_text("candidate config\n")
             (self.envdir / filename).write_text("old config\n")
@@ -122,13 +126,37 @@ sys.exit(int(os.environ.get("VALIDATOR_FAIL", "0")))
         }
         self.env["MONITORING_CONFIG"] = json.dumps(self.monitoring_model)
 
-    def test_prod_uses_independent_tag_and_release_record(self):
+    def test_prod_uses_supplied_digest_and_its_own_release_record(self):
         self.change_environment("prod")
         result = self.release()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"bunch_server:prod-{SHA}", self.events())
-        self.assertNotIn(f"bunch_server:dev-{SHA}", self.events())
+        self.assertIn(f"docker pull {DIGEST}\n", self.events())
+        self.assertNotIn("docker image inspect", self.events())
+        self.assertNotIn("bunch_server:prod-", self.events())
+        self.assertNotIn("bunch_server:dev-", self.events())
         self.assertEqual((self.envdir / ".release.env").read_text(), f"APP_IMAGE={DIGEST}\n")
+
+    def test_retagged_image_cannot_replace_expected_digest(self):
+        # A tag lookup would now return a different registry digest.
+        self.env["DIGEST"] = DIGEST[:-64] + "c" * 64
+        result = self.release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"docker pull {DIGEST}\n", self.events())
+        self.assertIn(f"--image {DIGEST} --ready --resources", self.events())
+        self.assertNotIn("docker image inspect", self.events())
+        self.assertNotIn(self.env["DIGEST"], self.events())
+        self.assertEqual((self.envdir / ".release.env").read_text(), f"APP_IMAGE={DIGEST}\n")
+
+    def test_invalid_expected_digest_rejected_before_docker(self):
+        for image in INVALID_IMAGES:
+            with self.subTest(image=image):
+                self.env["EXPECTED_APP_IMAGE"] = image
+                self.assertNotEqual(self.release().returncode, 0)
+                self.assertEqual(self.events(), "")
+                self.assert_live_preserved()
+        self.env.pop("EXPECTED_APP_IMAGE", None)
+        self.assertNotEqual(self.release().returncode, 0)
+        self.assertEqual(self.events(), "")
 
     def test_monitoring_check_preserves_live_files(self):
         self.monitoring_candidate()
@@ -217,7 +245,7 @@ sys.exit(int(os.environ.get("VALIDATOR_FAIL", "0")))
         self.assertNotIn(" up ", self.events())
         self.assert_live_preserved()
 
-    def test_check_resolves_digest_and_preserves_live_files(self):
+    def test_check_uses_expected_digest_and_preserves_live_files(self):
         result = self.release("--check")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"--image {DIGEST} --ready --resources", self.events())
@@ -276,6 +304,8 @@ with open(os.environ["EVENTS"], "a") as log: log.write(" ".join(sys.argv[1:]) + 
         self.env.update(SSH_HOST="server.invalid", SSH_USER="bunch", SSH_PASSWORD="test-password",
                         GITHUB_TOKEN="test-token", GITHUB_ACTOR="bunch")
         for environment in ("dev", "monitoring"):
+            if environment == "monitoring":
+                self.env.pop("EXPECTED_APP_IMAGE", None)
             self.log.unlink(missing_ok=True)
             result = subprocess.run(["bash", "deploy/ci-deploy.sh", environment, SHA], cwd=ROOT,
                                     env=self.env, capture_output=True, text=True)
@@ -286,8 +316,28 @@ with open(os.environ["EVENTS"], "a") as log: log.write(" ".join(sys.argv[1:]) + 
             self.assertNotIn(".env", "\n".join(line for line in events.splitlines() if " scp " in line))
             self.assertNotIn("test-token", events)
             self.assertNotIn("test-password", events)
+            if environment == "dev":
+                self.assertIn(f"EXPECTED_APP_IMAGE='{DIGEST}'", events)
+            else:
+                self.assertNotIn("EXPECTED_APP_IMAGE=", events)
 
-
+    def test_transport_rejects_invalid_expected_digest_before_ssh(self):
+        self.script("sshpass", 'import sys\nsys.exit("SSH must not be called")\n')
+        self.env.update(SSH_HOST="server.invalid", SSH_USER="bunch", SSH_PASSWORD="test-password",
+                        GITHUB_TOKEN="test-token", GITHUB_ACTOR="bunch")
+        for image in INVALID_IMAGES:
+            with self.subTest(image=image):
+                self.env["EXPECTED_APP_IMAGE"] = image
+                result = subprocess.run(["bash", "deploy/ci-deploy.sh", "dev", SHA], cwd=ROOT,
+                                        env=self.env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("expected application digest", result.stderr.lower())
+                self.assertEqual(self.events(), "")
+        self.env.pop("EXPECTED_APP_IMAGE", None)
+        result = subprocess.run(["bash", "deploy/ci-deploy.sh", "dev", SHA], cwd=ROOT,
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("expected application digest", result.stderr.lower())
 
 
 class WorkflowAdmissionTest(unittest.TestCase):
@@ -312,6 +362,52 @@ class WorkflowAdmissionTest(unittest.TestCase):
             result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+    def publish_script(self):
+        step = self.workflow().split("      - name: Build and push image\n", 1)[1]
+        return textwrap.dedent(step.split("        run: |\n", 1)[1].split("\n  deploy:\n", 1)[0])
+
+    def run_publish(self, digest="sha256:" + "b" * 64, push_failure=False):
+        with tempfile.TemporaryDirectory(dir=ROOT / "deploy/tests") as directory:
+            directory = Path(directory)
+            docker = directory / "docker"
+            docker.write_text(f"#!{sys.executable}\n" + 'import os,sys\n'
+                              'if sys.argv[1] == "push":\n'
+                              '    assert sys.argv[2:] == ["--quiet", "ghcr.io/kusitms-34th-bunch/bunch_server:dev-" + "a" * 40]\n'
+                              '    print(os.environ["PUSH_DIGEST"])\n'
+                              '    sys.exit(int(os.environ["PUSH_FAILURE"]))\n'
+                              'assert sys.argv[1] == "build", "Do not reinterpret the tag after push"\n')
+            docker.chmod(0o700)
+            output = directory / "outputs"
+            env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}", GITHUB_OUTPUT=str(output),
+                       GITHUB_SHA=SHA, GITHUB_REPOSITORY="Kusitms-34th-Bunch/BUNCH_Server",
+                       ENVIRONMENT="dev", PUSH_DIGEST=digest, PUSH_FAILURE=str(int(push_failure)))
+            result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", self.publish_script()],
+                                    cwd=directory, env=env, capture_output=True, text=True)
+            return result, output.read_text() if output.exists() else ""
+
+    def test_publish_exports_the_digest_returned_by_push(self):
+        result, output = self.run_publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, f"app_image={DIGEST}\n")
+
+    def test_failed_push_does_not_export_a_deployable_digest(self):
+        result, output = self.run_publish(push_failure=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output, "")
+
+    def test_invalid_push_digest_does_not_export_an_image(self):
+        for digest in ("", "sha256:bad", "sha256:" + "b" * 63, "sha256:" + "B" * 64):
+            with self.subTest(digest=digest):
+                result, output = self.run_publish(digest=digest)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output, "")
+
+    def test_published_digest_is_forwarded_to_deploy(self):
+        workflow = self.workflow()
+        self.assertIn("app_image: ${{ steps.push.outputs.app_image }}", workflow)
+        self.assertIn("EXPECTED_APP_IMAGE: ${{ needs.publish.outputs.app_image }}", workflow)
+        self.assertIn("      - name: Build and push image\n        id: push\n", workflow)
 
     def r2_test_step(self):
         step = self.workflow().split("      - name: Test R2 migration tool when present\n", 1)[1]

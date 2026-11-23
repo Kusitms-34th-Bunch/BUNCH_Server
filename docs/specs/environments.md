@@ -30,7 +30,7 @@
 - R2 계약은 `R2_ENDPOINT`(버킷명 제외), `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`다. 서명 기본 만료는 #213 코드의 1800초다.
 - Apple/Google/Kakao 앱·번들 ID 분리는 보류한다. Cloudinary 키는 #213 최종 복사·검증과 DB 매핑 후 새 R2 앱 기동 전에 앱 환경에서 제거한다.
   일회성 도구와 기존 앱 복구 설정에는 보존하며 원본 삭제·계정 해지는 별도 후속 작업이다.
-- 앱은 CI가 게시한 SHA 태그를 pull한 뒤 digest로 고정한다. 환경별 `.release.env`가 `APP_IMAGE`를 기록하며 서로 공유하지 않는다.
+- 앱은 CI push가 반환한 digest를 publish output으로 전달받아 그 이미지 그대로 pull한다. 태그 재해석은 하지 않는다. 환경별 `.release.env`가 `APP_IMAGE`를 기록하며 서로 공유하지 않는다.
 - 앱 환경의 PostgreSQL·Redis·Tunnel 이미지도 실측 digest로 고정하고 CI가 갱신하지 않는다. 공용 관측은 정확한 버전 또는 digest를 사용한다.
 - 컨테이너 자원 상한 합계는 4CPU/8GB보다 작게 두고 OS·Docker 여유를 남긴다. 상한은 실측 후 조정하며 성능 보장은 아니다.
 - 단일 Alloy/Loki/Prometheus/Grafana가 `environment=dev|prod` 라벨로 로그·메트릭·알림·대시보드를 구분한다.
