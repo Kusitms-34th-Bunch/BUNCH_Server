@@ -8,8 +8,7 @@ import java.time.Instant
  * without a time comes after all that have one, again by photo ID (8-6, where the order of the upload is read as the
  * order of the IDs).
  *
- * The time is given by the caller, because the steps do not all use the time of the photo as it was taken: a time that
- * was borrowed or corrected comes in (5-3, 5-5).
+ * The time is given by the caller, because the steps do not all use the same clock: the local one or the absolute one.
  */
 object PhotoOrder {
     fun <T> byTimeThenId(timeOf: (T) -> Instant?, idOf: (T) -> Long): Comparator<T> =

@@ -2,7 +2,7 @@ package com.bunch.recommendation.domain.combination
 
 /**
  * Gives the photos with a date only to a bundle (recommended bundle specification 7-9, 7-10). A photo with a date only
- * is one that found no photo to borrow a time from (5-3), so it has no place on the time axis and no bundle took it. It
+ * is one that was uploaded without a shooting time (X3), so it has no place on the time axis and no bundle took it. It
  * goes to the bundle that most of the photos of its batch with a time are in; when that does not tell, to the bundle
  * of the day if there is only one; and to none otherwise. A bundle with the same number of them is the one that starts
  * first, then the one with the lower photo number (1.8).

@@ -33,8 +33,8 @@ import java.time.LocalDate
  * - The bundles of a day that is **held** (photos still being analyzed) stay as they are (5-6).
  *
  * The whole bunch is saved, not only the days that changed: the calculation reads all the photos of the bunch, and a
- * day can change because of another (a date borrowed, a clock corrected, 5-3 and 5-5). A bundle that did not change
- * is left as it is, so this costs a comparison, not a write.
+ * day can change because of another (an upload batch with a wrong clock is left out of every day, X5). A bundle that
+ * did not change is left as it is, so this costs a comparison, not a write.
  *
  * A photo is in one recommended bundle only (7-10), so the rows of the photos that leave a bundle are deleted before
  * the rows of the bundles they come to are written. A photo that is still in a bundle of a day that is held, and

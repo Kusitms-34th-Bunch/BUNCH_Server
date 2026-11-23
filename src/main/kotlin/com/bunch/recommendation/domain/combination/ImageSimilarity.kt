@@ -2,8 +2,8 @@ package com.bunch.recommendation.domain.combination
 
 /**
  * How alike two photos look, from 0 (nothing alike) to 1 (the same image), or null when it cannot be told because a
- * photo has no value to compare (recommended bundle specification 5-4). The steps that join duplicates and find a date
- * to borrow ask this and compare the answer with a number of the settings, so they do not depend on what the number
+ * photo has no value to compare (recommended bundle specification 5-4). The step that scores a card asks this and
+ * compares the answer with a number of the settings, so they do not depend on what the number
  * is made of. The first version is made of the image fingerprint ([FingerprintSimilarity]); an embedding can take its
  * place without a change of the steps (4-2).
  */

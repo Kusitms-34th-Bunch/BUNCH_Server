@@ -11,7 +11,7 @@ import java.util.UUID
 /**
  * One uploader of one photo of the bunch, with what the combination reads of the photo (recommended bundle
  * specification 4-1). A photo uploaded together by several members comes as several rows. A photo without a date is a
- * row too, because the steps after this one may give it a date (5-3).
+ * row too: the preparation of the day leaves it out (X2).
  */
 interface CombinationPhotoRow {
     val photoId: Long

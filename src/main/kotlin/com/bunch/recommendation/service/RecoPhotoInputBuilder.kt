@@ -22,9 +22,9 @@ import java.time.ZoneOffset
 /**
  * Makes the input of the recommended bundle combination from what the database holds of a bunch (recommended bundle
  * specification 3-1, 5-1, 5-2). The photos of a draft or a published bundle and the photos that are not ready are not
- * there (3-1). A photo without a date is there as a photo of which the time is unknown, because the steps after this
- * one may give it a date (5-3). The photos come in the order of their numbers, so the same bunch gives the same input
- * every time.
+ * there (3-1). A photo without a date is there as a photo of which the time is unknown: the preparation of the day
+ * leaves it out (X2). The photos come in the order of their numbers, so the same bunch gives the same input every
+ * time.
  *
  * The quality is the one calculated when the photo was uploaded; a photo without it has none (it is not low, 3-1). What
  * the AI told is the stored answer of the analysis (4-3), read again by the same class that read it when it came. The
