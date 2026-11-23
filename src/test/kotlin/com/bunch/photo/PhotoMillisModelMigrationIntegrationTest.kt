@@ -29,7 +29,7 @@ class PhotoMillisModelMigrationIntegrationTest @Autowired constructor(private va
     fun `an old photo keeps no milliseconds and no device model, and the migration can be repeated`() {
         val schema = "photo_millis_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            val version = MigrationVersion.fromVersion("52")
+            val version = MigrationVersion.fromVersion("54")
             val previous = configure(schema).info().all().mapNotNull { it.version }.filter { it < version }.max()
             configure(schema, previous.toString()).migrate()
             val photo = insertOldPhoto(schema)
