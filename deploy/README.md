@@ -33,7 +33,7 @@ Compose 프로젝트 `bunch`, 개발 데이터 볼륨 `bunch-pgdata`, `bunch-red
 진행 중인 `main → ~` 배포가 모두 끝났거나 취소됐는지 확인한다. 과거 실행의 재실행도 금지한다.
 GitHub의 repository variables `DEPLOY_DEV_ENABLED`, `DEPLOY_PROD_ENABLED`, `MONITORING_DEPLOY_ENABLED`는
 미설정 또는 `false`로 둔다. **이 변수는 과거 workflow에 소급 적용되지 않으므로 Disable을 대체하지 않는다.**
-`CONTRIBUTING.md`와 기존 모니터링 Spec의 `dev 검증만/main 홈 배포/latest` 설명은 이번 전환 후 이 안내가 대체한다.
+[협업 규칙](../CONTRIBUTING.md)과 [모니터링 Spec](../docs/specs/monitoring.md)도 같은 환경별 배포 계약을 따른다.
 
 GitHub Environments `dev`, `prod`를 준비하고 각각 배포 브랜치를 `dev`, `main`으로 제한한다.
 각 Environment에 `SSH_HOST`, `SSH_USER=bunch`, `SSH_PASSWORD`를 등록한다. `SSH_PORT`는 필요할 때만 variable로 지정한다.
@@ -153,9 +153,12 @@ Compose 프로젝트는 계속 `bunch`다. `bunch-monitoring` 같은 새 프로�
 상한은 예약이 아니며 CPU 경쟁·메모리 OOM·디스크 부족은 별도 관측한다. JVM 최대 힙은 컨테이너 메모리의 60%다.
 실측 후 조정하되 두 앱+저장소+관측+OS의 합계를 다시 계산한다. validator가 예산 초과를 거부한다.
 
-## 4. 개발 경로 이전과 공용 관측
+## 4. 개발 이전 준비와 기존 앱 유지
 
 새 개발 환경의 변수·이미지·볼륨·network를 먼저 검증한다. 초기 검사는 준비 표식을 요구하지 않는다.
+이 단계에서는 **새 Compose로 앱을 기동하지 않는다.** 기존 Cloudinary 앱·Tunnel·관측은 홈의 설정으로 계속 실행한다.
+최종 Compose는 R2 앱 전용이며 Cloudinary 세 변수를 전달하지 않는다. 기존 데이터의 R2 전환 준비가 끝나기 전에
+새 이미지를 실행하면 새 Flyway가 매핑되지 않은 DB를 거부할 수 있다.
 
 ```bash
 (
@@ -163,7 +166,36 @@ set -euo pipefail
 python3 ~/dev/environment_check.py dev ~/dev --resources
 cd ~/dev
 docker compose --env-file .env -f compose.yaml config --quiet
-# Current DB/Redis containers keep running. Replace only app; brief API/WebSocket interruption.
+)
+```
+
+중단 지점 B: `~/dev`와 관측의 파일·키·네트워크만 준비됐고 기존 개발 앱과 데이터는 그대로다.
+기존 홈의 `.env`는 복사하거나 덮어쓰지 않는다. 자동 배포·운영 도메인은 아직 전환하지 않는다.
+
+## 5. 개발 hostname → R2 데이터 전환 → 개발 경로 활성화
+
+1. 기존 개발 Tunnel에 `dev.bunch.kr → http://app:8080`을 연결한다. 기존 `api` 연결은 유지한다.
+2. 실제 테스트 앱의 **API 주소와 WebSocket 주소를 모두** dev hostname으로 변경한다.
+3. 로그인/갱신·사진 조회/업로드/삭제·초대·STOMP 연결/재연결을 실제 iOS/WebView로 검증한다.
+   실제 프런트 Origin을 허용한다. API 주소를 무조건 Origin으로 쓰지 않는다.
+4. #213의 `docs/r2-migration.md`를 최종 계약으로 사용한다. 통합 checkout에서 해당 runbook과
+   `scripts/r2/prepare.sql`, 일회성 도구를 먼저 확보한다. 이 환경 분리 작업만 단독 배포하지 않는다.
+   **백업 → nullable 준비 SQL → 사전 복사 → ingress/쓰기·background·Cloudinary 관리 쓰기 동결과 기존 앱 정지 →
+   최종 차이 복사·전체 해시 검증 → DB 객체 경로 매핑**을 먼저 완료한다. 하나라도 실패하면 새 앱을 기동하지 않는다.
+5. `~/dev/.env`에 `R2_ENDPOINT`(버킷명 없는 account origin), `R2_BUCKET=bunch-dev`,
+   개발 전용 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`를 넣고 #213 이미지 digest를 확정한다.
+   서명 기본 만료는 코드의 1800초다. **새 R2 앱 컨테이너에는 Cloudinary 세 변수를 전달하지 않는다.**
+   Cloudinary 키는 일회성 도구 프로세스와 기존 앱의 비공개 복구 설정에만 보존한다.
+6. 새 앱의 background가 검증 전에 실행되지 않도록 `JAVA_TOOL_OPTIONS`에 일시적으로
+   `-Dasync-job.worker.enabled=false`를 추가한다. 기존 최대 힙 옵션도 유지한다.
+   공개 ingress·Tunnel은 계속 중지한 채 아래 명령으로 R2 앱과 최종 새 Flyway를 적용한다.
+   적용 이력의 번호는 #213 최신 runbook을 따르며 기존 migration을 수정하지 않는다.
+
+```bash
+(
+set -euo pipefail
+python3 ~/dev/environment_check.py dev ~/dev --resources
+cd ~/dev
 docker compose --env-file .env -f compose.yaml up -d --no-deps app
 )
 ```
@@ -182,7 +214,7 @@ cd ~/dev
 docker compose --env-file .env -f compose.yaml stop app cloudflared
 docker compose --env-file .env -f compose.yaml up -d --no-deps --force-recreate --wait postgres
 docker compose --env-file .env -f compose.yaml up -d --no-deps --force-recreate --wait redis
-docker compose --env-file .env -f compose.yaml up -d --no-deps app cloudflared
+docker compose --env-file .env -f compose.yaml up -d --no-deps app
 )
 ```
 
@@ -219,22 +251,24 @@ docker compose --env-file .env -f compose.yaml up -d --no-deps monitoring-cloudf
 공용 관리자 URL은 별도 Tunnel이며 API/관리 포트/Loki/Prometheus를 공개하지 않는다.
 공용 관측 자세한 변수·검증은 [모니터링 안내](monitoring/README.md)를 따른다.
 
-중단 지점 B: 개발 앱과 기존 데이터가 `~/dev`에서 정상이고 기존 `api.bunch.kr`은 계속 개발을 가리킬 수 있다.
-아직 자동 배포·운영 도메인 전환을 하지 않는다.
+R2 앱의 Flyway/JPA validate·내부 health·권한별 조회·사진/프로필·WebSocket·멱등 재응답을 먼저 검증한다.
+이 점검 중에는 공개 ingress와 background를 재개하지 않는다. 실제 R2의 1800초 만료·변조 거절·비공개 접근도
+#213 runbook 기준으로 확인한다. 성공 후에만 `JAVA_TOOL_OPTIONS`의 임시 worker 비활성 옵션을 제거하고
+검증한 기존 값으로 복원한 뒤 앱·Tunnel을 재생성해 쓰기와 background를 재개한다.
+Cloudinary 원본 삭제·계정 해지는 이 재개와도 별개인 후속 파괴적 정리이며 자동 실행하지 않는다.
 
-## 5. 개발 hostname → 앱 전환 → R2 순서
+```bash
+(
+set -euo pipefail
+python3 ~/dev/environment_check.py dev ~/dev --resources
+cd ~/dev
+docker compose --env-file .env -f compose.yaml up -d --no-deps app cloudflared
+)
+```
 
-1. 개발 Tunnel에 `dev.bunch.kr → http://app:8080`을 연결한다. 기존 `api` 연결은 유지한다.
-2. 실제 테스트 앱의 **API 주소와 WebSocket 주소를 모두** dev hostname으로 변경한다.
-3. 로그인/갱신·사진 조회/업로드/삭제·초대·STOMP 연결/재연결을 실제 iOS/WebView로 검증한다.
-   실제 프런트 Origin을 `BUNCH_WS_ALLOWED_ORIGINS`에 허용한다. API 주소를 무조건 Origin으로 쓰지 않는다.
-4. #213 이미지를 개발에 배포하고 `R2_ENDPOINT`(버킷명 없는 account origin), `R2_BUCKET=bunch-dev`,
-   개발 전용 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`를 설정한다. 서명 기본 만료는 코드의 1800초다.
-5. #213 일회성 이전 도구로 이전 자료·키·응답 계약을 검증한다. Cloudinary 키 제거는 **코드 배포와 데이터 이전 검증 후**다.
-   기존 Cloudinary 앱으로 되돌릴 가능성이 남아 있으면 해당 설정·데이터를 보존한다.
-
-중단 지점 C: 테스트 앱이 dev API/WebSocket과 개발 R2를 실제 사용한다는 근거가 확보돼야 다음으로 간다.
-이를 확인하지 않고 현재 `api.bunch.kr`을 운영으로 돌리면 기존 테스트 앱이 빈 운영 DB에 접속한다.
+중단 지점 C: 개발 앱·기존 데이터가 `~/dev`에서 정상이고, 테스트 앱이 dev API/WebSocket과 개발 R2를
+실제 사용한다는 근거가 확보돼야 다음으로 간다. 기존 `api.bunch.kr`은 이 확인 전 개발을 계속 가리킨다.
+이를 확인하지 않고 `api`를 운영으로 돌리면 기존 테스트 앱이 빈 운영 DB에 접속한다.
 
 ## 6. 빈 운영 DB와 독립 서비스 준비
 
@@ -383,6 +417,11 @@ DB_URL=jdbc:postgresql://localhost:55212/bunch_test REDIS_PORT=56212 ./gradlew c
 
 모니터링 smoke는 실제 Grafana/Loki/Prometheus와 로컬 HTTP stub를 쓰며 실제 Discord/iOS SDK 검증과 다르다.
 프로젝트에는 별도 Kotlin lint/정적 분석 도구가 없다. shell/YAML/Compose·실행 검증과 전체 build 결과를 구분해 보고한다.
+
+Workflow의 `queue: max`와 `cancel-in-progress: false`는 [GitHub 공식 지원 조합](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)이다.
+actionlint 1.7.12의 unknown-key 경고는 검사 스키마의 지원 지연이며, 이 속성 두 줄만 제거한 사본 검사와 구분한다.
+실제 workflow의 대기열 설정은 유지한다.
+실제 GitHub 실행 검증은 배포를 활성화하기 전 별도로 확인한다.
 
 참고: [Compose external 볼륨](https://docs.docker.com/reference/compose-file/volumes/),
 [Compose 환경 변수 우선순위](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/),

@@ -79,7 +79,8 @@ def validate(model, environment, allow_examples=False):
     require(env['DB_URL'] == 'jdbc:postgresql://postgres:5432/bunch' and env['DB_USERNAME'] == 'bunch', 'Database boundary mismatch.')
     require(env['REDIS_HOST'] == 'redis' and str(env['REDIS_PORT']) == '6379', 'Redis boundary mismatch.')
     require(str(env['SERVER_PORT']) == '8080' and str(env['MANAGEMENT_SERVER_PORT']) == '8081', 'Application port mismatch.')
-    require(not {'TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'DISCORD_WEBHOOK_URL'} & env.keys(), 'Unexpected app credentials.')
+    require(not {'TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'DISCORD_WEBHOOK_URL',
+                 'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'} & env.keys(), 'Unexpected app credentials.')
     require(set(services['cloudflared']['environment']) == {'TUNNEL_TOKEN'}, 'Unexpected Tunnel credentials.')
     require(set(services['postgres']['environment']) == {'POSTGRES_USER', 'POSTGRES_DB', 'POSTGRES_PASSWORD'},
             'Unexpected PostgreSQL credentials.')

@@ -72,6 +72,12 @@ class EnvironmentContractTest(unittest.TestCase):
     def test_app_does_not_receive_admin_or_tunnel_credentials(self):
         self.reject(lambda m: m['services']['app']['environment'].update(TUNNEL_TOKEN='fake'), 'credentials')
 
+    def test_final_runtime_receives_no_cloudinary_credentials(self):
+        for key in ('CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'):
+            for model in self.models.values():
+                self.assertNotIn(key, model['services']['app']['environment'])
+            self.reject(lambda m: m['services']['app']['environment'].update({key: 'fake'}), 'credentials')
+
     def test_activation_requires_r2_and_independent_credentials(self):
         model = copy.deepcopy(self.models['dev'])
         with self.assertRaisesRegex(CHECK.InvalidEnvironment, 'R2 rollout'):

@@ -32,7 +32,10 @@ dev  - 개발 통합 브랜치
 - 릴리스 검증 및 팀 승인 후 dev → main으로 머지한다.
 - CI는 dev 대상 PR과 dev/main push에서 빌드·테스트를 실행한다.
 - 문서만 변경하면 변경 확인만 실행하고 필수 `build` 검사를 skipped로 남긴다.
-- dev는 검증만 수행한다. main push는 검증 후 GHCR 게시와 운영 앱 배포를 수행한다.
+- 앱 변경이 있는 dev/main push는 검증 후 환경별 SHA 이미지를 GHCR에 게시한다.
+- 준비 표식과 활성화 변수를 갖춘 환경에만 dev → `~/dev`, main → `~/prod`로 배포하며 이미지 digest를 고정한다.
+- 공용 모니터링은 main에서 별도 활성화한 경우에만 `~/monitoring`으로 배포한다.
+- 기존 main → 홈 배포는 환경 이전 전에 중지한다. 전환 순서는 [환경 계약](docs/specs/environments.md)을 따른다.
 - 서버 준비와 필요한 Secrets는 [배포 안내](deploy/README.md)를 따른다.
 
 ## 브랜치 이름 작성

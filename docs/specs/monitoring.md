@@ -2,21 +2,25 @@
 
 ## 목적과 범위
 
-BUNCH 단일 운영 서버의 요청 로그·메트릭을 Grafana 대시보드 하나에서 조회하고,
+BUNCH 단일 서버의 개발·운영 요청 로그·메트릭을 Grafana 대시보드 하나에서 조회하고,
 첫 5xx와 앱 메트릭 수집 중단을 Discord로 알린다. 이 문서는 승인된 최소 구현 계약이며,
 이전의 오류율·지연·힙 임계값 계획을 대체한다. 실제 운영 배포·웹훅 수신 완료를 뜻하지 않는다.
 제품 API·DB 스키마·앱 내 알림·APNs 계약은 바꾸지 않는다.
-구현은 [이슈 #13](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/13)에서 추적한다.
+관측 기반은 [이슈 #13](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/13), 환경 분리는
+[이슈 #212](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/issues/212)에서 추적한다.
+프로젝트·볼륨 보존과 전환 순서는 [환경 계약](environments.md)을 따른다.
 
 | 구성 | 책임·내부 연결 |
 | --- | --- |
 | Actuator·Micrometer Prometheus | 앱 `8081`에서 health·Prometheus 제공 |
-| Alloy | Compose project `bunch`, service `app`의 Docker 로그 → Loki |
+| Alloy | `kr.bunch.environment`가 `dev` 또는 `prod`인 service `app`의 Docker 로그 → Loki |
 | Loki | 요청 로그 보관·최근 1분 5xx 집계, 내부 `3100` |
-| Prometheus | `app:8081/actuator/prometheus` 수집, 내부 `9090` |
-| Grafana | 메트릭·로그 대시보드, 두 알림 평가·Discord 전송, 내부 `3000` |
+| Prometheus | `dev-app:8081` / `prod-app:8081`의 `/actuator/prometheus` 수집, 내부 `9090` |
+| Grafana | 메트릭·로그 대시보드, 환경별 두 알림(총 네 규칙) 평가·Discord 전송, 내부 `3000` |
 
-`deploy/compose.yaml`과 `deploy/monitoring/`이 실행 설정의 원본이다.
+`deploy/compose.yaml`은 앱 환경, `deploy/monitoring/compose.yaml`과 같은 디렉터리의 프로비저닝은
+공용 관측 설정의 원본이다. 관측 프로젝트 `bunch`와 기존 외부 데이터 볼륨을 유지한다.
+공용 기본 네트워크는 `bunch-monitoring`이며 Prometheus만 두 환경의 관측 네트워크에도 연결한다.
 모니터링 이미지 버전은 고정 태그를 사용한다. 별도 Alertmanager·앱 Discord appender·
 전송 서버·recording rule·배포 이력 시스템은 두지 않는다.
 외부 HTTPS·호스트 전체·Tunnel·DB/Redis 전용 감시, 고가용성과 분산 추적은 범위 밖이다.
@@ -27,9 +31,9 @@ BUNCH 단일 운영 서버의 요청 로그·메트릭을 Grafana 대시보드 �
 - API `8080`과 관리 `8081`을 분리한다. 관리 HTTP 노출은 `/actuator/health`,
   `/actuator/prometheus`만 허용하고 health 상세는 숨긴다. 내부 수집에 제품 JWT를 요구하지 않는다.
   API 포트나 공개 Tunnel에서는 관리 정보를 제공하지 않는다.
-- 관리 포트·Alloy·Loki·Prometheus의 호스트 포트를 열지 않는다. Grafana는 기존 Tunnel의
-  별도 관리자 HTTPS hostname으로만 연결하며 익명 접근·회원 가입을 끄고 인증을 유지한다.
-- Prometheus job은 `bunch`, 로그·알림 식별 라벨은 `service=bunch`, `environment=prod`다.
+- 관리 포트·Alloy·Loki·Prometheus의 호스트 포트를 열지 않는다. Grafana는 앱과 분리된 전용 Tunnel의
+  관리자 HTTPS hostname으로만 연결하며 익명 접근·회원 가입을 끄고 인증을 유지한다.
+- Prometheus job은 `bunch`, 로그·알림 식별 라벨은 `service=bunch`, `environment=dev|prod`다. 메트릭에도 같은 환경 라벨을 붙인다.
   HTTP 메트릭의 URI는 매핑 템플릿을 사용한다. 원문 URL·query·토큰·회원 ID·요청 ID를 라벨로 쓰지 않는다.
   HTTP 처리 시간 히스토그램을 활성화하여 p95를 계산하고 대시보드에서 관리 요청을 제외한다. `up=1`은 메트릭 수집 성공이며 API·DB·Redis 정상 보장이 아니다.
 - 기존 `traceId / eventId / userId` MDC·요청 시작/종료·MDC 정리·초대 토큰 마스킹을 유지한다.
@@ -44,14 +48,15 @@ BUNCH 단일 운영 서버의 요청 로그·메트릭을 Grafana 대시보드 �
 
 ## 알림 계약
 
-평가는 **10초 간격**이다. Grafana의 파일 프로비저닝으로 규칙·contact point·notification policy를 관리한다.
+각 환경의 두 규칙을 독립 평가하며 총 네 규칙을 둔다. 평가는 **10초 간격**이다.
+Grafana의 파일 프로비저닝으로 규칙·contact point·notification policy를 관리한다.
 
 | 규칙 | 조건 | `for` | 최초 대기 | 반복 | 복구 전송 |
 | --- | --- | --- | --- | --- | --- |
 | 첫 5xx | Loki 최근 1분 요청 종료 로그 중 5xx 합계 ≥ 1 | `0s` | `group_wait: 0s` | `5m` | 끔 |
-| 앱 수집 중단 | Prometheus `up{job="bunch"}=0` 또는 대상 소실 | `1m` | `group_wait: 0s` | `5m` | 켬 |
+| 앱 수집 중단 | 해당 환경의 Prometheus `up{job="bunch"}=0` 또는 대상 소실 | `1m` | `group_wait: 0s` | `5m` | 켬 |
 
-규칙별로 묶으며 `service / environment / alertname`을 식별에 사용한다.
+환경·규칙별로 묶으며 `service / environment / alertname`을 식별에 사용한다.
 5xx는 Loki에 수집된 다음 평가에서 바로 firing한다. 정상 트래픽이나 최소 요청 수를 기다리지 않는다.
 최근 1분 창에서 사라지면 정상 상태로 돌아가지만 Discord 복구 메시지는 보내지 않는다.
 반복 5분은 같은 firing 그룹이 지속될 때의 간격이다. 정상으로 돌아간 뒤 새 5xx가 발생하면
@@ -62,8 +67,8 @@ BUNCH 단일 운영 서버의 요청 로그·메트릭을 Grafana 대시보드 �
 수집 중단은 대상 소실을 조회식에서 명시적으로 포함한다. 앱 수집 규칙의 실제 No Data/Error는
 `KeepLast`로 기존 상태를 유지하여 조회 실패를 정상 복구로 보내지 않는다.
 5xx 규칙의 No Data/Error는 각각 Grafana의 `NoData`/`Error` 상태로 다룬다.
-이때 Grafana 기본 데이터 소스 알림이 발생할 수 있으므로 제품 규칙 두 개와 구분해 확인한다.
-Loki/Grafana 자체 중단은 이 두 규칙으로 확실히 알릴 수 없으며, 관측 실패가 5xx가 없다는 증거도 아니다.
+이때 Grafana 기본 데이터 소스 알림이 발생할 수 있으므로 환경별 제품 규칙 두 개와 구분해 확인한다.
+Loki/Grafana 자체 중단은 이 앱 관측 규칙으로 확실히 알릴 수 없으며, 관측 실패가 5xx가 없다는 증거도 아니다.
 
 ### 실제 탐지 지연
 
@@ -86,8 +91,9 @@ Grafana/Loki가 준비되기 전에는 즉시 탐지할 수 없다. Docker 대�
 
 ### 전송·비밀값
 
-- 앱·DB·Redis·Tunnel·Alloy·Grafana는 공통 `.env`를 `env_file`로 읽는다.
-  `DISCORD_WEBHOOK_URL`과 Grafana 설정도 같은 파일에 두며 해당 서비스들에 전체 변수가 전달된다.
+- 개발 `~/dev/.env`, 운영 `~/prod/.env`, 공용 관측 `~/monitoring/.env`를 분리한다.
+  `env_file`로 전체 값을 전달하지 않고 각 서비스에 필요한 변수만 전달한다.
+  관측 환경에는 Grafana·Discord·전용 Tunnel 설정만 두며 DB/JWT/R2 키를 넣지 않는다.
 - `GF_SERVER_ROOT_URL`은 실제 Grafana HTTPS URL이며 링크 생성에 사용한다.
   `GF_SECURITY_ADMIN_PASSWORD`는 초기 관리자 생성용이다. 기존 계정 비밀번호 변경은 별도 수행한다.
 - 메시지는 규칙·서비스·환경·발생/복구·조건·Grafana 링크로 원인을 확인할 수 있게 한다.
@@ -99,6 +105,8 @@ Grafana/Loki가 준비되기 전에는 즉시 탐지할 수 없다. Docker 대�
 
 로그·메트릭을 대시보드 하나에서 조회한다. 앱 수집 상태, 제품 API RPS·5xx,
 HTTP 지연 p95, JVM 힙·Hikari 풀과 요청 로그를 확인하고 traceId/eventId로 검색한다.
+환경 selector는 로그와 메트릭 모두에 적용된다. 환경 라벨이 없던 과거 메트릭은 새 selector에
+나타나지 않지만 기존 볼륨에 남는다.
 무트래픽의 비율·지연은 계산 불가로 다루며 수집 실패를 정상 0으로 덮지 않는다.
 프로비저닝 파일과 고정 UID가 원본이며 UI 변경은 저장소에 반영해야 재현된다.
 
@@ -112,31 +120,34 @@ HTTP 지연 p95, JVM 힙·Hikari 풀과 요청 로그를 확인하고 traceId/ev
 
 ## 배포·검증
 
-[배포 안내](../../deploy/README.md)의 SSH 사용자 홈(`~`) 절차를 따른다.
+[배포 안내](../../deploy/README.md)의 환경별 경로와 준비 표식·활성화 변수 절차를 따른다.
 CI는 `git diff`로 앱/모니터링 두 플래그를 계산하고 공통 Compose·환경 예제·CI 변경은 둘 다 켠다.
 문서만 변경하면 필수 이름 `build`를 skipped로 남기며 배포하지 않는다.
-모니터링만 변경하면 설정 검증 후 네 모니터링 서비스를 함께 재생성하고 앱은 재시작하지 않는다.
-앱 변경에서만 `latest` 이미지를 빌드·게시·pull하고 app만 갱신한다.
-PostgreSQL·Redis·cloudflared는 CI가 재시작하지 않는다.
+공용 모니터링은 main에서 별도 활성화한 경우만 후보 설정을 검증하고, 이미지를 pull한 뒤
+네 서비스만 중지·설정 교체·재생성한다. 모니터링 단독 변경은 앱을 재시작하지 않는다.
+앱 변경은 dev/main별 SHA 태그를 게시하고 각 환경에서 digest로 고정해 app만 갱신한다.
+PostgreSQL·Redis·앱/관측 Tunnel은 CI가 재시작하지 않는다.
+배포는 공통 대기열에서 순차 실행하고 실패 시 수동 복구한다.
 
 자동 검증은 다음과 같다. 실제 실행 결과는 완료 보고에 남기며 이 목록 자체가 통과 증거는 아니다.
 
 ```bash
-test -f deploy/.env || cp deploy/.env.example deploy/.env
+bash deploy/check.sh
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 ```
 
 - 설정 검사: 비밀값 출력 없는 Compose `config --quiet`, Prometheus·Alloy·Loki 설정과 Grafana 프로비저닝.
-- 로컬 HTTP stub: 실제 Grafana/Loki를 기동해 요청 종료 로그의 5xx 조회와 알림 프로비저닝·전송을 검증.
+- 로컬 HTTP stub: 실제 Alloy/Grafana/Loki/Prometheus를 기동해 환경 격리·요청 종료 로그의 5xx 조회·알림 프로비저닝·전송을 검증.
   stub는 운영 Discord를 호출하지 않는다. 실행 범위·대기 시간은 테스트 스크립트를 따른다.
 - 앱 테스트: 관리 포트 분리·health/prometheus만 노출·인증 회귀·JWT 이전 503 요청 종료 로그·MDC 정리·마스킹.
 - 별도 운영 확인: 첫 기동 후 메트릭·로그 조회, 지정 시험 채널의 발생/복구 수신·링크,
   재생성 후 데이터 유지·RAM/디스크 여유. 실제 운영 웹훅 전송은 별도 승인 범위다.
 
-실패는 해당 명령에서 작업을 중단하며 수동 재실행한다. 이전 Git의 Compose·monitoring 파일을
-복원하는 절차는 배포 안내에 둔다. 자동 rollback·digest pinning·manifest·staging은 도입하지 않는다.
+실패는 해당 명령에서 작업을 중단하며 수동 재실행한다. 이전 설정과 이미지 digest 복원은
+[배포 안내](../../deploy/README.md), 새 알림 UID 정리는 [관측 복구 안내](../../deploy/monitoring/README.md)를 따른다.
+후보 설정 검증과 환경별 이미지 digest 기록만 사용하며 자동 rollback·별도 배포 프레임워크는 두지 않는다.
 
 ## 참고
 
