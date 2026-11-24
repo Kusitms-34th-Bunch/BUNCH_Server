@@ -12,8 +12,9 @@
 | R2 | `bunch-dev`, 기존 Cloudinary 원본 이전 | `bunch-prod`, 빈 상태로 시작 |
 | API·WebSocket | `dev.bunch.kr` | 기존 `api.bunch.kr`과 운영 Tunnel 재사용 |
 
-기존 DB와 Redis를 정지한 뒤 개발 컨테이너에 기존 볼륨을 연결한다. 운영은 새 볼륨과 새 DB·JWT·푸시
-암호화 키를 사용한다. 기존 개발의 DB·JWT·푸시 암호화 키는 유지한다. 소셜 로그인 앱·번들 분리는 보류한다.
+기존 DB와 Redis를 정지한 뒤 개발 컨테이너에 기존 볼륨을 연결한다. 운영은 새 볼륨과 새 DB·JWT 키를
+사용한다. 개발 DB·JWT 값과 양쪽의 기존 APNs 설정·푸시 기기 토큰 암호화 키는 유지한다.
+소셜 로그인 앱·번들 분리는 보류한다.
 각 환경은 별도 R2 자격 증명을 사용한다. 서버에서 API·DB·Redis·관리 포트를 호스트에 게시하지 않는다.
 
 기존 Alloy·Loki·Prometheus·Grafana는 `~/prod` Compose에서 기존 볼륨과 `~/monitoring` 설정을 사용한다.

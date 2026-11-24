@@ -8,8 +8,9 @@
 - 기존 `main` workflow가 서버 홈으로 배포하는 동안에는 `dev → main` 릴리스 머지를 보류한다.
   전환 전 기존 CI의 서버 배포를 중지하고 대기·진행 중인 배포가 끝났는지 확인한다.
   새 workflow가 main에 반영된 후에는 검증과 GHCR 게시를 사용할 수 있다.
-- #217을 먼저 반영하고 #226에 최신 dev를 통합해 V54 → V55 순서를 확인한다.
-  #225와 #226의 통합 이미지로 실제 전환한다. `APP_IMAGE`는 CI 요약의 GHCR digest를 사용한다.
+- #226을 먼저 반영하고 #225를 함께 적용한다. R2는 현재 V53에서 V55로 넘어간다.
+  #217을 나중에 반영할 경우 아직 적용하지 않은 V54의 번호를 V55 이후로 조정한다.
+  `APP_IMAGE`는 CI 요약의 GHCR digest를 사용한다.
 - 현재 홈 Compose·환경 파일·실행 이미지 digest·마운트·볼륨을 확인하고 복구할 수 있게 보관한다.
   DB dump와 Redis 볼륨(AOF 포함)은 별도 저장소에 보관하고 별도 DB/Redis에서 복구를 시험한다.
   기존 Redis의 일관된 전체 볼륨 백업은 쓰기를 멈추고 Redis를 정지한 시점에 확보한다.
@@ -24,14 +25,14 @@
 | 경로 | Compose 변경 | `.env` 설정 |
 | --- | --- | --- |
 | `~/dev` | `name: bunch-dev`, 앱·DB·Redis·Tunnel만 사용, 기존 DB·Redis 외부 볼륨 | 기존 DB·JWT·푸시 암호화 키, 개발 R2, 개발 주소와 Tunnel |
-| `~/prod` | `name: bunch`, 새 운영 DB·Redis 외부 볼륨, 기존 모니터링 유지 | 새 DB·JWT·푸시 암호화 키, 운영 R2, 기존 Tunnel·Grafana·Discord |
+| `~/prod` | `name: bunch`, 새 운영 DB·Redis 외부 볼륨, 기존 모니터링 유지 | 새 DB·JWT와 기존 푸시 암호화 키, 운영 R2, 기존 Tunnel·Grafana·Discord |
 
 PostgreSQL은 `postgres:16`, Redis는 `redis:7`을 사용한다. Compose 기본 네트워크 이름은
 개발 `bunch-dev_default`, 운영 `bunch_default`다. 앱 설정은 `env_file: .env`로 읽고
 `APP_IMAGE`도 기존대로 `.env`에서 지정한다. 운영의 모니터링 마운트는 `../monitoring`, 사전 마운트는
 두 환경 모두 `../profanity`로 지정한다. 볼륨 이름은 [환경 계약](../docs/specs/environments.md)에 따른다.
 
-각 `.env`는 `600`으로 설정한다. 개발에서 기존 소셜·APNs 설정을 유지하고 PEM 줄바꿈을 보존한다.
+각 `.env`는 `600`으로 설정한다. 기존 APNs 설정과 기기 토큰 암호화 키를 두 환경에서 사용하고 PEM 줄바꿈을 보존한다.
 개발은 `bunch-dev`, 운영은 `bunch-prod` R2 키를 넣는다. Cloudinary 키는 이전 도구와 복구 설정에 보관한다.
 WebSocket은 실제 웹·WebView Origin을 사용한다.
 
