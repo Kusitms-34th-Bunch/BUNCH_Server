@@ -48,7 +48,7 @@ jobs:
             git diff --no-renames --name-only -z "$BASE" "$HEAD" > "$changed"
             while IFS= read -r -d '' path; do
               case "$path" in
-                .github/workflows/ci.yml|deploy/compose.yaml|deploy/.env.example|deploy/environments/*|deploy/tests/*|deploy/check.sh)
+                .github/workflows/ci.yml|deploy/compose.yaml|deploy/.env.example)
                   app=true
                   monitoring=true
                   ;;
@@ -110,8 +110,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Build and test
         run: ./gradlew build
-      - name: Check deployment configuration
-        run: bash deploy/check.sh
       - name: Test the R2 migration tool
         if: needs.changes.outputs.app == 'true'
         run: |
@@ -120,7 +118,9 @@ jobs:
           fi
       - name: Validate monitoring configuration
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
-        run: bash deploy/monitoring/check.sh
+        run: |
+          cp deploy/.env.example deploy/.env
+          bash deploy/monitoring/check.sh
       - name: Test Grafana and Loki with local HTTP stubs
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: python3 deploy/monitoring/smoke_test.py

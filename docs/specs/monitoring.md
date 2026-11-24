@@ -86,8 +86,7 @@ Grafana/Loki가 준비되기 전에는 즉시 탐지할 수 없다. Docker 대�
 
 ### 전송·비밀값
 
-- `~/monitoring/.env`에서 Grafana 설정과 `DISCORD_WEBHOOK_URL`을 전달한다.
-  운영 앱 자격 증명은 `~/prod/.env`에서 해당 서비스에 전달한다.
+- 운영 Compose는 `~/prod/.env`를 읽는다. Grafana 설정과 `DISCORD_WEBHOOK_URL`도 이 파일에 둔다.
 - `GF_SERVER_ROOT_URL`은 실제 Grafana HTTPS URL이며 링크 생성에 사용한다.
   `GF_SECURITY_ADMIN_PASSWORD`는 초기 관리자 생성용이다. 기존 계정 비밀번호 변경은 별도 수행한다.
 - 메시지는 규칙·서비스·환경·발생/복구·조건·Grafana 링크로 원인을 확인할 수 있게 한다.
@@ -113,11 +112,12 @@ HTTP 지연 p95, JVM 힙·Hikari 풀과 요청 로그를 확인하고 traceId/ev
 ## 배포·검증
 
 [배포 안내](../../deploy/README.md)에 따라 운영 프로젝트와 네트워크를 공유하고 운영 앱만 수집한다.
-모니터링 변경은 `~/monitoring`에서 해당 서비스에 수동 적용한다. CI는 설정을 검증한다.
+모니터링 설정은 `~/monitoring`에 두고 `~/prod`에서 해당 서비스에 수동 적용한다. CI는 설정을 검증한다.
 
 자동 검증은 다음과 같다. 실제 실행 결과는 완료 보고에 남기며 이 목록 자체가 통과 증거는 아니다.
 
 ```bash
+test -f deploy/.env || cp deploy/.env.example deploy/.env
 bash deploy/monitoring/check.sh
 python3 deploy/monitoring/smoke_test.py
 DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build

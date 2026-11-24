@@ -18,29 +18,35 @@
 
 ## 2. 서버 설정 준비
 
-| 경로 | 배치할 파일 | 설정 |
-| --- | --- | --- |
-| `~/dev` | `deploy/compose.yaml`, `deploy/.env.example` 기반 `.env` | 기존 DB 접속값·JWT·푸시 암호화 키 유지, 기존 데이터 볼륨·개발 R2·새 Tunnel |
-| `~/prod` | 동일 Compose, `deploy/environments/.env.example` 기반 `.env` | 새 DB 접속값·JWT·푸시 암호화 키·운영 R2·기존 Tunnel |
-| `~/monitoring` | `deploy/monitoring/compose.yaml`과 설정 파일, 해당 예제 기반 `.env` | 기존 Grafana·Discord 값, 기존 볼륨 |
+서버의 기존 Compose를 `~/dev/compose.yaml`, `~/prod/compose.yaml`의 출발점으로 사용한다.
+실제 운영 파일과 두 환경의 `.env`는 서버에서 관리한다.
 
-환경 파일 권한은 `600`으로 두고 각 서비스에 필요한 값만 전달한다. 전체 기존 `.env`를 세 경로에 복사하지 않는다.
-개발에서는 기존 PostgreSQL·Redis 이미지 digest, 기존 사전 마운트 `/home/bunch/profanity`와 소셜·APNs 설정을 확인한다.
-특히 Apple과 APNs의 PEM 줄바꿈을 보존한다. 운영 초대 주소는 `api.bunch.kr`로, 개발은 개발 주소로 설정한다.
-WebSocket은 실제 웹·WebView Origin을 사용한다. 예제 JVM 힙 상한은 부하와 사용량을 확인하며 조정한다.
+| 경로 | Compose 변경 | `.env` 설정 |
+| --- | --- | --- |
+| `~/dev` | `name: bunch-dev`, 앱·DB·Redis·Tunnel만 사용, 기존 DB·Redis 외부 볼륨 | 기존 DB·JWT·푸시 암호화 키, 개발 R2, 개발 주소와 Tunnel |
+| `~/prod` | `name: bunch`, 새 운영 DB·Redis 외부 볼륨, 기존 모니터링 유지 | 새 DB·JWT·푸시 암호화 키, 운영 R2, 기존 Tunnel·Grafana·Discord |
+
+PostgreSQL은 `postgres:16`, Redis는 `redis:7`을 사용한다. Compose 기본 네트워크 이름은
+개발 `bunch-dev_default`, 운영 `bunch_default`다. 앱 설정은 `env_file: .env`로 읽고
+`APP_IMAGE`도 기존대로 `.env`에서 지정한다. 운영의 모니터링 마운트는 `../monitoring`, 사전 마운트는
+두 환경 모두 `../profanity`로 지정한다. 볼륨 이름은 [환경 계약](../docs/specs/environments.md)에 따른다.
+
+각 `.env`는 `600`으로 설정한다. 개발에서 기존 소셜·APNs 설정을 유지하고 PEM 줄바꿈을 보존한다.
+개발은 `bunch-dev`, 운영은 `bunch-prod` R2 키를 넣는다. Cloudinary 키는 이전 도구와 복구 설정에 보관한다.
+WebSocket은 실제 웹·WebView Origin을 사용한다.
 
 기존 볼륨과 네트워크를 확인하고, 아래 새 자원 이름이 비어 있는 상태에서 한 번 생성한다.
 
 ```bash
 docker volume inspect bunch-pgdata bunch-redis-data >/dev/null
 docker network inspect bunch_default >/dev/null
-docker network create bunch-dev-default
 docker volume create bunch-prod-pgdata
 docker volume create bunch-prod-redis-data
 ```
 
-각 디렉터리에서 `docker compose config --quiet`와 `docker compose pull`로 설정·이미지를 확인한다.
-개발 Tunnel을 아직 연결하지 않는 경우에는 `TUNNEL_TOKEN`을 비워 두고 DB·Redis·앱 서비스만 지정해 기동한다.
+각 환경에서 `docker compose config --quiet`와 `docker compose pull app`으로 설정·앱 이미지를 확인한다.
+볼륨 이전 직전 현재 실행 컨테이너와 로컬 `postgres:16`·`redis:7` 이미지가 같은지 확인한다.
+개발 Tunnel을 아직 연결하지 않는다면 DB·Redis·앱 서비스만 지정해 기동한다.
 공개 전 운영 이미지에서 임시 `/api/v1/auth/dev/token` 경로가 차단되는지 확인한다.
 
 ## 3. 점검 시간에 전환
@@ -55,7 +61,7 @@ docker volume create bunch-prod-redis-data
 4. `~/prod`에서 `docker compose up -d --wait postgres redis`로 기존 `bunch`의 DB·Redis 서비스를
    **새 운영 볼륨**에 연결한다. 개발과 운영 두 DB·Redis 컨테이너의 실제 마운트 이름이 서로 다른지 확인한다.
    새 PostgreSQL에서 아래 순서로 앱 DB를 생성하고 앱을 기동해 Flyway와 내부 health를 확인한다.
-5. `~/monitoring`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
+5. `~/prod`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
    운영 앱의 Prometheus 대상과 대시보드를 확인한다. `~/prod`에서 기존 Tunnel을 기동해
    `api.bunch.kr → http://app:8080`, `grafana.bunch.kr → http://grafana:3000`으로 접근되는지 확인한다.
    기존 Tunnel의 다른 API 주소도 운영으로 연결되므로 공개할 주소를 확인한다.
@@ -90,10 +96,10 @@ docker compose up -d --no-deps app
 ```
 
 앱 관리 포트의 내부 `/actuator/health`와 해당 도메인으로 배포를 확인한다.
-모니터링 변경은 `~/monitoring`에서 해당 서비스만 재생성한다.
+모니터링 설정은 `~/monitoring`에서 관리하고 `~/prod`에서 해당 서비스만 재생성한다.
 
 실패 시 쓰기를 멈추고 이전 이미지·설정·연결을 확인한다. 기존 볼륨을 홈 프로젝트로 되돌릴 때는 먼저
 개발 DB·Redis를 정지한다. V55 이후에는 구버전 이미지뿐 아니라 전환 직전 DB 백업 복구가 필요하다.
 운영에 이미 새 쓰기를 허용했다면 운영 서비스와 데이터를 보존한 상태에서 복구를 조율한다.
-공용 프로젝트 `bunch`의 분할 Compose에는 `down`, `--remove-orphans`를 사용하지 않는다.
+이전 과정에서는 서비스 이름을 지정해 정지·기동한다.
 볼륨 삭제와 Cloudinary 원본 삭제는 이 전환 절차에 포함되지 않는다.

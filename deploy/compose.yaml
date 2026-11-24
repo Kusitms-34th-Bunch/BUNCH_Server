@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:?Set the verified environment project name}
+name: bunch
 
 x-logging: &logging
   driver: json-file
@@ -8,13 +8,10 @@ x-logging: &logging
 
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:?Pin the existing or approved PostgreSQL image}
+    image: postgres:16
     restart: unless-stopped
     logging: *logging
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?Set PostgreSQL administrator}
-      POSTGRES_DB: ${POSTGRES_DB:?Set PostgreSQL initial database}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set PostgreSQL administrator password}
+    env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,9 +21,10 @@ services:
       retries: 10
 
   redis:
-    image: ${REDIS_IMAGE:?Pin the existing or approved Redis image}
+    image: redis:7
     restart: unless-stopped
     logging: *logging
+    env_file: .env
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -37,46 +35,12 @@ services:
       retries: 10
 
   app:
-    image: ${APP_IMAGE:?Set an immutable application image}
+    image: ${APP_IMAGE}
     restart: unless-stopped
     logging: *logging
-    environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:?Set dev or prod}
-      SERVER_PORT: "8080"
-      MANAGEMENT_SERVER_PORT: "8081"
-      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:-}
-      DB_URL: ${DB_URL:?Set the environment database URL}
-      DB_USERNAME: ${DB_USERNAME:?Set the application database user}
-      DB_PASSWORD: ${DB_PASSWORD:?Set the application database password}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      JWT_SECRET: ${JWT_SECRET:?Set the environment JWT key}
-      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:?Set Apple client ID}
-      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
-      APPLE_KEY_ID: ${APPLE_KEY_ID:-}
-      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?Set Google client ID}
-      KAKAO_NATIVE_APP_KEY: ${KAKAO_NATIVE_APP_KEY:?Set Kakao client ID}
-      TERMS_SERVICE_VERSION: ${TERMS_SERVICE_VERSION:-}
-      TERMS_PRIVACY_VERSION: ${TERMS_PRIVACY_VERSION:-}
-      TERMS_AGE_VERSION: ${TERMS_AGE_VERSION:-}
-      TERMS_DEMOGRAPHICS_VERSION: ${TERMS_DEMOGRAPHICS_VERSION:-}
-      BUNCH_INVITATION_BASE_URL: ${BUNCH_INVITATION_BASE_URL:?Set invitation URL}
-      BUNCH_WS_ALLOWED_ORIGINS: ${BUNCH_WS_ALLOWED_ORIGINS:?Set actual WebView origins}
-      PROFANITY_DICTIONARY_PATH: ${PROFANITY_DICTIONARY_PATH:-}
-      RECO_COMBINATION_ENABLED: ${RECO_COMBINATION_ENABLED:-false}
-      BUNCH_BUNDLE_STAGE_THRESHOLDS: ${BUNCH_BUNDLE_STAGE_THRESHOLDS:-0,2,6,10}
-      PUSH_DEVICE_ENCRYPTION_KEY: ${PUSH_DEVICE_ENCRYPTION_KEY:-}
-      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
-      APNS_KEY_ID: ${APNS_KEY_ID:-}
-      APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
-      APNS_SANDBOX_TOPIC: ${APNS_SANDBOX_TOPIC:-}
-      APNS_PRODUCTION_TOPIC: ${APNS_PRODUCTION_TOPIC:-}
-      R2_ENDPOINT: ${R2_ENDPOINT:?Set R2_ENDPOINT}
-      R2_BUCKET: ${R2_BUCKET:?Set R2_BUCKET}
-      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?Set R2_ACCESS_KEY_ID}
-      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY}
-    expose: ["8081"]
+    env_file: .env
+    expose:
+      - "8081"
     volumes:
       - ${PROFANITY_DICTIONARY_MOUNT:-./profanity}:/app/profanity:ro
     depends_on:
@@ -86,25 +50,65 @@ services:
         condition: service_healthy
 
   cloudflared:
-    image: ${CLOUDFLARED_IMAGE:?Pin the existing or approved Tunnel image}
+    image: cloudflare/cloudflared:latest
     restart: unless-stopped
     logging: *logging
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    env_file: .env
     command: ["tunnel", "--no-autoupdate", "run"]
     depends_on:
       app:
         condition: service_started
 
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    logging: *logging
+    env_file: .env
+    user: "0"
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloydata:/var/lib/alloy/data
+
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    logging: *logging
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
+      - lokidata:/loki
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+    volumes:
+      - ./monitoring/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheusdata:/prometheus
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    restart: unless-stopped
+    logging: *logging
+    env_file: .env
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+
 volumes:
   pgdata:
-    external: true
-    name: ${POSTGRES_VOLUME:?Set the verified existing or newly provisioned volume}
+    name: bunch-pgdata
   redis_data:
-    external: true
-    name: ${REDIS_VOLUME:?Set the verified existing or newly provisioned volume}
-
-networks:
-  default:
-    external: true
-    name: ${APP_NETWORK:?Set the verified environment network}
+    name: bunch-redis-data
+  alloydata:
+  lokidata:
+  prometheusdata:
+  grafanadata:

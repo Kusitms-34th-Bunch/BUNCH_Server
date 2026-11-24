@@ -161,8 +161,8 @@ def main():
             images = {}
             for service in ("loki", "prometheus", "grafana"):
                 images[service] = docker(
-                    "compose", "--project-name", run_id, "--env-file", str(ROOT / ".env.example"),
-                    "-f", str(ROOT / "compose.yaml"), "config", "--images", service,
+                    "compose", "--project-name", run_id, "--env-file", str(ROOT.parent / ".env"),
+                    "-f", str(ROOT.parent / "compose.yaml"), "config", "--images", service,
                     env=compose_env,
                 )
                 require(re.fullmatch(r"[\w./-]+:[\w.-]+", images[service]) is not None

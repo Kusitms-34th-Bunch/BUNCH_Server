@@ -7,7 +7,7 @@
 | --- | --- | --- |
 | 브랜치 | `dev` | `main` |
 | Compose 프로젝트 | 새 `bunch-dev` | 기존 `bunch` |
-| 네트워크 | 새 `bunch-dev-default` | 기존 `bunch_default` |
+| 네트워크 | 새 `bunch-dev_default` | 기존 `bunch_default` |
 | PostgreSQL·Redis 볼륨 | 기존 `bunch-pgdata`, `bunch-redis-data` | 새 `bunch-prod-pgdata`, `bunch-prod-redis-data` |
 | R2 | `bunch-dev`, 기존 Cloudinary 원본 이전 | `bunch-prod`, 빈 상태로 시작 |
 | API·WebSocket | `dev.bunch.kr` | 기존 `api.bunch.kr`과 운영 Tunnel 재사용 |
@@ -16,7 +16,7 @@
 암호화 키를 사용한다. 기존 개발의 DB·JWT·푸시 암호화 키는 유지한다. 소셜 로그인 앱·번들 분리는 보류한다.
 각 환경은 별도 R2 자격 증명을 사용한다. 서버에서 API·DB·Redis·관리 포트를 호스트에 게시하지 않는다.
 
-기존 Alloy·Loki·Prometheus·Grafana 네 서비스와 볼륨을 `~/monitoring` 설정으로 운영한다.
+기존 Alloy·Loki·Prometheus·Grafana는 `~/prod` Compose에서 기존 볼륨과 `~/monitoring` 설정을 사용한다.
 모니터링은 기존 운영 네트워크에서 운영 앱을 수집하며 Grafana는 기존 Tunnel을 사용한다.
 개발 앱은 Docker 로그와 내부 health로 확인한다.
 
