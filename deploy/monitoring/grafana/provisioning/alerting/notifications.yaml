@@ -42,7 +42,7 @@ templates:
   - orgId: 1
     name: bunch
     template: |
-      {{ define "bunch.title" }}BUNCH · {{ .CommonLabels.environment }} · {{ .Status }}{{ end }}
+      {{ define "bunch.title" }}BUNCH · {{ .Status }}{{ end }}
       {{ define "bunch.message" }}
       {{ range .Alerts }}
       서비스: {{ .Labels.service }} / 환경: {{ .Labels.environment }}
@@ -56,5 +56,5 @@ templates:
       발생: {{ .StartsAt | tz "Asia/Seoul" | date "2006-01-02 15:04:05 MST" }}
       {{ if eq .Status "resolved" }}복구: {{ .EndsAt | tz "Asia/Seoul" | date "2006-01-02 15:04:05 MST" }}{{ end }}
       {{ end }}
-      대시보드: {{ reReplaceAll "/+$" "" .ExternalURL }}/d/bunch/bunch?orgId=1&var-environment={{ .CommonLabels.environment }}
+      대시보드: {{ reReplaceAll "/+$" "" .ExternalURL }}/d/bunch/bunch?orgId=1
       {{ end }}

@@ -1,5 +1,5 @@
-# Keep the existing project identity; never use --remove-orphans with this split file.
-name: ${MONITORING_PROJECT:?Set the existing monitoring Compose project}
+# Share the existing project and network so the current Tunnel still resolves grafana.
+name: bunch
 
 x-logging: &logging
   driver: json-file
@@ -12,9 +12,9 @@ services:
     image: grafana/alloy:v1.20.1
     restart: unless-stopped
     logging: *logging
-    cpus: 0.15
-    mem_limit: 192m
     user: "0"
+    environment:
+      MONITORING_ENVIRONMENT: prod
     command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
     volumes:
       - ./config.alloy:/etc/alloy/config.alloy:ro
@@ -25,8 +25,6 @@ services:
     image: grafana/loki:3.7.8
     restart: unless-stopped
     logging: *logging
-    cpus: 0.20
-    mem_limit: 320m
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
       - ./loki.yaml:/etc/loki/config.yaml:ro
@@ -36,8 +34,6 @@ services:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     logging: *logging
-    cpus: 0.15
-    mem_limit: 256m
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --storage.tsdb.path=/prometheus
@@ -46,15 +42,13 @@ services:
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheusdata:/prometheus
-    networks: [default, dev_metrics, prod_metrics]
 
   grafana:
     image: grafana/grafana:13.2.4
     restart: unless-stopped
     logging: *logging
-    cpus: 0.25
-    mem_limit: 320m
     environment:
+      MONITORING_ENVIRONMENT: prod
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?Set initial Grafana admin password}
       GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:?Set Grafana HTTPS root URL}
@@ -68,43 +62,22 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
-    networks: [default]
-
-  monitoring-cloudflared:
-    image: ${MONITORING_TUNNEL_IMAGE:?Set an exact cloudflared version or digest}
-    restart: unless-stopped
-    logging: *logging
-    cpus: 0.05
-    mem_limit: 64m
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      TUNNEL_TOKEN: ${MONITORING_TUNNEL_TOKEN:?Set the separate Grafana tunnel token}
-    networks: [default]
-    depends_on:
-      grafana:
-        condition: service_started
 
 volumes:
   alloydata:
     external: true
-    name: ${ALLOY_VOLUME:?Set the existing Alloy volume name}
+    name: bunch_alloydata
   lokidata:
     external: true
-    name: ${LOKI_VOLUME:?Set the existing Loki volume name}
+    name: bunch_lokidata
   prometheusdata:
     external: true
-    name: ${PROMETHEUS_VOLUME:?Set the existing Prometheus volume name}
+    name: bunch_prometheusdata
   grafanadata:
     external: true
-    name: ${GRAFANA_VOLUME:?Set the existing Grafana volume name}
+    name: bunch_grafanadata
 
 networks:
   default:
     external: true
-    name: ${MONITORING_NETWORK:?Set the dedicated bunch-monitoring network}
-  dev_metrics:
-    external: true
-    name: bunch-dev-metrics
-  prod_metrics:
-    external: true
-    name: bunch-prod-metrics
+    name: bunch_default

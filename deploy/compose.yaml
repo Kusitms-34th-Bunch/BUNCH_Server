@@ -11,8 +11,6 @@ services:
     image: ${POSTGRES_IMAGE:?Pin the existing or approved PostgreSQL image}
     restart: unless-stopped
     logging: *logging
-    cpus: ${POSTGRES_CPUS:-0.25}
-    mem_limit: ${POSTGRES_MEMORY:-512m}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set PostgreSQL administrator}
       POSTGRES_DB: ${POSTGRES_DB:?Set PostgreSQL initial database}
@@ -29,8 +27,6 @@ services:
     image: ${REDIS_IMAGE:?Pin the existing or approved Redis image}
     restart: unless-stopped
     logging: *logging
-    cpus: ${REDIS_CPUS:-0.10}
-    mem_limit: ${REDIS_MEMORY:-192m}
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -44,15 +40,11 @@ services:
     image: ${APP_IMAGE:?Set an immutable application image}
     restart: unless-stopped
     logging: *logging
-    cpus: ${APP_CPUS:-0.50}
-    mem_limit: ${APP_MEMORY:-1024m}
-    labels:
-      kr.bunch.environment: ${DEPLOY_ENV:?Set dev or prod}
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:?Set dev or prod}
       SERVER_PORT: "8080"
       MANAGEMENT_SERVER_PORT: "8081"
-      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=60.0}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:-}
       DB_URL: ${DB_URL:?Set the environment database URL}
       DB_USERNAME: ${DB_USERNAME:?Set the application database user}
       DB_PASSWORD: ${DB_PASSWORD:?Set the application database password}
@@ -80,17 +72,13 @@ services:
       APNS_PRIVATE_KEY: ${APNS_PRIVATE_KEY:-}
       APNS_SANDBOX_TOPIC: ${APNS_SANDBOX_TOPIC:-}
       APNS_PRODUCTION_TOPIC: ${APNS_PRODUCTION_TOPIC:-}
-      R2_ENDPOINT: ${R2_ENDPOINT:-}
-      R2_BUCKET: ${R2_BUCKET:-}
-      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
-      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:?Set R2_ENDPOINT}
+      R2_BUCKET: ${R2_BUCKET:?Set R2_BUCKET}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?Set R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY}
     expose: ["8081"]
     volumes:
       - ${PROFANITY_DICTIONARY_MOUNT:-./profanity}:/app/profanity:ro
-    networks:
-      default:
-      metrics:
-        aliases: ["${DEPLOY_ENV:?Set dev or prod}-app"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,10 +89,8 @@ services:
     image: ${CLOUDFLARED_IMAGE:?Pin the existing or approved Tunnel image}
     restart: unless-stopped
     logging: *logging
-    cpus: "0.05"
-    mem_limit: 128m
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set the environment-specific Tunnel token}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     command: ["tunnel", "--no-autoupdate", "run"]
     depends_on:
       app:
@@ -122,6 +108,3 @@ networks:
   default:
     external: true
     name: ${APP_NETWORK:?Set the verified environment network}
-  metrics:
-    external: true
-    name: bunch-${DEPLOY_ENV:?Set dev or prod}-metrics
