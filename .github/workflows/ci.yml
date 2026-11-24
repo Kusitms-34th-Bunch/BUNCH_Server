@@ -125,23 +125,47 @@ jobs:
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: python3 deploy/monitoring/smoke_test.py
       - name: Log in to GHCR
-        if: github.event_name == 'push' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push image
-        if: github.event_name == 'push' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
+        id: publish
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
         env:
           IMAGE: ghcr.io/kusitms-34th-bunch/bunch_server
         run: |
           set -euo pipefail
-          image="$IMAGE:$GITHUB_REF_NAME-$GITHUB_SHA"
+          image="$IMAGE:$GITHUB_SHA"
           docker build -t "$image" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
           digest=$(docker push --quiet "$image")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
           printf 'Published image: `%s@%s`\n' "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: Pull published image on server
+        if: steps.publish.outputs.image != ''
+        env:
+          APP_IMAGE: ${{ steps.publish.outputs.image }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y sshpass
+          printf '%s' "$GITHUB_TOKEN" |
+            sshpass -d 3 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+              -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+                set -eu
+                export DOCKER_CONFIG=\$(mktemp -d)
+                trap 'rm -r -- \"\$DOCKER_CONFIG\"' EXIT
+                docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
+                docker pull '$APP_IMAGE'
+              " 3<<< "$SSH_PASSWORD"
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4

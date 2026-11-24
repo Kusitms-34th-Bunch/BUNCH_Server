@@ -21,5 +21,6 @@
 모니터링은 기존 운영 네트워크에서 운영 앱을 수집하며 Grafana는 기존 Tunnel을 사용한다.
 개발 앱은 Docker 로그와 내부 health로 확인한다.
 
-GitHub Actions는 검증하고 GHCR에 이미지를 게시한다. 초기 배포는 검증한 이미지 digest로 수동 적용한다.
+GitHub Actions는 main에서 검증한 이미지를 GHCR에 게시하고 서버에서 받는다.
+초기 배포는 두 환경에 같은 이미지 digest를 수동 적용한다.
 서비스 중지·데이터 이전·운영 공개 순서는 [배포 안내](../../deploy/README.md)를 따른다.

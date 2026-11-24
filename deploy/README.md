@@ -5,12 +5,12 @@
 
 ## 1. 현재 앱을 유지하면서 준비
 
-- 기존 `main` workflow가 서버 홈으로 배포하는 동안에는 `dev → main` 릴리스 머지를 보류한다.
-  전환 전 기존 CI의 서버 배포를 중지하고 대기·진행 중인 배포가 끝났는지 확인한다.
-  새 workflow가 main에 반영된 후에는 검증과 GHCR 게시를 사용할 수 있다.
+- `dev → main` 릴리스 PR에 새 workflow가 포함됐는지 확인하고 기존 홈 배포가 실행 중이면 종료를 기다린다.
+  과거 홈 배포 실행을 다시 실행하지 않는다. 새 `main` push는 검증한 앱 이미지를 GHCR에 게시하고 서버에서 받는다.
+  서버에서 이미지를 받을 때 기존 SSH Secrets와 Actions의 `GITHUB_TOKEN`을 사용한다.
 - #226을 먼저 반영하고 #225를 함께 적용한다. R2는 현재 V53에서 V55로 넘어간다.
   #217을 나중에 반영할 경우 아직 적용하지 않은 V54의 번호를 V55 이후로 조정한다.
-  `APP_IMAGE`는 CI 요약의 GHCR digest를 사용한다.
+  두 `.env`의 `APP_IMAGE`에는 CI 요약의 같은 GHCR digest를 입력한다.
 - 현재 홈 Compose·환경 파일·실행 이미지 digest·마운트·볼륨을 확인하고 복구할 수 있게 보관한다.
   DB dump와 Redis 볼륨(AOF 포함)은 별도 저장소에 보관하고 별도 DB/Redis에서 복구를 시험한다.
   기존 Redis의 일관된 전체 볼륨 백업은 쓰기를 멈추고 Redis를 정지한 시점에 확보한다.
@@ -45,7 +45,7 @@ docker volume create bunch-prod-pgdata
 docker volume create bunch-prod-redis-data
 ```
 
-각 환경에서 `docker compose config --quiet`와 `docker compose pull app`으로 설정·앱 이미지를 확인한다.
+각 환경에서 `docker compose config --quiet`와 아래 이미지 확인 명령으로 설정과 로컬 이미지를 확인한다.
 볼륨 이전 직전 현재 실행 컨테이너와 로컬 `postgres:16`·`redis:7` 이미지가 같은지 확인한다.
 개발 Tunnel을 아직 연결하지 않는다면 DB·Redis·앱 서비스만 지정해 기동한다.
 공개 전 운영 이미지에서 임시 `/api/v1/auth/dev/token` 경로가 차단되는지 확인한다.
@@ -57,7 +57,7 @@ docker volume create bunch-prod-redis-data
 2. 최종 DB dump를 확보하고 R2 이전 안내의 최종 복사·해시 검증·DB 매핑을 완료한다.
    매핑에는 기존 PostgreSQL이 필요하다. 마무리 후 DB·Redis를 정지하고 최종 Redis 백업을 확보한다.
 3. `~/dev`에서 먼저 `docker compose up -d --wait postgres redis`로 기존 볼륨을 연결한다.
-   DB·Redis 데이터와 실제 마운트 이름을 확인한 후 `docker compose up -d app`으로 V55를 적용한다.
+   DB·Redis 데이터와 실제 마운트 이름을 확인한 후 `docker compose up -d --pull never --no-deps app`으로 V55를 적용한다.
    기존 계정·사진 조회, 새 업로드·목록 썸네일·상세 원본, WebSocket, 내부 health를 검증한다.
 4. `~/prod`에서 `docker compose up -d --wait postgres redis`로 기존 `bunch`의 DB·Redis 서비스를
    **새 운영 볼륨**에 연결한다. 개발과 운영 두 DB·Redis 컨테이너의 실제 마운트 이름이 서로 다른지 확인한다.
@@ -82,18 +82,18 @@ CREATE DATABASE bunch OWNER bunch;
 \quit
 ```
 
-`\password bunch`에는 운영 `.env`의 `DB_PASSWORD`를 입력한다. 이후 `docker compose up -d app`을 실행한다.
+`\password bunch`에는 운영 `.env`의 `DB_PASSWORD`를 입력한다. 이후 `docker compose up -d --pull never --no-deps app`을 실행한다.
 기존 데이터가 보이거나 예상 외 볼륨에 연결됐다면 공개를 중단하고 마운트부터 확인한다.
 
 ## 4. 이후 앱 배포와 복구
 
 대상 디렉터리 `~/dev` 또는 `~/prod`에서 `.env`의 `APP_IMAGE`에 승인된 GHCR digest를 지정한다.
-비공개 이미지는 권한이 있는 계정으로 GHCR에 로그인한다.
+이미지는 새 main CI가 서버에 내려받는다.
 
 ```bash
 docker compose config --quiet
-docker compose pull app
-docker compose up -d --no-deps app
+docker image inspect "$(docker compose config --images app)" >/dev/null
+docker compose up -d --pull never --no-deps app
 ```
 
 앱 관리 포트의 내부 `/actuator/health`와 해당 도메인으로 배포를 확인한다.

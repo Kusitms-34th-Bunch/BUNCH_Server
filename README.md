@@ -320,7 +320,7 @@ python3 deploy/monitoring/smoke_test.py
 CI는 dev 대상 PR과 dev/main push에서 빌드·테스트한다.
 문서만 변경하면 변경 확인만 수행하고 빌드·테스트·배포를 건너뛴다.
 CI는 앱과 모니터링 변경을 각각 감지한다. 공통 Compose·환경 예제·CI 변경은 둘 다 검증한다.
-앱 변경이 있는 dev/main push는 검증 후 GHCR에 브랜치·커밋별 이미지를 게시한다.
+앱 변경이 있는 main push는 검증 후 GHCR에 커밋별 이미지를 게시하고 서버에서 받는다.
 서버 적용은 [배포 안내](deploy/README.md)에 따라 대상 환경에서 검증한 이미지 digest로 수행한다.
 원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
 확정 마감일은 없다.

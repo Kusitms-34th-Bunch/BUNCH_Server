@@ -32,8 +32,8 @@ dev  - 개발 통합 브랜치
 - 릴리스 검증 및 팀 승인 후 dev → main으로 머지한다.
 - CI는 dev 대상 PR과 dev/main push에서 빌드·테스트를 실행한다.
 - 문서만 변경하면 변경 확인만 실행하고 필수 `build` 검사를 skipped로 남긴다.
-- 앱 변경이 있는 dev/main push는 검증 후 GHCR에 브랜치·커밋별 이미지를 게시한다.
-- 서버 배포는 [배포 안내](deploy/README.md)에 따라 `dev → ~/dev`, `main → ~/prod`에 수동 적용한다.
+- 앱 변경이 있는 main push는 검증 후 GHCR에 커밋별 이미지를 게시하고 서버에서 받는다.
+- 서버 배포는 [배포 안내](deploy/README.md)에 따라 `~/dev`와 `~/prod`에 같은 이미지를 수동 적용한다.
 
 ## 브랜치 이름 작성
 
