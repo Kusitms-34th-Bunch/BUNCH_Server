@@ -3,7 +3,9 @@ import copy
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -21,14 +23,30 @@ CHECK = load('environment_check', ROOT / 'environment_check.py')
 PREPARE = load('prepare_environments', ROOT / 'prepare-environments.py')
 
 
+def example_configuration(example):
+    compose_variables = set(re.findall(r'\$\{([A-Za-z_][A-Za-z0-9_]*)', (ROOT / 'compose.yaml').read_text()))
+    environment = {key: value for key, value in os.environ.items() if key not in compose_variables}
+    result = subprocess.run(['docker', 'compose', '--env-file', str(example), '-f', str(ROOT / 'compose.yaml'),
+                             'config', '--format', 'json'], check=True, capture_output=True, text=True,
+                            env=environment)
+    return json.loads(result.stdout)
+
+
 class EnvironmentContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.models = {}
         for env, example in [('dev', ROOT / '.env.example'), ('prod', ROOT / 'environments/.env.example')]:
-            result = subprocess.run(['docker', 'compose', '--env-file', str(example), '-f', str(ROOT / 'compose.yaml'),
-                                     'config', '--format', 'json'], check=True, capture_output=True, text=True)
-            cls.models[env] = json.loads(result.stdout)
+            cls.models[env] = example_configuration(example)
+
+    def test_examples_are_independent_of_ci_application_environment(self):
+        with patch.dict(os.environ, {'SPRING_PROFILES_ACTIVE': 'test',
+                                     'DB_URL': 'jdbc:postgresql://localhost:5432/bunch_test',
+                                     'DB_USERNAME': 'ci-user', 'DB_PASSWORD': 'ci-password',
+                                     'R2_BUCKET': 'unrelated-ci-bucket'}):
+            for environment, example in [('dev', ROOT / '.env.example'),
+                                         ('prod', ROOT / 'environments/.env.example')]:
+                CHECK.validate(example_configuration(example), environment, allow_examples=True)
 
     def test_example_environment_boundaries(self):
         for env, model in self.models.items():
