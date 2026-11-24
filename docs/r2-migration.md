@@ -23,42 +23,13 @@
 - 기존 권한 검사 뒤 응답 시 GET을 로컬 서명한다(1800초). 목록·카드·피드는 썸네일, 상세는 보관본이다.
   기존 필드명과 null 계약은 유지한다. 만료되면 앱은 기존 조회 API를 다시 호출한다.
 
-## 최신 dev와 마이그레이션 순서 (2026-11-23)
+## 마이그레이션 순서
 
-현재 통합 기준은 `origin/dev a00d34cdc2cf6996acdab801d76966acddca09c3`다. 이미 머지된
-#215의 `V53__notification_deep_link_fields.sql`은 원문·체크섬·적용 이력을 유지한다.
-R2의 미적용 신규 파일은 `V55__r2_image_objects.sql`이다. 기존 R2 V53은 로컬 개발 산출물이었으며
-운영 이력을 rename/repair하는 절차가 아니다. 이전 검증 DB에는 새 번호를 억지로 적용하지 않고 새
-전용 DB로 재검증한다.
-
-| 대상 | 확인한 번호/상태 | 이 작업의 처리 |
-| --- | --- | --- |
-| #215 / dev `a00d34c` | V53 알림 deep link, 머지 완료 | 코드·기존 알림 계약을 함께 통합, 파일 변경 없음 |
-| #217 `22cd7c3` | V54 촬영 밀리초·기기 모델·크기, OPEN | 번호만 예약 고려, 기능·파일 미통합 |
-| #219 `41cb95e` | #217 변경과 같은 V54를 포함, OPEN | 중복된 V54를 새 migration으로 간주하지 않음, 미통합 |
-| #221 `f484810` | 같은 V54를 포함, OPEN | 미통합 |
-| #224 `2b78e9f` | 같은 V54를 포함, OPEN | 미통합 |
-| #213 / 이 변경 | V55 R2 | 기존 자산 전환 조건을 확인한 뒤 적용 |
-
-**#217의 V54가 적용될 환경에는 V54 → V55 순서로 배포한다.** Flyway 기본 설정에서 V55를 먼저
-적용한 후 V54를 추가하면 V54가 무시되거나 validate가 실패할 수 있다. 따라서 권장 통합 순서는
-#217 → 최신 dev를 #213에 반영하고 겹치는 코드·테스트 조정 → #213이다. 후속 추천 PR은 head ancestry 확인상
-#217 → #219 → #221 → #224 순서이며 병합 시 다시 확인하고 R2 경로/서명을 보존해 통합한다. 적용된 migration을
-다시 번호 변경하거나 `outOfOrder`/repair를 켜서 순서를 우회하지 않는다. #217을 채택하지 않는
-환경의 현재 소스는 번호 54를 만들지 않으며 빈 DB는 포함된 V53 → V55를 정상 적용한다. 이후
-V54 기능을 채택하기 전 별도 순서 조정이 필요하다. 지금은 #217의 기능을 가져오지 않았다.
-
-#217과 겹치는 지점은 `PhotoService`의 `upload/saveUpload/joinUpload`, `PhotoRepository`의 projection과
-촬영일 초기화, `PhotoUploadTestSupport`, 사진함 Spec이다. 이후 통합 시 다음을 함께 유지한다.
-
-- #217의 `capturedMillis/deviceModel`, `Photo.width/height`는 보관본 `PhotoImage`에서 얻은 값이다.
-  썸네일의 300px 크기를 사진의 보관본 해상도로 저장하지 않는다.
-- R2의 `StoredImage.objectKey`, `ImageAsset.objectKey`, projection `imageKey`, 권한 검사 뒤 응답 시
-  `ImageUrls` 서명과 보관본 원본 해시를 유지한다. `publicId/url`로 되돌리지 않는다.
-- #217의 없는 값만 채우기·촬영일 삭제 시 millis 초기화와 R2의 외부 I/O 트랜잭션 경계·중복 업로드
-  보상 삭제를 모두 보존한다. 문서와 fixture는 두 계약을 함께 반영하고 새 전체 build로 검증한다.
-- V54가 실제 통합되면 R2 전환 테스트의 pre-R2 기준도 V54로 올리고 현재 소스의 V54 부재
-  assertion을 실제 V54 이력 보존 assertion으로 바꾼다. 기존 V53·새 V54 원문은 수정하지 않는다.
+#226을 먼저 반영한다. 현재 dev와 서버의 마지막 적용 버전은 V53이고, R2는
+`V55__r2_image_objects.sql`을 적용한다. V54의 프로덕션 적용을 기다릴 필요는 없다.
+#217 및 이를 포함한 후속 PR을 나중에 반영할 경우 아직 적용되지 않은 V54 파일을 V55보다 큰
+다음 사용 가능한 버전으로 올리고, R2 경로와 서명 계약을 유지하며 통합한다. #217의 촬영 정보와
+해상도는 썸네일이 아닌 보관본 기준으로 유지한다. 적용된 Flyway 파일이나 체크섬은 수정하지 않는다.
 
 ## 로컬 도구 준비
 
@@ -150,24 +121,13 @@ scripts/r2/run.sh test
 
 ## 빈 운영 환경과 #212 연계
 
-별도 빈 운영 DB·Redis·`bunch-prod`를 미리 준비하는 것으로 확정했다. 이후 `api.bunch.kr`을 운영에 연결한다.
-기존 도메인 연결은 그대로 두며 dev 도메인과 개발 R2 전환 점검 일정은 별도로 확정한다. 도메인 변경 없이도
-운영 앱의 내부 기동 준비와 코드 통합·로컬 검증은 진행할 수 있다. 실제 준비·배포는 조정 채팅이 순차 수행한다.
+기존 `api.bunch.kr` Tunnel과 Compose 프로젝트 `bunch`를 새 빈 운영 DB·Redis·`bunch-prod`에
+연결한다. 이전까지 기존 API는 테스트 환경을 제공한다. 기존 테스트 데이터는 새 개발 프로젝트
+`bunch-dev`에 기존 볼륨을 재연결해 보존한다. 서버 전환 절차는 #225를 따른다.
 
-1. #212 담당은 운영 전용 빈 DB·Redis와 private `bunch-prod`를 연결한다. `DB_URL`과 DB 자격 증명,
-   `REDIS_HOST/REDIS_PORT`를 운영 대상으로 명시하고 개발 저장소를 가리키지 않는지 확인한다.
-   개발 DB dump·이미지·Redis 세션은 가져오지 않는다.
-2. 앱에는 `R2_BUCKET=bunch-prod`와 운영 접근 권한의 R2 네 값을 전달하고 Cloudinary 변수를 제거한다.
-   API 도메인과 R2 endpoint는 별개다. 버킷을 공개하거나 R2 endpoint를 `api.bunch.kr`로 바꾸지 않는다.
-3. 빈 DB는 현재 포함된 V1~V53 및 V55를 직접 적용한다. 준비 SQL·Cloudinary inventory/copy/cutover는
-   운영에 실행하지 않는다. 빈 `image_assets`는 V55의 기존 자산 mapping 요구를 만족하며 최초 실행 후
-   Flyway validate·재실행이 가능하다. #217을 통합할 경우 앞 절의 V54 → V55 순서를 지킨다.
-4. 별도 운영 연결을 사용하는 앱의 DB/Redis 연결·JPA validate·내부 health 확인을 마친 뒤 도메인 전환은
-   추후 일정에 수행한다. 실제 업로드·권한·서명 검증은 조정 채팅이 관리하는 smoke 단계에서 수행한다.
-
-현재 개발 데이터는 `bunch-dev`만 대상으로 위 사전 복사·짧은 점검 중 동결·최종 검증·V55·배포 순서를 따른다.
-#212는 README·deploy/.env 예제·Compose·CI/서버 env 전달을 담당한다.
-`deploy/**`, `.github/workflows/**`, README는 이 변경에서 수정하지 않는다.
+운영 빈 DB에는 준비 SQL·Cloudinary 복사·DB 매핑 없이 기존 마이그레이션과 R2의 V55를 적용한다.
+운영 앱은 환경별 DB·Redis·R2로 연결하고, JWT 값은 개발과 구분한다. 초기 내부 검증이 끝나면
+기존 Tunnel을 다시 열어 운영 API를 공개한다. 개발 이미지 이전과 앱 전환은 점검 시간에 실행한다.
 
 ## 검증 범위
 
