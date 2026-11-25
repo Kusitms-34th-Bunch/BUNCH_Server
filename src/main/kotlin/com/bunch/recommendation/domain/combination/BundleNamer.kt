@@ -1,21 +1,24 @@
 package com.bunch.recommendation.domain.combination
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 /**
- * Gives the bundles of one day their titles (recommended bundle specification 9-1). The title is made of the date, the
- * part of the day, and what the bundle is, by the kind of the bundle:
+ * Gives the bundles of one day their titles (recommended bundle specification 4, the name of a bundle). The title is
+ * the date and the part of the day, 「10월 19일 밤」, and nothing of what the photos show (they are not read).
  *
- * - an event that stood by a strong clue: the date and the name of the event, 「10월 19일 생일 파티」;
- * - an event that stood by a supporting clue or by the date: the date and the part of the day, 「10월 19일 밤」, with no
- *   name of the event, because a name that is wrong is worse than none;
- * - a general bundle: the date, the part of the day and the name of its activity, 「10월 19일 밤 식사」. When the
- *   activity gives no name (the other activity, the transit) the title is the date and the part of the day.
+ * The date is the calendar date of the time the bundle starts (D7: a bundle is dated by its start), with the year in
+ * front when it is not the year of [today]. A bundle that starts between midnight and 05:00 is of the next date, though
+ * its day (`day_key`) is the one before; a bundle with no time to start from has the date of its day. The part of
+ * the day is the one that [CombinationSettings.dayPartMainShare] (70%) or more of the photos of the bundle that have a
+ * time were taken in. When no part has that many, the two parts with the most photos are put together in the order of
+ * the day, 「10월 19일 오후~밤」, so that a bundle of a cafe in the morning and a lunch in the afternoon is not named
+ * after the afternoon alone (G9). A photo with a date only has no time to vote with.
  *
- * The date is the day of the bundle (`day_key`), with the year in front when it is not the year of [today]. The part of
- * the day is the one most of the photos of the bundle were taken in, counted as the general bundles count it. When the
- * titles of two bundles of the day are the same, each gets a number in the order the bundles start, 「… (1)」, 「… (2)」;
- * the parts of a day that was cut for its size are numbered the same way.
+ * When two bundles or more of the day have the same title, each of them is given the time it starts, 「10월 19일 오후
+ * 2시」: the part of the day the first photo is in and the hour on a clock of 12 hours. When they start in the same hour
+ * too, the minute is put to the ones that start in it, 「10월 19일 오후 2시 40분」, so that no two titles of a day are the
+ * same (the bundles of a day are at least 20 minutes apart).
  *
  * Nothing here reads the time of the clock: [today] is given, so the same bundles give the same titles.
  */
@@ -25,38 +28,90 @@ class BundleNamer(
     /** The bundles of [day], each with its title. The bundles come back in the order they were given. */
     fun name(bundles: List<RecoBundle>, day: DayPreparation.Ready, today: LocalDate): List<RecoBundle> {
         val photos = day.photos.associateBy { it.photoId }
-        val bases = bundles.map { baseOf(it, photos, today) }
-        val order = bundles.indices.sortedWith(
-            compareBy<Int>({ bundles[it].startAt }).thenBy { index -> bundles[index].photos.minOf { it.photoId } }
-        )
-        val numbers = HashMap<Int, Int>()
-        order.groupBy { bases[it] }.values.filter { it.size > 1 }.forEach { same ->
-            same.forEachIndexed { position, index -> numbers[index] = position + 1 }
-        }
-        return bundles.mapIndexed { index, bundle ->
-            bundle.copy(title = numbers[index]?.let { "${bases[index]} ($it)" } ?: bases[index])
-        }
+        val forms = bundles.mapIndexed { index, bundle -> formOf(index, bundle, photos, today) }
+        val titles = forms.groupBy { it.base }.values
+            .flatMap { same -> if (same.size == 1) listOf(same[0].index to same[0].base) else withStartTime(same) }
+            .toMap()
+        return bundles.mapIndexed { index, bundle -> bundle.copy(title = titles.getValue(index)) }
     }
 
-    private fun baseOf(bundle: RecoBundle, photos: Map<Long, PreparedPhoto>, today: LocalDate): String {
-        val date = dateOf(bundle.dayKey, today)
-        if (bundle.kind == BundleKind.EVENT && bundle.establishedBy == EstablishedBy.STRONG) {
-            return "$date ${BundleNames.eventName(bundle.eventType!!, bundle.dayKey)}"
-        }
-        val activityName = bundle.activity?.takeIf { bundle.kind == BundleKind.GENERAL }?.let(BundleNames::activityName)
-        val dayPartName = dayPartOf(bundle, photos)?.let(BundleNames::dayPartName)
-        return listOfNotNull(date, dayPartName, activityName).joinToString(" ")
-    }
+    // What a title is made of for a bundle: the title without a time, and the time the bundle starts, when it has one.
+    private data class Form(
+        val index: Int,
+        val date: String,
+        val base: String,
+        val start: LocalDateTime?
+    )
 
-    // The part of the day of the bundle, or null when none of its photos has a time to tell it (a day of photos with a
-    // date only).
-    private fun dayPartOf(bundle: RecoBundle, photos: Map<Long, PreparedPhoto>): DayPart? {
+    private fun formOf(index: Int, bundle: RecoBundle, photos: Map<Long, PreparedPhoto>, today: LocalDate): Form {
         val inBundle = bundle.photos.mapNotNull { photos[it.photoId] }
-        return if (inBundle.any { it.localTime != null }) settings.mainDayPartOf(inBundle) else null
+        val start = startOf(inBundle)
+        val date = dateOf(start?.toLocalDate() ?: bundle.dayKey, today)
+        val parts = partsOf(inBundle)?.let(::partsName)
+        return Form(
+            index = index,
+            date = date,
+            base = listOfNotNull(date, parts).joinToString(" "),
+            start = start
+        )
     }
 
-    private fun dateOf(dayKey: LocalDate, today: LocalDate): String {
-        val year = if (dayKey.year == today.year) "" else "${dayKey.year}년 "
-        return "$year${dayKey.monthValue}월 ${dayKey.dayOfMonth}일"
+    // The titles of bundles that have the same title: each with the time it starts, and with the minute too where the
+    // hour is the same. A bundle with no time to start from keeps the title it has.
+    private fun withStartTime(same: List<Form>): List<Pair<Int, String>> {
+        val byHour = same.groupBy { hourTitle(it) }
+        return same.map { form ->
+            val title = hourTitle(form)
+            val sharesHour = form.start != null && byHour.getValue(title).size > 1
+            form.index to if (sharesHour) minuteTitle(form) else title
+        }
+    }
+
+    private fun hourTitle(form: Form): String =
+        form.start?.let { "${form.date} ${timeName(it, withMinute = false)}" } ?: form.base
+
+    private fun minuteTitle(form: Form): String = "${form.date} ${timeName(form.start!!, withMinute = true)}"
+
+    // 「오후 2시」, and 「오후 2시 40분」 with the minute. The minute is left out when it is none, 「오후 2시」, so the one that
+    // starts at the hour and the one that starts later in it differ.
+    private fun timeName(start: LocalDateTime, withMinute: Boolean): String {
+        val part = BundleNames.dayPartName(settings.dayPartOf(start.toLocalTime()))
+        val hour = if (start.hour % HALF_DAY == 0) HALF_DAY else start.hour % HALF_DAY
+        val minute = if (withMinute && start.minute > 0) " ${start.minute}분" else ""
+        return "$part ${hour}시$minute"
+    }
+
+    // The part of the day most of the photos are in, or the two parts with the most photos in the order of the day, or
+    // null when none of the photos has a time.
+    private fun partsOf(photos: List<PreparedPhoto>): List<DayPart>? {
+        val counts = photos.mapNotNull { it.localTime }
+            .groupingBy { settings.dayPartOf(it.toLocalTime()) }
+            .eachCount()
+        val total = counts.values.sum()
+        if (total == 0) return null
+        val byPhotos = counts.entries.sortedWith(
+            compareByDescending<Map.Entry<DayPart, Int>> { it.value }.thenBy { it.key }
+        )
+        val main = byPhotos.first()
+        if (main.value >= settings.dayPartMainShare * total - SHARE_TOLERANCE) return listOf(main.key)
+        return byPhotos.take(2).map { it.key }.sorted()
+    }
+
+    private fun partsName(parts: List<DayPart>): String = parts.joinToString("~") { BundleNames.dayPartName(it) }
+
+    // The time the bundle starts: where the first of its photos that has a time was taken.
+    private fun startOf(photos: List<PreparedPhoto>): LocalDateTime? = photos
+        .filter { it.instant != null && it.localTime != null }
+        .minWithOrNull(compareBy({ it.instant }, { it.photoId }))
+        ?.localTime
+
+    private fun dateOf(date: LocalDate, today: LocalDate): String {
+        val year = if (date.year == today.year) "" else "${date.year}년 "
+        return "$year${date.monthValue}월 ${date.dayOfMonth}일"
+    }
+
+    private companion object {
+        const val HALF_DAY = 12
+        const val SHARE_TOLERANCE = 1e-9
     }
 }

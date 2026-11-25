@@ -49,9 +49,10 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the member limit and the window of the card are the ones of the table`() {
+    fun `the member limit, the window of the card and the share of the part of the day are the ones of the table`() {
         assertThat(settings.memberMaxRatio).isEqualTo(0.6)
         assertThat(settings.cardWindow).isEqualTo(Duration.ofMinutes(10))
+        assertThat(settings.dayPartMainShare).isEqualTo(0.70)
     }
 
     @Test

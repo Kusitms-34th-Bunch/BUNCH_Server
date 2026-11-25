@@ -21,6 +21,9 @@ import java.time.ZoneId
  * [sameSlotGap] is the gap after which even the same part of the day is cut (4 hours). [minBoundaryGap] is the gap that
  * makes a boundary at all (20 minutes).
  *
+ * [dayPartMainShare] is the share of the photos of a bundle that names its part of the day in its title (4, 70%); below
+ * it the title has the two parts with the most photos.
+ *
  * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds).
  *
  * [togetherWindow] is how close in time the photos of two different members must be to make a moment they took together
@@ -61,6 +64,7 @@ data class CombinationSettings(
     val memberMaxRatio: Double = 0.6,
     val cardWindow: Duration = Duration.ofMinutes(10),
     val timeBuckets: Int = 4,
+    val dayPartMainShare: Double = 0.70,
     val eventSamePlaceGap: Duration = Duration.ofHours(2),
     val clueMinConfidence: Double = 0.70,
     val sensitiveMinConfidence: Double = 0.50,
@@ -109,6 +113,9 @@ data class CombinationSettings(
         }
         require(memberMaxRatio > 0.0 && memberMaxRatio <= 1.0) {
             "a ratio is above 0 and at most 1"
+        }
+        require(dayPartMainShare > 0.5 && dayPartMainShare <= 1.0) {
+            "the share that names the part of a bundle is above a half and at most 1, so only one part can have it"
         }
         require(
             listOf(
