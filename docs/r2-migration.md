@@ -22,7 +22,7 @@
 3. 기존 `bunch-pgdata`·`bunch-redis-data` 볼륨을 보존하고 운영 DB·Redis를 새 빈 볼륨으로 기동한다.
 4. 운영 DB 계정을 초기화하고 R2 앱을 기동한다. 빈 DB는 V53 다음에 V55와 원본 크기를 추가하는 V56을 적용한다.
    기존 사진 복사나 DB 경로 갱신은 빈 운영 DB에 실행하지 않는다.
-5. 운영의 DB·Redis·R2 연결과 내부 health, 개발 토큰 API 차단을 확인한 뒤 기존 API Tunnel을 연다.
+5. 운영의 DB·Redis·R2 연결과 내부 health, 개발 토큰 API 제거을 확인한 뒤 기존 API Tunnel을 연다.
    개발 DNS와 테스트 앱 주소 변경은 이후에 진행한다.
 
 현재 R2는 `V55__r2_image_objects.sql`을 사용한다. #217을 나중에 반영할 때는 아직 적용하지 않은 V54를
