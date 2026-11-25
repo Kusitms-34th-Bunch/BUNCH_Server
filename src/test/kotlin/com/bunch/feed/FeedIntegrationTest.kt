@@ -354,14 +354,16 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         assertThat(card.id).isEqualTo(bundle)
         assertThat(card.title).isEqualTo("제목")
         assertThat(card.date.toString()).isEqualTo("2026-10-30")
-        assertThat(card.photos.map { it.imageUrl }).containsExactly("https://example.com/cover.jpg", "https://example.com/later.jpg")
+        assertThat(card.photos).hasSize(2)
+        assertThat(card.photos[0].imageUrl).contains("/photos/feed-cover-").contains("/thumbnail.jpg?").contains("X-Amz-Expires=7200")
+        assertThat(card.photos[1].imageUrl).contains("/photos/feed-later-").contains("/thumbnail.jpg?")
         assertThat(card.coverImageUrl).isEqualTo(card.photos.first().imageUrl)
         assertThat(card.locations.map { it.position }).containsExactly(0, 1)
         assertThat(card.participants.map { it.memberId }).containsExactly(owner, departed, withdrawn)
         assertThat(card.participants.map { it.profileAvailable }).containsExactly(true, false, false)
         assertThat(card.participants.drop(1).map { it.nickname }).containsExactly("작성자", "작성자")
         assertThat(card.participants.drop(1).map { it.imageUrl }).containsOnlyNulls()
-        assertThat(card.bunch.imageUrl).isEqualTo("https://example.com/avatar.jpg")
+        assertThat(card.bunch.imageUrl).contains("/profiles/feed-avatar-").contains("/profile.jpg?")
         jdbc.update("UPDATE bunch_memberships SET status='ACTIVE' WHERE bunch_id=? AND member_id=?", target, departed)
         assertThat(feed.get(user).bundles().single().bundle.participants[1].profileAvailable).isTrue()
     }
@@ -587,8 +589,9 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
             SELECT ?,?,created_by,now() FROM bunches WHERE id=?""", source, target, source)
     }
 
-    private fun image(name: String): Long = jdbc.queryForObject("""INSERT INTO image_assets(public_id,url,created_at)
-        VALUES (?,?,now()) RETURNING id""", Long::class.java, "feed/${UUID.randomUUID()}", "https://example.com/$name.jpg")!!
+    private fun image(name: String): Long = jdbc.queryForObject("""INSERT INTO image_assets(object_key,created_at)
+        VALUES (?,now()) RETURNING id""", Long::class.java,
+        if (name == "avatar") "profiles/feed-$name-${UUID.randomUUID()}/profile.jpg" else "photos/feed-$name-${UUID.randomUUID()}/original.jpg")!!
         .also { imageIds += it }
 
     private fun photo(bundle: Long, image: Long, position: Int, owner: Long) {

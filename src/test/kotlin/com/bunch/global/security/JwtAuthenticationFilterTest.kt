@@ -42,7 +42,7 @@ class JwtAuthenticationFilterTest {
                 .claim("tokenType", "ws").setAudience("bunch-ws").setId(UUID.randomUUID().toString())
                 .setIssuedAt(issuedAt).setExpiration(Date(issuedAt.time + 60_000))
                 .signWith(Keys.hmacShaKeyFor(ByteArray(64) { 7 }), SignatureAlgorithm.HS512).compact()
-            val wsRequest = MockHttpServletRequest("POST", "/api/v1/auth/dev/token")
+            val wsRequest = MockHttpServletRequest("POST", "/api/v1/auth/google/login")
             wsRequest.addHeader("Authorization", "Bearer $token")
             val wsResponse = MockHttpServletResponse()
 

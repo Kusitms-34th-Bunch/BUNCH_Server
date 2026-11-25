@@ -58,8 +58,8 @@ interface RecommendationRepository : Repository<Photo, Long> {
     fun findAddedAt(@Param("photoIds") photoIds: Collection<Long>): List<PhotoAddedRow>
 
     // The address of the stored image of a photo, or null when the photo is gone (the AI analysis, 4-2).
-    @Query("select a.url from Photo p join p.imageAsset a where p.id = :photoId")
-    fun findImageUrl(@Param("photoId") photoId: Long): String?
+    @Query("select a.objectKey from Photo p join p.imageAsset a where p.id = :photoId")
+    fun findImageKey(@Param("photoId") photoId: Long): String?
 
     @Query("select m.id as memberId, m.nickname as nickname from Member m where m.id in :memberIds")
     fun findNicknames(@Param("memberIds") memberIds: Collection<Long>): List<MemberNicknameRow>
@@ -86,7 +86,7 @@ interface RecommendationRepository : Repository<Photo, Long> {
     // The photos of the cards in the order they are shown in. A photo that was deleted is already gone from
     // candidate_photos, and a photo whose date was cleared is left out here until the next calculation.
     @Query(
-        "select cp.candidateId as candidateId, p.id as photoId, a.url as imageUrl, p.capturedDate as capturedDate, " +
+        "select cp.candidateId as candidateId, p.id as photoId, a.objectKey as imageKey, p.capturedDate as capturedDate, " +
             "p.capturedTime as capturedTime from CandidatePhoto cp join Photo p on p.id = cp.photoId " +
             "join p.imageAsset a where cp.candidateId in :candidateIds and cp.position is not null " +
             "and p.capturedDate is not null and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
@@ -97,7 +97,7 @@ interface RecommendationRepository : Repository<Photo, Long> {
     // The photos of the cards of the new recommended bundles in the order of the card (the order of the time). A photo
     // that was deleted is already gone, and a photo whose date was cleared is left out until the next calculation.
     @Query(
-        "select rp.bundleId as candidateId, p.id as photoId, a.url as imageUrl, p.capturedDate as capturedDate, " +
+        "select rp.bundleId as candidateId, p.id as photoId, a.objectKey as imageKey, p.capturedDate as capturedDate, " +
             "p.capturedTime as capturedTime from RecommendedBundlePhoto rp join Photo p on p.id = rp.photoId " +
             "join p.imageAsset a where rp.bundleId in :bundleIds and rp.cardPosition is not null " +
             "and p.capturedDate is not null and p.processingStatus = com.bunch.photo.domain.ProcessingStatus.READY " +
@@ -118,7 +118,7 @@ interface RecommendationRepository : Repository<Photo, Long> {
 
     // The badge shows the member as they are now, so the nickname and profile image are read from the member.
     @Query(
-        "select u.photo.id as photoId, m.id as memberId, m.nickname as nickname, a.url as imageUrl " +
+        "select u.photo.id as photoId, m.id as memberId, m.nickname as nickname, a.objectKey as imageKey " +
             "from PhotoUploader u join u.member m left join m.profileImageAsset a " +
             "where u.photo.id in :photoIds order by u.photo.id asc, u.id asc"
     )
@@ -238,7 +238,7 @@ interface RecommendationRepository : Repository<Photo, Long> {
     interface CardPhotoRow {
         val candidateId: Long
         val photoId: Long
-        val imageUrl: String
+        val imageKey: String
         val capturedDate: LocalDate
         val capturedTime: LocalTime?
     }
@@ -248,7 +248,7 @@ interface RecommendationRepository : Repository<Photo, Long> {
         val photoId: Long
         val memberId: Long
         val nickname: String?
-        val imageUrl: String?
+        val imageKey: String?
     }
 
     /** A date whose photos changed and when they changed last (4.2.9 rule 2). */

@@ -1,5 +1,6 @@
 package com.bunch.social.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bundle.domain.BundleRepository
 import com.bunch.bundle.domain.BundleStatus
@@ -35,6 +36,7 @@ import java.util.UUID
 
 @Service
 class SocialCommentService(
+    private val imageUrls: ImageUrls,
     private val access: FeedAccessService,
     private val comments: SocialCommentRepository,
     private val members: MemberRepository,
@@ -220,7 +222,7 @@ class SocialCommentService(
             val author = if (deleted || profile == null) {
                 SocialCommentAuthor(null, "작성자", null)
             } else {
-                SocialCommentAuthor(profile.id, profile.nickname ?: "작성자", profile.imageUrl)
+                SocialCommentAuthor(profile.id, profile.nickname ?: "작성자", imageUrls.profile(profile.imageKey))
             }
             SocialCommentItem(
                 id = row.id,
