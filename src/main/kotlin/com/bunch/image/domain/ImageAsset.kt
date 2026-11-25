@@ -15,11 +15,8 @@ class ImageAsset(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
 
-    @Column(nullable = false, unique = true, length = 255)
-    val publicId: String,
-
-    @Column(nullable = false, columnDefinition = "text")
-    val url: String,
+    @Column(nullable = false, unique = true, columnDefinition = "text")
+    val objectKey: String,
 
     @Column(nullable = false)
     val createdAt: Instant = Instant.now()

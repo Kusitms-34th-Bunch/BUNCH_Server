@@ -33,6 +33,8 @@ nextCursor, hasNext, endReached}`다. `bundleCount`는 이번 응답의 실제 �
 카드는 `{id, bunch, publishedAt, title, date, coverImageUrl, photos, locations,
 participants, likeCount, likedByCurrentBunch, commentCount}`다.
 `bunch`는 `{id, name, imageUrl, characterType, visibility}`이며 번치 프로필 이동에 쓴다.
+`coverImageUrl`과 `photos[].imageUrl`은 카드·Feed 표시용 `thumbnail.jpg`의 UTC 정시 기준 2시간 후 만료되는
+signed URL이고, `bunch.imageUrl`과 `participants[].imageUrl`은 `profile.jpg` signed URL이다.
 `photos`는 `{id, imageUrl, position}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
 `date`는 nullable ISO 날짜, 경과 시간은 `publishedAt` 기준으로 앱이 표시한다.
 `locations`는 [장소 계약](bundle-locations.md)의 순서 있는 배열이다.
@@ -40,6 +42,9 @@ participants, likeCount, likedByCurrentBunch, commentCount}`다.
 `{memberId, joinedAt, nickname, imageUrl, profileAvailable}`다. 발행 참여자 전원을 유지하며
 나간/탈퇴한 사람은 `작성자 / null / false`, 같은 계정의 유효한 재가입은 복구된다.
 `profileAvailable=true`일 때만 [멤버 프로필](member-social-profile.md)로 이동한다.
+
+이미지 객체는 비공개이며 기존 Feed 접근 확인 뒤 URL을 서명한다. 서명 URL은 DB·커서·멱등 결과·
+이벤트에 저장하지 않는다. 만료·서명 실패 시 전용 갱신 API가 아니라 같은 Feed GET을 다시 호출한다.
 
 `hasNext=true`와 `nextCursor!=null`은 항상 함께 반환한다. `endReached=!hasNext`다.
 모든 후보가 없으면 `items=[]`, `bundleCount=0`, `hasNext=false`, `nextCursor=null`,

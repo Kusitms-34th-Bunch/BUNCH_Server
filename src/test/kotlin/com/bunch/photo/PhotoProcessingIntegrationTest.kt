@@ -84,8 +84,7 @@ class PhotoProcessingIntegrationTest : BunchIntegrationSupport() {
         val bunchId = create(member()).id
         val asset = assets.saveAndFlush(
             ImageAsset(
-                publicId = "photos/${UUID.randomUUID()}",
-                url = "https://images.example/photo.jpg",
+                objectKey = "photos/photo-processing-${UUID.randomUUID()}/original.jpg",
                 createdAt = Instant.now()
             )
         ).also { ownedAssetIds += it.id }

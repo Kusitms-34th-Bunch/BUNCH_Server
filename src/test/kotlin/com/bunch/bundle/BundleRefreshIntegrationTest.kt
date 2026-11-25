@@ -42,6 +42,7 @@ import java.util.UUID
 @SpringBootTest
 @ActiveProfiles("test")
 class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
+
     @Autowired
     private lateinit var management: BunchMembershipManagementService
     @Autowired
@@ -132,7 +133,7 @@ class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
         assertThat(note.memberId).isEqualTo(f.guest)
         assertThat(note.content).isEqualTo("현재 프로필로 보이는 코멘트")
         assertThat(note.nickname).isEqualTo(profile.nickname)
-        assertThat(note.imageUrl).isEqualTo(profile.imageUrl)
+        assertThat(note.imageUrl).contains("/bunch-test/${profile.imageKey}?")
         assertThat(note.profileAvailable).isTrue()
     }
 
@@ -151,7 +152,11 @@ class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
             assertThat(person.role).isNull()
             assertThat(person.creator).isFalse()
             assertThat(person.nickname).isEqualTo(profile.nickname)
-            assertThat(person.imageUrl).isEqualTo(profile.imageUrl)
+            if (profile.imageKey == null) {
+            assertThat(person.imageUrl).isNull()
+        } else {
+            assertThat(person.imageUrl).contains("/bunch-test/${profile.imageKey}?")
+        }
             assertThat(person.profileAvailable).isTrue()
         }
     }
@@ -300,7 +305,7 @@ class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
         ChangeMembershipRoleRequest(f.ownerMembership, version(f), MembershipRole.CO_OWNER))
 
     private fun photo(f: Fixture): Long {
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "refresh/${UUID.randomUUID()}", url = "https://test/photo"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(asset.id)
         val row = photos.saveAndFlush(Photo(bunch = bunchRows.findById(f.bunch).orElseThrow(),
             imageAsset = asset, fileHash = UUID.randomUUID().toString().replace("-", "").repeat(2),
@@ -326,9 +331,7 @@ class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun setCurrentProfile(memberId: Long) {
-        val asset = assets.saveAndFlush(ImageAsset(
-            publicId = "refresh-profile/${UUID.randomUUID()}", url = "https://test/profile/$memberId"
-        ))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(asset.id)
         val member = members.findById(memberId).orElseThrow()
         member.nickname = uniqueName()
@@ -347,7 +350,11 @@ class BundleRefreshIntegrationTest : BunchIntegrationSupport() {
         assertThat(person.role).isEqualTo(role)
         assertThat(person.creator).isEqualTo(creator)
         assertThat(person.nickname).isEqualTo(profile.nickname)
-        assertThat(person.imageUrl).isEqualTo(profile.imageUrl)
+        if (profile.imageKey == null) {
+            assertThat(person.imageUrl).isNull()
+        } else {
+            assertThat(person.imageUrl).contains("/bunch-test/${profile.imageKey}?")
+        }
         assertThat(person.profileAvailable).isTrue()
     }
 

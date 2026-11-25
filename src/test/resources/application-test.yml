@@ -28,3 +28,9 @@ terms:
   privacy-version: v1
   age-version: v1
   demographics-version: v1
+
+r2:
+  endpoint: https://00000000000000000000000000000000.r2.cloudflarestorage.com
+  bucket: bunch-test
+  access-key-id: test-key
+  secret-access-key: test-secret

@@ -23,6 +23,8 @@ B는 페이지·FOLLOWING/PUBLIC 경계를 넘는 누적 6번들 간격으로 sl
 후보를 모두 쓰면 새 풀을 시작한다. 직전 ID만 남아 대안이 없으면 슬롯을 생략한다.
 결과 캐시·고정 시퀀스가 없으므로 동일 페이지 재요청의 광고는 달라도 된다.
 랜덤 선택은 후보 인덱스의 균등 난수이며 테스트는 제어한 난수로 검증한다.
+운영 경량 JRE에서도 동작하도록 기본 난수 구현은 java.base의 `java.util.Random`을 사용한다.
+선택적 `jdk.random` 모듈이 필요한 `RandomGenerator.getDefault()`에 의존하지 않는다.
 선택한 장소들의 현재 번치 핀 상태는 G의 findForPlaces 배치 API로 조회한다.
 
 광고 응답: `{id, name, introduction, photoUrl, tags, externalLink, place,
@@ -90,6 +92,8 @@ V36에서 place_address의 NOT NULL만 제거하고 빈 주소 금지 CHECK는 �
 ## 검증 범위
 
 순수 선택 테스트는 후보 범위·소진·직전 제외·생략을 확률 없이 검증한다.
+기본 인자를 사용하는 경로는 java.base만 허용한 별도 JVM에서 빈 후보·단일 후보·
+복수 후보와 풀 재충전을 검증해 JDK와 운영 JRE의 모듈 차이를 회귀 검사한다.
 실제 PostgreSQL/Redis 테스트는 DB 갱신 즉시 반영·개인 숨김 영속/동시 멱등·
 현재 번치 핀 배치·소속 0개·서버 장소 사용·비활성/숨김 거부·V29를 검증한다.
 전체 GET 피드 간격·커서 통합은 B 후속이며 iOS/WebView 수동 확인은 별도다.

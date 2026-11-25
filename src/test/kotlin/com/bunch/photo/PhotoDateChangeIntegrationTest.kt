@@ -38,7 +38,7 @@ class PhotoDateChangeIntegrationTest : PhotoHttpTestSupport() {
     @Autowired
     private lateinit var events: ApplicationEvents
 
-    // Deleting a photo removes its image afterwards; the real storage would call Cloudinary.
+    // Deleting a photo removes its image afterwards; the real storage would call R2.
     @MockitoBean
     private lateinit var storage: ProfileImageStorage
 
@@ -46,7 +46,7 @@ class PhotoDateChangeIntegrationTest : PhotoHttpTestSupport() {
     fun cleanDateChangeFixtures() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-http/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-http-%/original.jpg'")
     }
 
     // ---- What a change does ----

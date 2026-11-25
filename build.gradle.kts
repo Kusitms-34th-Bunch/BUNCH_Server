@@ -9,6 +9,7 @@ group = "com.bunch"
 version = "0.0.1-SNAPSHOT"
 repositories { mavenCentral() }
 dependencies {
+    implementation("software.amazon.awssdk:s3:2.57.3")
     implementation("org.automerge:automerge:0.0.9")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-websocket")

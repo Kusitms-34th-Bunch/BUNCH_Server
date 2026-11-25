@@ -549,10 +549,7 @@ class BundleHttpIntegrationTest : BunchIntegrationSupport() {
     private fun readyPhoto(bunchId: Long, uploaderIds: List<Long>, ordinal: Int): Long {
         val bunch = bunchRepository.findById(bunchId).orElseThrow()
         val asset = imageAssets.saveAndFlush(
-            ImageAsset(
-                publicId = "bundle-http/${UUID.randomUUID()}",
-                url = "https://images.example/bundle-${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
         )
         ownedAssetIds += asset.id
         val photo = photos.saveAndFlush(
