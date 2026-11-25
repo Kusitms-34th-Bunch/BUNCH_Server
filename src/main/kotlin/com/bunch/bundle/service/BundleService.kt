@@ -1,5 +1,6 @@
 package com.bunch.bundle.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.domain.MembershipStatus
 import com.bunch.bunch.domain.BunchMembershipRepository
@@ -37,6 +38,7 @@ import java.util.UUID
 
 @Service
 class BundleService(
+    private val imageUrls: ImageUrls,
     private val access: BundleAccessService,
     private val feedAccess: FeedAccessService,
     private val attribution: BundleAttributionService,
@@ -147,7 +149,7 @@ class BundleService(
         val likeTotals = likes.summaries(userId, ids)
         val commentTotals = socialComments.counts(userId, ids)
         return BundlePage(result.content.map {
-            snapshot(it, userId, likeTotals[it.id] ?: SocialLikeSummary(), commentTotals[it.id] ?: 0)
+            snapshot(it, userId, likeTotals[it.id] ?: SocialLikeSummary(), commentTotals[it.id] ?: 0, thumbnails = true)
         }, page, size, result.totalElements)
     }
 
@@ -871,7 +873,8 @@ class BundleService(
         bundle: Bundle,
         userId: Long,
         likeSummary: SocialLikeSummary? = null,
-        commentTotal: Long? = null
+        commentTotal: Long? = null,
+        thumbnails: Boolean = false
     ): BundleSnapshot {
         val draft = bundle.status == BundleStatus.DRAFT
         val profanityState = eventProfanity(bundle)
@@ -885,7 +888,7 @@ class BundleService(
             bundle.id, bundle.bunchId, bundle.createdBy, bundle.status, bundle.title, bundle.titleVersion,
             bundle.visibility, bundle.visibilityVersion, bundle.date, bundle.dateVersion, bundle.revision,
             photoRows(bundle.id).map {
-                photoResponse(it).copy(picks = photoPicks.getValue(it.id))
+                photoResponse(it, thumbnails).copy(picks = photoPicks.getValue(it.id))
             },
             people.participants,
             people.comments,
@@ -918,7 +921,7 @@ class BundleService(
     ) + titleChanges(bundle, profanityState) + photoChanges(bundle) + participantChanges(bundle, profanityState)
 
     private fun photoChanges(bundle: Bundle): Map<String, Any?> = mapOf(
-        "photos" to photoRows(bundle.id).map(::photoResponse), "dateChips" to dateChips(bundle)
+        "photos" to photoRows(bundle.id).map { photoResponse(it) }, "dateChips" to dateChips(bundle)
     )
 
     private fun participantChanges(
@@ -936,8 +939,14 @@ class BundleService(
         )
     }
 
-    private fun photoResponse(row: BundlePhoto) = BundlePhotoResponse(
-        row.id, row.photoId, row.imageAsset.id, row.imageAsset.url, row.position, row.addedBy, row.addedAt
+    private fun photoResponse(row: BundlePhoto, thumbnail: Boolean = false) = BundlePhotoResponse(
+        row.id,
+        row.photoId,
+        row.imageAsset.id,
+        if (thumbnail) imageUrls.thumbnail(row.imageAsset.objectKey) else imageUrls.full(row.imageAsset.objectKey),
+        row.position,
+        row.addedBy,
+        row.addedAt
     )
 
     private fun commentResponse(row: BundleComment) = BundleCommentResponse(

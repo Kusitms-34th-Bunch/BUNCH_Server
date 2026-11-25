@@ -7,7 +7,9 @@ data class PhotoDetailResponse(
     val imageUrl: String,
     val capturedDate: LocalDate?,
     val uploaders: List<PhotoDetailUploader>,
-    val usedInDraftBundle: Boolean
+    val usedInDraftBundle: Boolean,
+    val width: Int? = null,
+    val height: Int? = null
 )
 
 data class PhotoDetailUploader(

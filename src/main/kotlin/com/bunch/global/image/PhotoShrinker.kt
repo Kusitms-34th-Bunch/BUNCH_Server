@@ -27,7 +27,7 @@ object PhotoShrinker {
     fun shrink(bytes: ByteArray, longSide: Int): PhotoImage? {
         require(longSide > 0) { "the long side must be positive" }
         return try {
-            read(bytes, longSide)?.let { toPhoto(scaled(it, longSide)) }
+            ImageDecodeLimiter.withPermit { read(bytes, longSide)?.let { toPhoto(scaled(it, longSide)) } }
         } catch (_: IOException) {
             null
         } catch (_: RuntimeException) {

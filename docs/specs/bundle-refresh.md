@@ -42,6 +42,9 @@ PERMISSIONS 수신자는 각자의 인증으로 최신 GET snapshot을 다시 �
 별도로 포함된다. OWNER/CO_OWNER/MEMBER 역할과 초안 생성자 여부를 합쳐 단일 배지 값으로
 만들지 않으며, 앱이 우선순위를 적용한다. 재조회로 역할 변경/관리자 위임을 반영한다.
 서버는 다음 쓰기·상태 전송에서도 권한을 검증하며 신호 수신 여부만으로 권한을 허용하지 않는다.
+`participants[].imageUrl`은 이 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 대해 정확히 1800초
+유효한 signed URL을 만들고, 이미지가 없거나 비활성 작성자면 기존 `null`/`profileAvailable:false`를
+유지한다. URL은 저장·재생하지 않으며 만료되면 기존 GET snapshot을 다시 읽는다.
 재연결에서도 기존 GET snapshot을 기준으로 복구한다. 연결 중 유실의 재생·오프라인 큐·범용 Pub/Sub는 추가하지 않는다.
 브로커 전송 실패 처리와 기존 구독·인증 경계는 공통 realtime 구현을 따른다.
 

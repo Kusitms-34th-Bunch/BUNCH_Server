@@ -86,8 +86,7 @@ Grafana/Loki가 준비되기 전에는 즉시 탐지할 수 없다. Docker 대�
 
 ### 전송·비밀값
 
-- 앱·DB·Redis·Tunnel·Alloy·Grafana는 공통 `.env`를 `env_file`로 읽는다.
-  `DISCORD_WEBHOOK_URL`과 Grafana 설정도 같은 파일에 두며 해당 서비스들에 전체 변수가 전달된다.
+- 운영 Compose는 `~/prod/.env`를 읽는다. Grafana 설정과 `DISCORD_WEBHOOK_URL`도 이 파일에 둔다.
 - `GF_SERVER_ROOT_URL`은 실제 Grafana HTTPS URL이며 링크 생성에 사용한다.
   `GF_SECURITY_ADMIN_PASSWORD`는 초기 관리자 생성용이다. 기존 계정 비밀번호 변경은 별도 수행한다.
 - 메시지는 규칙·서비스·환경·발생/복구·조건·Grafana 링크로 원인을 확인할 수 있게 한다.
@@ -106,18 +105,14 @@ HTTP 지연 p95, JVM 힙·Hikari 풀과 요청 로그를 확인하고 traceId/ev
   수집·보관이 실패할 수 있으므로 최소 7일 보존 보장은 아니다.
 - Docker 로그는 파일당 `10m`, 최대 `3`개로 회전한다. 바쁜 서비스의 로그가 수집 전에 회전하면 유실될 수 있다.
 - Alloy 위치·Loki·Prometheus·Grafana 데이터는 영속 볼륨을 사용한다.
-  기존 `bunch-pgdata / bunch-redis-data`를 보존하며 무손실·정확히 한 번 수집은 보장하지 않는다.
+  기존 모니터링 볼륨을 보존하며 무손실·정확히 한 번 수집은 보장하지 않는다.
 - Alloy의 Docker 소켓 `:ro`는 Docker API 권한을 읽기 전용으로 제한하지 않는다.
   이 접근 권한을 다른 모니터링 서비스에 추가하지 않는다.
 
 ## 배포·검증
 
-[배포 안내](../../deploy/README.md)의 SSH 사용자 홈(`~`) 절차를 따른다.
-CI는 `git diff`로 앱/모니터링 두 플래그를 계산하고 공통 Compose·환경 예제·CI 변경은 둘 다 켠다.
-문서만 변경하면 필수 이름 `build`를 skipped로 남기며 배포하지 않는다.
-모니터링만 변경하면 설정 검증 후 네 모니터링 서비스를 함께 재생성하고 앱은 재시작하지 않는다.
-앱 변경에서만 `latest` 이미지를 빌드·게시·pull하고 app만 갱신한다.
-PostgreSQL·Redis·cloudflared는 CI가 재시작하지 않는다.
+[배포 안내](../../deploy/README.md)에 따라 운영 프로젝트와 네트워크를 공유하고 운영 앱만 수집한다.
+모니터링 설정은 `~/monitoring`에 두고 `~/prod`에서 해당 서비스에 수동 적용한다. CI는 설정을 검증한다.
 
 자동 검증은 다음과 같다. 실제 실행 결과는 완료 보고에 남기며 이 목록 자체가 통과 증거는 아니다.
 
@@ -135,8 +130,7 @@ DB_URL=jdbc:postgresql://localhost:5432/bunch_test ./gradlew clean build
 - 별도 운영 확인: 첫 기동 후 메트릭·로그 조회, 지정 시험 채널의 발생/복구 수신·링크,
   재생성 후 데이터 유지·RAM/디스크 여유. 실제 운영 웹훅 전송은 별도 승인 범위다.
 
-실패는 해당 명령에서 작업을 중단하며 수동 재실행한다. 이전 Git의 Compose·monitoring 파일을
-복원하는 절차는 배포 안내에 둔다. 자동 rollback·digest pinning·manifest·staging은 도입하지 않는다.
+실패 시 이전에 검증한 모니터링 설정을 복원한 뒤 해당 서비스를 다시 기동한다.
 
 ## 참고
 

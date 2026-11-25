@@ -504,10 +504,10 @@ AI 제목은 확정 전이라 만들지 않는다.
 
 | 곳 | 값 | 근거 |
 | --- | --- | --- |
-| 카드 | `id`, `title`, `startDate`, `endDate`(자정을 넘긴 묶음만), `photoCount`(남은 카드 사진 장수), `uploaders`, `coverImageUrl`(카드 사진 중 첫 번째의 원본 이미지) | 4.2.2 로직 1·2 |
-| 카드의 `uploaders` | 카드 사진을 올린 멤버(`memberId`, `nickname`, `imageUrl`). 올린 사진이 많은 멤버부터, 같으면 멤버 번호 순. 「외 N명」은 앱이 줄 너비로 줄인다 | 4.2.2 로직 1, 백엔드 가이드 1번 표 |
+| 카드 | `id`, `title`, `startDate`, `endDate`(자정을 넘긴 묶음만), `photoCount`(남은 카드 사진 장수), `uploaders`, `coverImageUrl`(카드 사진 중 첫 번째의 `thumbnail.jpg` signed URL) | 4.2.2 로직 1·2 |
+| 카드의 `uploaders` | 카드 사진을 올린 멤버(`memberId`, `nickname`, `imageUrl`). `imageUrl`은 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 대해 정확히 1800초 유효한 signed URL이다. 올린 사진이 많은 멤버부터, 같으면 멤버 번호 순. 「외 N명」은 앱이 줄 너비로 줄인다 | 4.2.2 로직 1, 백엔드 가이드 1번 표 |
 | 상세 | `id`, `title`, `photos` | 4.2.5 |
-| 상세의 사진 | `photoId`, `thumbnailUrl`(정사각 그리드), `imageUrl`(뷰어 원본 비율), `capturedDate`(항상 있음), `capturedTime`(없을 수 있음), `uploaders`(함께 올린 사진은 여러 명, 닉네임과 프로필 이미지는 지금 값) | 4.2.5 로직 3, 4.2.6 |
+| 상세의 사진 | `photoId`, `thumbnailUrl`(정사각 그리드용 `thumbnail.jpg` signed URL), `imageUrl`(뷰어용 `original.jpg` signed URL), `capturedDate`(항상 있음), `capturedTime`(없을 수 있음), `uploaders`(함께 올린 사진은 여러 명, 닉네임과 프로필 이미지는 지금 값). 두 URL 모두 정확히 1800초 유효하며 저장·재생하지 않는다 | 4.2.5 로직 3, 4.2.6 |
 
 ### 권한과 오류
 
@@ -538,7 +538,7 @@ AI 제목은 확정 전이라 만들지 않는다.
 | --- | --- | --- |
 | 멤버 칩의 순서 | 카드 사진을 많이 올린 멤버부터, 같으면 멤버 번호 순 | 명세서가 순서를 정하지 않음. 제목의 닉네임 순서와 같게 함 |
 | 접근 확인 | 번들 API가 쓰는 접근 불가 안내를 아는 확인을 쓴다(없는 번치는 403) | #50 이후의 방식. 사진 API는 옛 방식(없는 번치 404) |
-| 대표 사진 URL | 원본 이미지 | 카드 폭용 크기는 앱과 확정 |
+| 대표 사진 URL | `thumbnail.jpg`의 정확히 1800초 유효한 signed URL | 카드 폭용 크기는 앱과 확정 |
 | 응답 모양 | 목록 `{ bundles }`, 상세 `{ id, title, photos }` | 사진 목록 응답과 같은 형태(`ApiResponse` 안의 객체) |
 
 ## 초안 연결 (4.1.3, 4.3.11, 이슈 #73)

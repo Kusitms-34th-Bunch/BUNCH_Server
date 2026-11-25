@@ -39,9 +39,9 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
         // The members are deleted by the superclass hook, so release the test images first.
         jdbc.update(
             """UPDATE members SET profile_image_asset_id = NULL WHERE profile_image_asset_id IN
-                (SELECT id FROM image_assets WHERE public_id LIKE 'test-member-image/%')"""
+                (SELECT id FROM image_assets WHERE object_key LIKE 'test-member-image/%')"""
         )
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-member-image/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'test-member-image/%'")
     }
 
     @Test
@@ -97,7 +97,7 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
         val ownerId = member()
         val bunchId = create(ownerId).id
         val withImage = joined(ownerId, bunchId, "가가")
-        val imageUrl = "https://res.cloudinary.com/test/image/upload/test-member-image/profile.jpg"
+        val imageUrl = "profiles/test-member-image/profile.jpg"
         profileImage(withImage, imageUrl)
 
         members(ownerId, bunchId)
@@ -105,7 +105,7 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
             .andExpect(jsonPath("$.data[0].memberId").value(ownerId))
             .andExpect(jsonPath("$.data[0].imageUrl").doesNotExist())
             .andExpect(jsonPath("$.data[1].memberId").value(withImage))
-            .andExpect(jsonPath("$.data[1].imageUrl").value(imageUrl))
+            .andExpect(jsonPath("$.data[1].imageUrl").value(org.hamcrest.Matchers.containsString("/bunch-test/$imageUrl?")))
     }
 
     @Test
@@ -233,9 +233,8 @@ class BunchMemberListIntegrationTest : BunchIntegrationSupport() {
 
     private fun profileImage(memberId: Long, url: String) {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-member-image/${UUID.randomUUID()}",
             url
         )!!
         jdbc.update("UPDATE members SET profile_image_asset_id = ? WHERE id = ?", assetId, memberId)

@@ -20,15 +20,19 @@ HTTP API는 이 범위에 포함하지 않는다. 업로드 저장 규칙은 [�
 | 필드 | 타입·제약 |
 | --- | --- |
 | `id` | `Long`, identity, 기본값 `0` |
-| `publicId` | `String`, 필수·유일 |
-| `url` | `String`, 필수 |
+| `objectKey` | `String`, 필수·유일. R2 객체 경로만 저장하며 서명 URL은 저장하지 않는다 |
 | `createdAt` | `Instant`, 기본값 `Instant.now()` |
 
 `ImageAssetService.store`는 소유자 변경 트랜잭션 안에서만 호출한다.
-저장소 삭제는 `releaseAfterCommit(assetId)`로 요청하며, 외부 파일 삭제는 DB 변경이
-성공적으로 커밋된 뒤에만 시도한다.
+저장소 삭제는 `releaseAfterCommit(assetId)`로 요청하며, R2 객체 삭제는 DB 변경이
+성공적으로 커밋된 뒤에만 시도한다. 기존 ImageAsset ID와 소유 FK는 유지한다.
 
 ### Photo
+
+`width`·`height`는 EXIF 회전 뒤 보이는 원본의 픽셀 크기다. 신규 업로드 검사 결과를 저장하며
+두 값 모두 양수이거나 둘 다 `null`이다. 기존 사진은 V56에서 `null`로 유지하고 직접 이전 때 채울 수 있다.
+썸네일의 정사각형 크기를 저장하지 않는다.
+
 
 Photo는 번치 사진함의 한 기록이다. 실제 파일은 `ImageAsset`가 가리키며, Photo가
 그 자산을 소유한다.
@@ -184,109 +188,106 @@ ImageAsset 삭제 시 서비스는 after-commit callback에서 `REQUIRES_NEW` tr
 restrictive FK로 참조 중인지 DB가 최종 판단한다.
 
 - FK SQLSTATE `23503`이면 자산을 보존하고 외부 파일을 삭제하지 않는다.
-- 다른 정리 오류는 자산 ID만 로그에 남긴다. 이미 성공한 owner transaction은
-  실패로 보고하거나 rollback하지 않는다.
-- 자산 DB 행 삭제가 실제로 커밋된 뒤에만 `storage.delete(publicId)`를 호출한다.
+- 다른 정리 오류는 이미 성공한 owner transaction을 실패로 보고하거나 rollback하지
+  않는다.
+- 자산 DB 행 삭제가 실제로 커밋된 뒤에만 `storage.delete(objectKey)`를 호출한다.
 - 외부 파일 삭제 실패는 owner 변경을 되돌리지 않는다.
 
 이 방식은 미래 retaining table을 ImageAsset에 restrictive FK로 연결하기만 해도
 참조 카운터나 테이블 목록을 수정하지 않고 파일 보존을 적용한다. 새 업로드는
-새 public ID를 생성하며 삭제한 public ID로 자산을 재생성하거나 파일을 덮어쓰지 않는다.
-공유 파일은 기존 자산 ID의 FK로 연결한다. 파일 삭제 실패는 public ID만 기록하며
-자동 재시도·정리 배치는 추가하지 않는다.
+새 UUID object key를 생성하며 삭제한 key로 자산을 재생성하거나 파일을 덮어쓰지 않는다.
+공유 파일은 기존 자산 ID의 FK로 연결한다. 자동 URL 캐시·URL 갱신 API·정리 배치는
+추가하지 않는다.
 
 ## 기존 프로필 이전
 
-V5는 members·bunches의 기존 public ID/URL 쌍을 검사하고 같은 public ID가 같은
-URL을 가리킬 때 하나의 ImageAsset으로 백필한다. 한쪽만 있는 쌍이나 URL 충돌은
-전체 마이그레이션을 실패시키고 기존 스키마·데이터를 보존한다. 재업로드 없이
-nullable `profile_image_asset_id`를 연결한 뒤 직접 저장 컬럼을 제거한다. 기본 이미지는
-FK가 null이고 API `imageUrl`도 null이다. 기존 URL 문자열은 그대로 응답한다.
+R2 이전은 별도 준비 SQL과 전환 Flyway로 나눈다. 준비 단계는 nullable `object_key`를
+추가하고 기존 자산 ID·FK를 보존하며, 전환 단계는 누락 key를 거부한 뒤 기존 URL·public ID
+저장을 제거한다. 한쪽만 있는 자산이나 key 충돌은 전체 전환을 실패시키고 기존 스키마·데이터를
+보존한다. 프로필은 nullable `profile_image_asset_id`를 계속 사용하고 기본 이미지는
+FK와 API `imageUrl`이 모두 `null`이다. 세부 순서와 복구는 [R2 이미지 이전 문서](../r2-migration.md)를 따른다.
 
-프로필의 JPEG·정사각형·크기·메타데이터 제거 검증은 기존 저장소 처리를 유지한다.
+프로필의 JPEG·정사각형·크기·메타데이터 제거 검증은 기존 저장소 처리를 유지하며,
+저장 객체는 `profiles/<UUID>/profile.jpg` 한 개다.
 사진함의 일반 이미지 입력에는 프로필 검증 규칙을 적용하지 않는다. 이미지 저장만
 실패하면 가입은 기본 이미지로 완료하고, 번치 변경 실패 시 기존 이미지를 유지한다.
 
-## 사진함 이미지 저장소
+## 사진함·프로필 이미지 저장소
 
-사진함의 이미지 파일은 `com.bunch.global.image.PhotoImageStorage`가 `photos/` 경로로
-업로드·삭제한다. 프로필의 `ProfileImageStorage`(JPEG·정사각형·1024px·5MB·`profiles/`)는
-바꾸지 않으며 사진함에 프로필 규칙을 적용하지 않는다. 사진함 업로드 API와 해시 계산·중복
-병합은 #30의 범위이고, 이 저장소는 #30이 쓸 부품만 제공한다.
+최종 런타임 저장소는 비공개 R2 하나다. 설정 계약은 `R2_ENDPOINT`(버킷명 제외),
+`R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`이며 공개 `r2.dev`, Custom Domain,
+외부 URL 호환 계층은 사용하지 않는다. DB의 `ImageAsset`에는 `objectKey`만 저장하고
+기존 자산 ID와 FK를 유지한다.
 
-### 입력 검증
+객체 경로는 다음과 같이 고정한다.
 
-`inspect(file)`는 업로드 바이트를 디코딩하지 않고 검사해 `PhotoImage`(바이트, 가로, 세로)를
-반환한다. 바이트는 재인코딩하지 않고 받은 그대로 돌려주므로 호출자는 이 바이트로 SHA-256을
-한 번만 계산하고, 같은 사진이 아닐 때만 `upload`를 호출한다.
+- 사진: `photos/<UUID>/original.jpg`와 같은 디렉터리의 `thumbnail.jpg`.
+- 프로필: `profiles/<UUID>/profile.jpg` 한 객체. 기존 프로필 JPEG·정사각형·1024px·5MiB·메타데이터
+  제거 규칙은 유지한다.
 
-| 항목 | 규칙 | 거부 사유 |
-| --- | --- | --- |
-| Content-Type | `image/jpeg`만 허용한다 | `UNSUPPORTED_FORMAT` |
-| 크기 | 1장 30MiB(30 × 1024 × 1024바이트) 이하. 선언된 크기와 무관하게 30MiB + 1바이트까지만 읽는다 | `TOO_LARGE` |
-| JPEG 구조 | SOI로 시작해 EOI로 끝나며 마커 세그먼트 길이가 파일 안에 있어야 한다. 구조가 깨지면 추측하지 않고 거부한다 | `UNSUPPORTED_FORMAT` |
-| 해상도 | 프레임 헤더가 선언한 긴 변이 `photo-image.max-dimension`(기본 4096) 이하. 정사각형 제한은 없다. 픽셀은 디코딩하지 않으므로 작은 파일이 거대한 래스터를 선언해도 메모리를 쓰지 않는다 | `RESOLUTION_EXCEEDED` |
-| 위치 메타데이터 | EXIF의 GPS IFD 포인터(0x8825)나 XMP의 위치 속성(`exif:GPS*`, `Iptc4xmpCore:Location`, `Iptc4xmpExt:LocationCreated`·`LocationShown`, `photoshop:City`·`State`·`Country`)이 남아 있으면 거부한다 | `LOCATION_METADATA` |
+### 입력 검증과 메모리 경계
 
-모든 거부는 `PhotoImageRejectedException`(`ErrorCode.INVALID_INPUT`)이며 `reason`으로
-사유를 구분한다. 같은 파일을 다시 보내도 성공할 수 없으므로 #30은 재시도 불가로 응답하고,
-사유별 사진함 오류 코드는 #30이 정한다.
+`PhotoImageStorage.inspect(file)`는 픽셀을 디코딩하지 않고 JPEG 형식·구조·크기·헤더 해상도·
+위치 메타데이터를 검사해 `PhotoImage`를 반환한다. 보관본 바이트는 재인코딩하지 않고 그대로
+유지하므로 파일 해시도 유지된다. 사진 입력은 30MiB 이하이고, 헤더가 선언한 긴 변은 4096px
+이하여야 하며, EXIF/XMP 위치 정보가 남아 있으면 거부한다. 프로필 입력은 기존 정제 규칙을
+그대로 따른다.
 
-- 명세서 3.2.2는 앱이 위치 메타데이터(EXIF·XMP 포함)를 지우고 긴 변 2560px로 줄여 올린다고
-  정한다. 서버는 지우지 않고 남아 있으면 거부한다. 파일을 다시 인코딩하면 30MB 이미지를
-  통째로 디코딩해야 하고 해시도 달라지기 때문이다.
-- IPTC(APP13) 위치 필드와 EXIF 안에 내장된 미리보기 이미지는 검사하지 않는다.
-- 픽셀을 디코딩하지 않으므로 JPEG 헤더만 정상이고 데이터가 손상된 파일은 이 단계에서 걸러지지
-  않는다. 외부 저장소가 처리하지 못하면 업로드 실패로 나타난다.
-- 허용 형식은 현재 JPEG뿐이다. 명세서 3.2.2는 앱이 JPEG·PNG·HEIC·WebP를 고를 수 있다고 하므로
-  앱이 서버로 JPEG만 보내는지 확정 대기다. HEIC·WebP를 서버가 받으려면 새 의존성이 필요하다.
+기존 검사 범위와 동일하게 IPTC(APP13) 위치 필드와 EXIF에 내장된 미리보기 이미지는 검사하지
+않는다. 원본 바이트 보존은 이 메타데이터까지 제거한다는 보장이 아니며, 검사 확장은 별도 정책
+확정과 회귀 검증이 필요하다.
 
-### 업로드와 삭제
+`ImageUploadLimiter`는 프로세스 전체에서 두 개의 업로드만 허용한다. `PhotoController`의
+`inspect`부터 업로드 완료까지와 `ProfileImageStorage`의 정제부터 R2 PUT까지 같은 경계를
+공유하므로 애플리케이션이 보유하는 업로드 바이트의 최대치는 60MiB다. 이는 multipart 요청
+파싱 한도나 디스크 임시파일 임계값을 새로 정하는 설정이 아니다. multipart 파싱은 서블릿의
+기존 정책과 기본 디스크 임계값을 따르며, permit을 얻기 전에 추가로 전체 바이트를 메모리에
+읽지 않는다. 단, 가입 멱등성 fingerprint를 위한 기존 5MiB 이하 프로필 읽기는 예외다.
+번치 프로필 저장의 멱등 지문은 전체 파일을 추가로 보관하지 않고 8KiB 버퍼로 해시한다.
 
-- `upload(image)`는 `photos/{UUID}` public ID로 `overwrite=false` 업로드한다. 응답의 HTTPS URL,
-  public ID, `resource_type=image`, `format=jpg`, 가로·세로가 보낸 값과 같은지 확인한다.
-- 업로드가 실패하거나 응답이 맞지 않으면 생성한 public ID의 삭제를 시도하고
-  `PHOTO_IMAGE_STORAGE_FAILED`(`PHOTO_007`, 503)로 응답한다. 프로필의 `IMAGE_001`과 구분한다.
-- 연결 3초, 읽기 `photo-image.read-timeout-seconds`(기본 60초)로 30MB 업로드를 허용한다.
-  리다이렉트는 따라가지 않는다. 자격 증명이 없거나 업로드 주소가 안전하지 않으면 원격 호출 없이
-  실패하며 애플리케이션 기동은 막지 않는다.
-- `delete(publicId)`는 예외를 던지지 않는다. 이미 없는 파일은 성공으로 보고 실패하면 public ID만
-  로그에 남긴다. 실패한 삭제의 재시도는 별도 이슈(이미지 파일 삭제 재시도)에서 다룬다.
-- 요청마다 최대 30MiB를 서버 메모리로 읽는다. 동시 업로드 한도와 컨테이너 메모리는 운영 환경
-  점검에서 정한다.
+`ImageDecodeLimiter`도 프로세스 전체 두 permit을 공유하며 fingerprint, 품질 계산, 앱 입력
+축소, 프로필 정제, 사진 썸네일 생성을 함께 제한한다. 새 이미지 라이브러리는 추가하지 않는다.
+
+### 썸네일과 업로드
+
+`PhotoImageStorage.upload`는 DB transaction 밖에서 다음을 한 번 수행한다.
+
+1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 300px이고 작은
+   이미지는 확대하지 않으며 JPEG 품질은 75다.
+2. 원본을 `original.jpg`로, 방금 만든 썸네일을 `thumbnail.jpg`로 R2에 PUT한다.
+
+썸네일은 큐나 별도 비동기 작업으로 만들지 않는다. JPEG 전체를 대상으로 ImageIO의 bounded
+source subsampling을 적용해 디코딩한 뒤 중앙을 잘라 최종 크기로 줄인다. 따라서 crop 바깥의
+손상도 검출 대상이며, 원본 보관본의 바이트와 해시는 이 과정에서 바뀌지 않는다. 두 PUT 중
+하나라도 실패하면 생성한 사진 객체를 보상 정리하고 업로드 실패로 처리한다.
+
+프로필은 `ProfileImageStorage`가 기존 JPEG 정제 결과를 `profiles/<UUID>/profile.jpg`로
+PUT한다. 사진·프로필 모두 외부 저장소 I/O는 DB transaction 밖에서 실행하며, DB 자산 행
+삭제와 R2 객체 삭제는 커밋 후에만 시도한다. restrictive FK가 공유 자산을 보호한다.
 
 ### 표시 URL
 
-`PhotoImageUrls`는 저장된 `ImageAsset.url`에서 표시용 주소를 계산하며 따로 저장하지 않는다.
-원본과 썸네일 파일을 따로 두지 않는다(PRD §7 확정 사항).
+표시 URL은 `ImageUrls.full(key)`, `ImageUrls.thumbnail(key)`, `ImageUrls.profile(key?)`가
+응답 시 로컬에서 만든다. 각 URL은 기존 유스케이스의 인증·소속·공개 범위 확인을 통과한
+뒤에만 정확히 1800초 유효하게 서명한다.
 
-- 전체 크기: 저장된 URL 그대로다. 보관된 이미지가 곧 전체 크기다.
-- 정사각 썸네일: URL의 `/image/upload/` 바로 뒤에 `c_fill,w_N,h_N/` 변환을 넣는다. 기본 300,
-  허용 범위 1~2560이다. 변환할 수 없는 URL(업로드 구간이 없는 주소)은 그대로 돌려준다.
+- 사진함 목록·카드·Feed는 `thumbnail.jpg`를 기존 `thumbnailUrl` 또는 `coverImageUrl` 필드로
+  제공한다.
+- 사진함·발행 Bundle 상세는 `original.jpg`를 기존 `imageUrl` 필드로 제공한다.
+- 프로필·멤버·업로더 이미지는 `profile.jpg`를 기존 `imageUrl` 필드로 제공한다.
+- 기존 필드명과 `null`/기본 이미지 fallback을 유지하고 `objectKey`는 외부 응답에 내보내지
+  않는다. 서명 URL은 DB·멱등 재생 결과·이벤트에 저장하거나 재생하지 않는다.
+- URL이 만료되면 전용 refresh API를 만들지 않고 같은 기존 조회 API를 다시 호출한다.
 
-### 설정
-
-| 키 | 기본값 | 의미 |
-| --- | --- | --- |
-| `spring.servlet.multipart.max-file-size` / `max-request-size` | 30MB / 31MB (#33에서는 6MB / 7MB였고 #30의 업로드 API와 함께 올렸다) | 서버 전체 업로드 한도. 30MB 사진을 받기 위한 값이다. 모든 파일 업로드에 적용되므로 프로필·번치 이미지 담당과 배포 담당의 확인이 필요하다. 프로필 저장소는 코드에서 5MB 검사를 유지한다 |
-| `photo-image.max-dimension` | 4096 | 허용하는 긴 변 상한(px) |
-| `photo-image.read-timeout-seconds` | 60 | 외부 저장소 응답 대기 시간 |
-| `cloudinary.*` | 기존 설정 | 프로필 저장소와 같은 자격 증명을 쓴다 |
+세부 이전 순서와 복구는 [R2 이미지 이전 문서](../r2-migration.md)를 따른다. 준비 단계와
+전환 Flyway는 분리하고, 이미 적용된 Flyway는 수정하지 않는다.
 
 ### 저장소 테스트
 
-`JpegHeaderInspectorTest`, `PhotoImageStorageTest`, `PhotoImageUrlsTest`는 DB와 실제 소켓 없이
-실행한다. 외부 저장소 호출은 `MockRestServiceServer`로 대체해 업로드 요청 형식, 응답 검증 실패 시
-정리 호출, 삭제, 설정 주입을 검증한다. 경계값(30MiB, 긴 변 4096px)과 위치 메타데이터 거부도 포함한다.
-
-### 확정 대기
-
-- 이미지 접근 방식: 현재는 누구나 주소로 볼 수 있는 공개 URL이다. PRD §7-13은 권한 확인 후
-  짧은 유효기간의 URL을 권장하고 명세서에는 이 방식이 없다. 사진함 목록 API(#35)를 확정하기
-  전에 정한다.
-- 서버가 받는 형식(위 허용 형식), 해상도 상한 값, 썸네일 크기, 위치 메타데이터를 거부할지
-  지울지는 앱의 처리 범위 답에 따라 바뀔 수 있다.
-- 사용 중인 Cloudinary 플랜의 30MB 업로드 가능 여부는 확인하지 못했다.
+저장소 테스트는 DB와 실제 R2 없이 로컬 stub으로 R2 PUT·부분 실패 보상·삭제 경계를 검증한다.
+입력 30MiB/헤더 4096px 경계, EXIF 방향·위치 메타데이터, 두 limiter의 동시성, 전체 JPEG를
+bounded source subsampling으로 읽는 썸네일, 300px·JPEG 품질 75, object key 경로와 정확한 1800초 서명
+계약을 포함한다.
 
 ## 테스트 기준
 
