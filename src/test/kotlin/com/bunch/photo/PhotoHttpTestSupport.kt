@@ -193,7 +193,7 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         assertThat(uri.scheme).isEqualTo("https")
         assertThat(uri.host).isEqualTo("00000000000000000000000000000000.r2.cloudflarestorage.com")
         assertThat(uri.path).startsWith("/bunch-test/").endsWith("/$objectKey")
-        assertThat(uri.rawQuery).contains("X-Amz-Expires=1800", "X-Amz-Signature=")
+        assertThat(uri.rawQuery).contains("X-Amz-Expires=7200", "X-Amz-Signature=")
     }
 
     protected fun ResultActions.expectError(error: ErrorCode): ResultActions =

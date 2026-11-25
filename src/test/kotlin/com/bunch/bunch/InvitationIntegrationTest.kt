@@ -182,7 +182,7 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         assertThat(replay.outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(replay.bunch.id).isEqualTo(first.bunch.id)
         assertThat(replay.bunch.name).isEqualTo(newName)
-        assertThat(replay.bunch.imageUrl).contains("/bunch-test/${currentImage.objectKey}?").contains("X-Amz-Expires=1800")
+        assertThat(replay.bunch.imageUrl).contains("/bunch-test/${currentImage.objectKey}?").contains("X-Amz-Expires=7200")
         assertError(ErrorCode.INVALID_INVITATION) { join(newcomer, invite) }
     }
 
