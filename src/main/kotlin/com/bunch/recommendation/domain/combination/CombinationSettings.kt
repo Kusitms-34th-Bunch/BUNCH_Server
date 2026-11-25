@@ -17,6 +17,11 @@ import kotlin.math.abs
  * morning starts at [dayStartHour], the afternoon at [afternoonStartHour] and the night at [nightStartHour], and the
  * night goes on to the start of the next day.
  *
+ * The gaps that cut a bundle (2-2, 3-2): [peopleChangeGap] is the gap after which a change of all the members is a
+ * change of the bunch (1 hour); [slotChangeGap] is the gap after which a change of the part of the day cuts (2 hours);
+ * [sameSlotGap] is the gap after which even the same part of the day is cut (4 hours). [minBoundaryGap] is the gap that
+ * makes a boundary at all (20 minutes).
+ *
  * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds).
  *
  * [togetherWindow] is how close in time the photos of two different members must be to make a moment they took together
@@ -40,8 +45,9 @@ data class CombinationSettings(
     val dayStartHour: Int = 5,
     val afternoonStartHour: Int = 12,
     val nightStartHour: Int = 18,
-    val continuityShort: Duration = Duration.ofHours(2),
-    val continuityLong: Duration = Duration.ofHours(4),
+    val peopleChangeGap: Duration = Duration.ofHours(1),
+    val slotChangeGap: Duration = Duration.ofHours(2),
+    val sameSlotGap: Duration = Duration.ofHours(4),
     val minBoundaryGap: Duration = Duration.ofMinutes(20),
     val minPhotos: Int = 6,
     val minUploaders: Int = 2,
@@ -125,19 +131,20 @@ data class CombinationSettings(
         }
     }
 
-    /** The gap that still joins photos of this pace, or null for a day pace, which is not cut by time (3-5). */
-    fun continuityOf(pace: Pace): Duration? = when (pace) {
-        Pace.SHORT -> continuityShort
-        Pace.LONG -> continuityLong
-        Pace.DAY -> null
-    }
-
     /** The part of the day a local time is in. A part starts at its hour and ends before the next one (3-1). */
     fun dayPartOf(time: LocalTime): DayPart = when (time.hour) {
         in dayStartHour until afternoonStartHour -> DayPart.MORNING
         in afternoonStartHour until nightStartHour -> DayPart.AFTERNOON
         else -> DayPart.NIGHT
     }
+
+    /** The part of the day most of [photos] were taken in; a tie goes to the earlier part (3-1). */
+    fun mainDayPartOf(photos: Collection<PreparedPhoto>): DayPart =
+        photos.mapNotNull { it.localTime }
+            .groupingBy { dayPartOf(it.toLocalTime()) }
+            .eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<DayPart, Int>> { it.value }.thenBy { it.key.ordinal })
+            .first().key
 
     /** The photos on the card of a bundle of [photoCount] pictures, or null below the smallest bundle (8-1). */
     fun cardSizeFor(photoCount: Int): Int? = cardSizeSteps.lastOrNull { photoCount >= it.fromPhotos }?.cardSize

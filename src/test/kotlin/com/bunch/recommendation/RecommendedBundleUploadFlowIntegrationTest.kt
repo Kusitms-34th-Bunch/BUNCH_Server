@@ -80,7 +80,7 @@ class RecommendedBundleUploadFlowIntegrationTest : PhotoUploadTestSupport() {
         assertThat(looked).isEqualTo(1)
         val saved = bundles.findByBunchId(bunchId).single()
         assertThat(saved.dayKey).isEqualTo(day)
-        assertThat(saved.title).contains("오전 식사")
+        assertThat(saved.title).isEqualTo("10월 19일 오전")
         assertThat(saved.photoCount).isEqualTo(8)
         assertThat(saved.uploaderCount).isEqualTo(2)
         assertThat(bundlePhotos.findByBundleIdIn(listOf(saved.id)).map { it.photoId })

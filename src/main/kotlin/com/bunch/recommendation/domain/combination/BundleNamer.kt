@@ -20,8 +20,7 @@ import java.time.LocalDate
  * Nothing here reads the time of the clock: [today] is given, so the same bundles give the same titles.
  */
 class BundleNamer(
-    settings: CombinationSettings = CombinationSettings(),
-    private val activities: GeneralActivities = GeneralActivities(settings)
+    private val settings: CombinationSettings = CombinationSettings()
 ) {
     /** The bundles of [day], each with its title. The bundles come back in the order they were given. */
     fun name(bundles: List<RecoBundle>, day: DayPreparation.Ready, today: LocalDate): List<RecoBundle> {
@@ -53,7 +52,7 @@ class BundleNamer(
     // date only).
     private fun dayPartOf(bundle: RecoBundle, photos: Map<Long, PreparedPhoto>): DayPart? {
         val inBundle = bundle.photos.mapNotNull { photos[it.photoId] }
-        return if (inBundle.any { it.localTime != null }) activities.slotOf(inBundle) else null
+        return if (inBundle.any { it.localTime != null }) settings.mainDayPartOf(inBundle) else null
     }
 
     private fun dateOf(dayKey: LocalDate, today: LocalDate): String {

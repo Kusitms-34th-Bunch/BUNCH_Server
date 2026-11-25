@@ -1,9 +1,9 @@
 package com.bunch.recommendation.domain.combination
 
 /**
- * How long a gap may be before photos of one event or one activity count as two (recommended bundle specification 3-5).
- * The gap itself is a setting, see `CombinationSettings.continuityOf`. The constants run from the shortest to the
- * longest, so [longer] is the one with the bigger ordinal.
+ * How long an event or an activity lasts, from the shortest to the longest, so [longer] is the one with the bigger
+ * ordinal. The codes of the events and the activities carry it; the cutting of the general bundles does not use it any
+ * more (it cuts by the gaps of the settings alone).
  */
 enum class Pace {
     SHORT,

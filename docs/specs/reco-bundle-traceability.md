@@ -29,7 +29,7 @@
 | F6 | 품질 | `ImageQuality`(긴 변 1024px 회색조, 흔들림·노출·해상도), `PhotoRecoFeature.quality` | `PhotoUploadQualityIntegrationTest`, `PhotoRecoFeatureQualityMigrationIntegrationTest` | 구현됨 | D3·L3 법무 확인 대기. 업로드 때 동기 계산, 비동기 분리는 별도 이슈 |
 | F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 업로드 필드 `deviceModel`(`photo_reco_feature.device_model`), `capturedMillis`(3자리, `photos.captured_millis`). R1용 해상도는 서버가 읽어 `photos.width`·`height`에 저장 | `PhotoUploadMillisModelIntegrationTest`, `PhotoMillisModelMigrationIntegrationTest` | 부분 구현(#204 저장, #218 추천 입력 연결) | 렌즈·연사 ID·EXIF 고유 ID는 받지 않는다(D4·L2 법무 대기). 추천 입력(`RecoPhoto`)에 연결하는 것은 후속. 앱 협의 필요 |
 | R1 | 중복 묶음 | `DuplicateGrouper(TimeNormalizer, burstMaxGap)`: 밀리초+기기 모델+해상도가 모두 있고 같음, 같은 업로더·같은 기기 모델·2초 안의 연사. 이미지 지문은 쓰지 않는다. 같은 파일은 업로드 때 한 사진으로 합쳐짐 | `DuplicateGrouperTest`, `RecoPhotoInputIntegrationTest` | 구현됨(#218) | 값이 없으면 같다고 보지 않음(C8). 지문은 날짜 빌리기·시계 보정·카드 점수가 아직 써서 입력에 남아 있고, 그 단계의 재작성 이슈에서 삭제 |
-| R2 | 함께 찍은 순간 | `TogetherMoments`(서로 다른 멤버의 쓸 수 있는 사진이 `togetherWindow` 안에 있는 순간. 같은 중복 묶음을 여러 멤버가 올렸으면 가장 먼저 올린 멤버 한 명의 사진으로 봄) | `TogetherMomentsTest` | 구현됨(#222) | 번들·나누기 판단에 연결하는 것은 #223, 사진 고르기·커버는 후속 |
+| R2 | 함께 찍은 순간 | `TogetherMoments`(서로 다른 멤버의 쓸 수 있는 사진이 `togetherWindow` 안에 있는 순간. 같은 중복 묶음을 여러 멤버가 올렸으면 가장 먼저 올린 멤버 한 명의 사진으로 봄) | `TogetherMomentsTest` | 구현됨(#222) | 번들·나누기 판단에는 #223에서 연결됨, 사진 고르기·커버는 후속 |
 
 ### 시간 기준 (새 기준 「시간 기준」)
 
@@ -37,17 +37,18 @@
 | --- | --- | --- | --- | --- | --- |
 | 하루·시간대 | 05:00~다음 날 05:00, 오전·오후·밤 | `CombinationSettings`(`dayStartHour`, `afternoonStartHour`, `nightStartHour`), `TimeNormalizer` | `CombinationSettingsTest`, `TimeNormalizerTest` | 구현됨 | |
 | 경계 20분 | 공백 20분 이상 | `CombinationSettings.minBoundaryGap` | `CombinationSettingsTest` | 구현됨 | 나누기 규칙은 아래 행 |
-| 사람 바뀜 1시간 | 사람 바뀜 공백 | 없음 | — | 미구현 | 후속 |
-| 시간대 바뀜 2시간 / 같은 시간대 4시간 | | `continuityShort`, `continuityLong`(활동 성격별로 씀) | `CombinationSettingsTest` | 교체 예정 | 새 기준은 시간대 기준으로 쓴다. 후속 |
+| 사람 바뀜 1시간 | 사람 바뀜 공백 | `CombinationSettings.peopleChangeGap` | `CombinationSettingsTest`, `GeneralPeopleTimeSplitterTest` | 구현됨(#223) | |
+| 시간대 바뀜 2시간 / 같은 시간대 4시간 | | `CombinationSettings.slotChangeGap`, `sameSlotGap` | `CombinationSettingsTest`, `GeneralPeopleTimeSplitterTest` | 구현됨(#223) | 이전 `continuityShort`·`continuityLong`(활동 성격별)을 대신함 |
 | 함께 찍은 순간 30분 | | `CombinationSettings.togetherWindow`(30분, 정확히 30분은 포함) | `CombinationSettingsTest` | 구현됨(#222) | "30분 안"의 경계 포함 여부는 기획 확인 |
 
 ### 일반 번들 (새 기준 「일반 번들 기준」)
 
 | 항목 | 새 기준 | 현재 구현 | 테스트 | 상태 | 이슈 / 비고 |
 | --- | --- | --- | --- | --- | --- |
-| 묶기·나누기 1~5순위 | 사람 바뀜 → 시간대 바뀜 → 같은 시간대 4시간 → 묶음 → 40장 분할 | `GeneralBundleFinder`, `GeneralSegmenter`, `GeneralChunker`, `GeneralPeopleTimeSplitter`, `GeneralBigSplitter`, `GeneralSectionBalancer`(활동 라벨 기반) | `GeneralBundleFinderTest` 등 | 교체 예정 | 후속 |
-| 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄 | 없음 | — | 미구현 | 후속 |
-| 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility.isRecommendable`(성립 조건 `isEnough` + 함께 찍은 순간 1번 이상) | `BundleEligibilityTest`, `TogetherMomentsTest` | 계산 구현됨(#222), 번들 반영은 후속 | 번들에 연결하고 "활동 미상은 번들이 아님" 규칙을 지우는 것은 #223 |
+| 묶기·나누기 1~4순위 | 사람 바뀜 → 시간대 바뀜 → 같은 시간대 4시간 → 묶음 | `GeneralBundleFinder`, `GeneralChunker`, `GeneralSegmenter`, `GeneralPeopleTimeSplitter` | `GeneralBundleFinderTest`, `GeneralPeopleTimeSplitterTest`, `GeneralSegmenterTest`, `GeneralChunkerTest` | 구현됨(#223) | 활동 라벨 기반 클래스(`GeneralActivities`, `GeneralActivitySections`, `GeneralSectionBalancer`, `GeneralSection`) 삭제 |
+| 묶기·나누기 5순위 | 40장 초과 시 서브 번들 | `GeneralBigSplitter` | `GeneralBigSplitterTest` | 부분(#223) | 나누는 곳의 판단이 아직 "양쪽 성립"(추천 조건이 아님). 추천 조건으로 바꾸는 것은 #227 |
+| 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄 | 없음 | — | 미구현 | #227 |
+| 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility.isRecommendable`(성립 조건 `isEnough` + 함께 찍은 순간 1번 이상), `GeneralCounter.isRecommendable` | `BundleEligibilityTest`, `TogetherMomentsTest`, `GeneralBundleFinderTest` | 구현됨(#222 계산, #223 번들 반영) | 번들 판단과 2·3순위 나누기가 쓴다. "활동 미상은 번들이 아님" 규칙은 삭제됨 |
 | 이벤트 번들 | 만들지 않음 | `EventFinder` 등 | `EventFinderTest` 등 | 삭제됨 | #199 |
 
 ### 사진 고르기와 이름 (새 기준 「사진 고르기」)
@@ -90,12 +91,12 @@
 
 ### 케이스 시나리오 (새 기준 「케이스」, V10)
 
-새 기준의 케이스 G1~G25, R1~R5(R4-1 포함), C1~C8, X1~X10은 테스트 시나리오로 옮긴다. 현재 구현의 시나리오 테스트는 이전판의 케이스(E, G, R, C, X)를 기준으로 하며, 새 기준 기준의 시나리오 테스트는 아직 없다.
+새 기준의 케이스 G1~G25, R1~R5(R4-1 포함), C1~C8, X1~X10은 테스트 시나리오로 옮긴다. 일반 번들은 1~4순위가 정하는 케이스를 `GeneralBundleFinderTest`가 새 기준으로 확인한다(#223). 나머지 케이스를 한곳에 모은 시나리오 테스트는 아직 없다.
 
 | 묶음 | 케이스 | 상태 | 이슈 |
 | --- | --- | --- | --- |
-| 일반 번들 | G1~G25 | 미구현(시나리오 테스트 없음) | 일반 번들 재작성 이슈에서 함께 |
-| 반복 활동 | R1~R5 | 미구현 | 같음 |
+| 일반 번들 | G1~G25 | 일부: 1~4순위가 정하는 케이스(G1~G17, G22, G24, G25)는 `GeneralBundleFinderTest` | 가장자리 정리(G18·G23)·5순위 확인과 G1~G25 시나리오 전체는 #227 |
+| 반복 활동 | R1~R5 | 일부: R1·R2·R4·R4-1은 `GeneralBundleFinderTest` | 시나리오 전체는 #227 |
 | 사진 고르기 | C1~C8 | 미구현 | 사진 고르기 이슈에서 함께 |
 | 예외 | X1~X10 | 일부(위 표) | 각 이슈에서 함께 |
 
@@ -114,7 +115,7 @@
 | 7 | 제목 | 상황별 문장 풀, 15자 이내, 한 번 뽑으면 고정(4.2.2) | 「10월 19일 밤」(날짜 + 시간대) | 초안 기본 제목(4.1.4)도 바뀜 |
 | 8 | 카드 정보 | 대표 사진·제목·멤버 닉네임 칩·사진 수·날짜(4.2.2) | 장 수·참여 멤버 수·시간 범위(D5) | 앱 화면 변경 |
 | 9 | 시각 없는 사진 | 업로드 묶음 → 업로드 멤버 → 사진 수(4.2.7-4) | 업로드 묶음 → 그날 번들이 하나면 그 번들 → 안 넣음(X3) | 일부 사진이 추천에서 빠짐 |
-| 10 | 시각이 하나도 없는 날 | 하루를 하나의 묶음으로 봄(4.2.7 예외) | 시각 없는 사진은 계산 제외(X3) | 경미 |
+| 10 | 시각이 하나도 없는 날 | 하루를 하나의 묶음으로 봄(4.2.7 예외) | 시각 없는 사진은 계산 제외(X3). 번들을 만들지 않음 | 경미 |
 | 11 | 메타데이터 전송 | 앱이 촬영 날짜·시간만 보내고 위치는 지움(3.2.2-3) | 기기 모델·렌즈·연사 ID·밀리초·고유 ID 추가(F7) | 앱 업로드 방식 변경, L2 법무 |
 | 12 | 첫 노출 시점 | 변경 후 5분 디바운스로 바로 반영(4.2.9-2) | 다음 날 05:00 이후(X6) | 당일 올린 사진이 바로 안 보임. 구현은 이미 새 기준 |
 

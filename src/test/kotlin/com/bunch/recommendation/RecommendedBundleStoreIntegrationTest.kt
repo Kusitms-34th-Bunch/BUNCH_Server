@@ -75,9 +75,9 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
 
         val saved = bundles.findByBunchId(bunchId).single()
         assertThat(outcome.created).isEqualTo(1)
-        assertThat(saved.title).isEqualTo("10월 19일 오전 식사")
+        assertThat(saved.title).isEqualTo("10월 19일 오전")
         assertThat(saved.kind).isEqualTo(BundleKind.GENERAL)
-        assertThat(saved.activity).isEqualTo(ActivityCode.MEAL)
+        assertThat(saved.activity).isNull()
         assertThat(saved.dayKey).isEqualTo(day)
         assertThat(saved.photoCount).isEqualTo(8)
         assertThat(saved.uploaderCount).isEqualTo(2)
@@ -143,7 +143,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         assertThat(after.id).isEqualTo(before.id)
         assertThat(after.createdAt).isEqualTo(before.createdAt)
         assertThat(after.visibleFrom).isEqualTo(before.visibleFrom)
-        assertThat(after.title).isEqualTo("2026년 10월 19일 오전 식사")
+        assertThat(after.title).isEqualTo("2026년 10월 19일 오전")
         assertThat(after.updatedAt).isEqualTo(later)
     }
 

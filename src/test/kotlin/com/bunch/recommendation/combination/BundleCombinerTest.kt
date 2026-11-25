@@ -73,24 +73,24 @@ class BundleCombinerTest {
     }
 
     @Test
-    fun `X7 photos the analysis of which failed give no activity and no bundle`() {
+    fun `X7 photos the analysis of which failed still make a bundle, because the content is not read`() {
         val failed = (1L..10L).map { shot(it, "10:%02d".format(it), member = 1 + it % 2, aiStatus = AiStatus.FAILED) }
 
-        val day = combine(failed).days.single()
+        val bundle = bundles(failed).single()
 
-        assertThat(day).isEqualTo(DayCombination.Bundled(LocalDate.parse("2026-10-19"), emptyList()))
+        assertThat(bundle.photoCount).isEqualTo(10)
     }
 
     // --- the general bundles (13-2) ---
 
     @Test
-    fun `a day of one activity is one general bundle with its card and its trace`() {
+    fun `a day of photos taken together is one general bundle with its card and its trace`() {
         val bundle = bundles(meals(1, "12:00", 8)).single()
 
         assertThat(bundle.kind).isEqualTo(BundleKind.GENERAL)
         assertThat(bundle.eventType).isNull()
         assertThat(bundle.establishedBy).isNull()
-        assertThat(bundle.activity).isEqualTo(MEAL)
+        assertThat(bundle.activity).isNull()
         assertThat(bundle.photoCount).isEqualTo(8)
         assertThat(onCard(bundle)).hasSize(8)
         assertThat(bundle.coverPhotoId).isEqualTo(onCard(bundle).first())
@@ -166,7 +166,7 @@ class BundleCombinerTest {
     fun `the year is in the title when the day is not of the year of the clock`() {
         val past = meals(1, "10:00", 8, date = "2025-10-19")
 
-        assertThat(bundles(past).single().title).isEqualTo("2025년 10월 19일 오전 식사")
+        assertThat(bundles(past).single().title).isEqualTo("2025년 10월 19일 오전")
     }
 
     @Test
@@ -181,8 +181,8 @@ class BundleCombinerTest {
                 .bundles.single().title
         }
 
-        assertThat(titles(lastYear)).isEqualTo("2026년 12월 30일 오전 식사")
-        assertThat(titles(thisYear)).isEqualTo("1월 1일 오전 식사")
+        assertThat(titles(lastYear)).isEqualTo("2026년 12월 30일 오전")
+        assertThat(titles(thisYear)).isEqualTo("1월 1일 오전")
     }
 
     @Test
@@ -203,8 +203,8 @@ class BundleCombinerTest {
         val nextYear = (BundleCombiner(clock = later).combine(photos).days.single() as DayCombination.Bundled)
             .bundles.map { it.title }
 
-        assertThat(now).containsExactly("10월 19일 오전 식사")
-        assertThat(nextYear).containsExactly("2026년 10월 19일 오전 식사")
+        assertThat(now).containsExactly("10월 19일 오전")
+        assertThat(nextYear).containsExactly("2026년 10월 19일 오전")
     }
 
     // --- the trace and the order (11, 1 principle 5) ---
