@@ -250,7 +250,6 @@ class AuthenticationHttpIntegrationTest @Autowired constructor(
         val pair = newSession()
         val token = signedWsToken(tokenProvider.getSessionId(pair.accessToken))
         listOf(
-            "/api/v1/auth/dev/token" to """{"nickname":"ws-rejected-${UUID.randomUUID()}"}""",
             "/api/v1/auth/reissue" to """{"refreshToken":"${pair.refreshToken}"}""",
             "/api/v1/auth/google/login" to """{"idToken":"not-a-jwt"}"""
         ).forEach { (path, body) ->

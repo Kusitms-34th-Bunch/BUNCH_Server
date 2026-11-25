@@ -209,9 +209,7 @@ class BundleFinalPublishIntegrationTest : BunchIntegrationSupport() {
     fun `gallery additions accept remaining capacity in selection order while library apply rolls back`() {
         val f = fixture()
         val sources = (1..21).map { number ->
-            val asset = assets.saveAndFlush(ImageAsset(
-                publicId = "capacity107/${UUID.randomUUID()}", url = "https://images.example/$number.jpg"
-            ))
+            val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
             assetIds += asset.id
             photos.saveAndFlush(Photo(
                 bunch = bunchRepository.findById(f.bunchId).orElseThrow(), imageAsset = asset,
@@ -246,9 +244,7 @@ class BundleFinalPublishIntegrationTest : BunchIntegrationSupport() {
     fun `two gallery requests racing for the last slot never exceed twenty photos`() {
         val f = fixture()
         val sourceIds = (1..20).map { number ->
-            val asset = assets.saveAndFlush(ImageAsset(
-                publicId = "race107/${UUID.randomUUID()}", url = "https://images.example/race$number.jpg"
-            ))
+            val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
             assetIds += asset.id
             photos.saveAndFlush(Photo(
                 bunch = bunchRepository.findById(f.bunchId).orElseThrow(), imageAsset = asset,
@@ -326,8 +322,7 @@ class BundleFinalPublishIntegrationTest : BunchIntegrationSupport() {
         val creator = member()
         val bunchId = create(publisher).id
         join(creator, issue(publisher, bunchId))
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "publish107/${UUID.randomUUID()}",
-            url = "https://images.example/107.jpg"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += asset.id
         val photo = photos.saveAndFlush(Photo(bunch = bunchRepository.findById(bunchId).orElseThrow(),
             imageAsset = asset, fileHash = "a".repeat(64), processingStatus = ProcessingStatus.READY))

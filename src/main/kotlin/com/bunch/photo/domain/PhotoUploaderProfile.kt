@@ -4,5 +4,5 @@ package com.bunch.photo.domain
 interface PhotoUploaderProfile {
     val memberId: Long
     val nickname: String?
-    val imageUrl: String?
+    val imageKey: String?
 }

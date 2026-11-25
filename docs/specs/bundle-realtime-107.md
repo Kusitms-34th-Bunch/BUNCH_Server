@@ -83,6 +83,11 @@ TYPE도 editing heartbeat를 대신하지 않으며, BEGIN은 typing의 3초 기
 `success/data/error`로 반환한다. 조회는 화면 입장으로 기록되지 않는다.
 구독을 먼저 완료한 뒤 GET으로 상태를 복구하고, 이후 topic 상태로 교체한다.
 
+presence의 `expiresAt`(기존 15초)는 presence 수명일 뿐 이미지 URL TTL이 아니다. 사진·참여자
+이미지가 포함된 snapshot/event는 기존 번들 권한 확인 뒤 UTC 정시 기준 2시간 후 만료되는 signed URL을 만들며,
+URL을 이벤트·DB·오프라인 replay에 저장하지 않는다. 이미지 URL이 만료되면 기존 REST snapshot을
+다시 호출한다.
+
 ```json
 {
   "members": [{"memberId": 12, "expiresAt": "2026-11-11T12:00:15Z"}],

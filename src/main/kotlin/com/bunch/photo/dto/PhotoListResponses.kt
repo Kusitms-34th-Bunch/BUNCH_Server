@@ -15,5 +15,7 @@ data class PhotoListItem(
     val capturedDate: LocalDate,
     val capturedTime: LocalTime?,
     val uploaderIds: List<Long>,
-    val usedInDraftBundle: Boolean
+    val usedInDraftBundle: Boolean,
+    val width: Int? = null,
+    val height: Int? = null
 )

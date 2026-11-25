@@ -732,10 +732,7 @@ class BundlePhotoPickLifecycleIntegrationTest : BunchIntegrationSupport() {
 
     private fun photo(bunchId: Long, vararg uploaderIds: Long): Photo {
         val asset = assets.saveAndFlush(
-            ImageAsset(
-                publicId = "bundle-pick-lifecycle/${UUID.randomUUID()}",
-                url = "https://images.example/bundle-pick-lifecycle/${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
         )
         ownedAssetIds += asset.id
         val saved = photos.saveAndFlush(

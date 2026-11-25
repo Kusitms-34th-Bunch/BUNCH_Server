@@ -1,5 +1,6 @@
 package com.bunch.kok.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchAccessNoticeRepository
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
@@ -36,6 +37,7 @@ import java.util.Base64
 
 @Service
 class KokService(
+    private val imageUrls: ImageUrls,
     private val access: FeedAccessService,
     private val members: MemberRepository,
     private val bunches: BunchRepository,
@@ -88,7 +90,7 @@ class KokService(
                     membershipId = it.id,
                     memberId = it.member.id,
                     nickname = it.member.nickname,
-                    imageUrl = it.member.imageUrl,
+                    imageUrl = imageUrls.profile(it.member.imageKey),
                     count = byMember[it.member.id] ?: 0L
                 )
             },

@@ -48,7 +48,7 @@ class MemberProfileService(
             throw ex
         } finally {
             // A file that was uploaded but not attached to the member is never kept.
-            if (!attached) images.delete(uploaded?.publicId)
+            if (!attached) images.delete(uploaded?.objectKey)
         }
     }
 

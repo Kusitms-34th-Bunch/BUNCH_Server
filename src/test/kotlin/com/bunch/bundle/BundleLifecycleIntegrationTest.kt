@@ -15,6 +15,7 @@ import com.bunch.bundle.dto.EditPublishedBundleRequest
 import com.bunch.bundle.dto.PublishedBundlePhotoInput
 import com.bunch.bundle.dto.BundleActor
 import com.bunch.bundle.dto.BundleSnapshot
+import com.bunch.bundle.dto.BundlePhotoResponse
 import com.bunch.bundle.dto.BundleTextRequest
 import com.bunch.bundle.dto.BundleDateRequest
 import com.bunch.bundle.dto.BundlePhotoChangesRequest
@@ -801,7 +802,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             "after-picker-move"
         )
         val replayed = bundleService.changePhotos(actor(owner), bunchId, draft.id, key, request)
-        assertThat(replayed.photos).isEqualTo(moved.photos)
+        assertThat(replayed.photos.withImagePaths()).isEqualTo(moved.photos.withImagePaths())
         assertThat(replayed.revision).isEqualTo(moved.revision)
         assertThat(replayed.photoChangeResult!!.replayed).isTrue()
         assertBundleError(ErrorCode.IDEMPOTENCY_CONFLICT) {
@@ -856,7 +857,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             )
         }
         val after = bundleService.get(owner, bunchId, draft.id)
-        assertThat(after.photos).isEqualTo(draft.photos)
+        assertThat(after.photos.withImagePaths()).isEqualTo(draft.photos.withImagePaths())
         assertThat(after.revision).isEqualTo(draft.revision)
         assertThat(after.updatedAt).isEqualTo(draft.updatedAt)
         assertThat(jdbc.queryForObject(
@@ -885,7 +886,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
                 bundleService.changePhotos(actor(owner), bunchId, draft.id, UUID.randomUUID(), request)
             }
         }
-        assertThat(bundleService.get(owner, bunchId, draft.id).photos).isEqualTo(draft.photos)
+        assertThat(bundleService.get(owner, bunchId, draft.id).photos.withImagePaths()).isEqualTo(draft.photos.withImagePaths())
     }
 
     @Test
@@ -899,7 +900,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             addPhotoIds = listOf(source.id), mode = BundleStatus.DRAFT, reselectedPhotoIds = listOf(source.id)
         )
         val repeated = bundleService.changePhotos(actor(owner), bunchId, draft.id, UUID.randomUUID(), request)
-        assertThat(repeated.photos).isEqualTo(draft.photos)
+        assertThat(repeated.photos.withImagePaths()).isEqualTo(draft.photos.withImagePaths())
         assertThat(repeated.revision).isEqualTo(draft.revision)
         assertBundleError(ErrorCode.BUNDLE_PHOTO_CONFLICT) {
             bundleService.changePhotos(
@@ -1127,7 +1128,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, uploadedBy = listOf(owner))
         val draft = createDraft(owner, bunchId, listOf(source.id))
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
 
         val result = photoService.removeUploader(bunchId, source.id, owner)
 
@@ -1435,7 +1436,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val bunchId = bunchWithMembers(owner, guest)
         val source = photo(bunchId, uploadedBy = listOf(owner))
         val draft = publishableDraft(owner, guest, bunchId, source, "publish-delete")
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
         val expectedRevision = bundleService.get(owner, bunchId, draft.id).revision
 
         val results = concurrently(
@@ -1482,7 +1483,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         val published = publishReadyBundle(owner, guest, bunchId, source, "published-update")
         val publishedPhoto = published.photos.single()
         val assetId = publishedPhoto.imageAssetId
-        val assetPublicId = source.imageAsset.publicId
+        val assetPublicId = source.imageAsset.objectKey
 
         val updated = bundleService.editPublished(
             actor(owner), bunchId, published.id,
@@ -1717,6 +1718,10 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         fun ordered() = bundleService.list(owner, bunchId, BundleStatus.DRAFT, 0, 2)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         assertThat(ordered().total).isEqualTo(3)
+        assertThat(ordered().items.flatMap { it.photos }.map { it.imageUrl })
+            .allSatisfy { url -> assertThat(url).contains("/thumbnail.jpg?").contains("X-Amz-Expires=7200") }
+        assertThat(bundleService.get(owner, bunchId, first.id).photos.single().imageUrl)
+            .contains("/original.jpg?").contains("X-Amz-Expires=7200")
         bundleService.get(owner, bunchId, first.id)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         bundleService.title(actor(owner), bunchId, first.id,
@@ -1942,10 +1947,7 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         status: ProcessingStatus = ProcessingStatus.READY
     ): Photo {
         val asset = assets.saveAndFlush(
-            ImageAsset(
-                publicId = "bundle-test/${UUID.randomUUID()}",
-                url = "https://images.example/bundle/${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
         )
         ownedAssetIds += asset.id
         val saved = photos.saveAndFlush(
@@ -1990,3 +1992,6 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
             .map { it.errorCode }
             .firstOrNull()
 }
+
+private fun List<BundlePhotoResponse>.withImagePaths() =
+    map { it.copy(imageUrl = it.imageUrl.substringBefore('?')) }
