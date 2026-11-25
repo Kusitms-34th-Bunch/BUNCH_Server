@@ -19,7 +19,7 @@ import java.time.Instant
  * two calculations of a bunch never run at the same time and the photos do not change while they are read.
  *
  * The photos of the whole bunch are read and calculated, not only the due days, because a day can change because of
- * another (a date borrowed, a clock corrected, 5-3 and 5-5), and the result of the whole bunch is saved
+ * another (an upload batch with a wrong clock is left out of every day, X5), and the result of the whole bunch is saved
  * ([RecommendedBundleStore]). The days that were due are taken out of the queue afterwards, except the ones whose time
  * was moved later while this ran: a change came, and it waits for its own quiet time.
  *

@@ -10,7 +10,7 @@ import java.time.LocalDateTime
  * gaps, so that members whose devices are in other time zones do not shift each other.
  *
  * The local time is the shooting time; the absolute time is the local time minus the offset, and a photo without an
- * offset is read in the default zone. A correction of the clock ([TimedPhoto.shift]) moves both.
+ * offset is read in the default zone (X4). No clock is corrected: the times are the ones the photos were taken with.
  */
 class TimeNormalizer(
     private val settings: CombinationSettings = CombinationSettings()
@@ -27,7 +27,7 @@ class TimeNormalizer(
     fun localTime(photo: TimedPhoto): LocalDateTime? {
         val date = photo.date ?: return null
         val time = photo.time ?: return null
-        return LocalDateTime.of(date, time).plus(photo.shift)
+        return LocalDateTime.of(date, time)
     }
 
     /** The shooting time on the absolute clock, or null when the date or the time is not known. */

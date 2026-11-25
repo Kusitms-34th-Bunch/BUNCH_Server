@@ -75,17 +75,6 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the similarities of the fingerprint start at their first numbers and can be moved`() {
-        assertThat(settings.fingerprintBurstMinSimilarity).isEqualTo(0.90)
-        assertThat(settings.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
-
-        val changed = CombinationSettings(fingerprintBurstMinSimilarity = 0.85)
-
-        assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
-        assertThat(changed.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
-    }
-
-    @Test
     fun `the numbers of the quality table are held with the others`() {
         assertThat(settings.quality).isEqualTo(ImageQualityCriteria())
 
@@ -96,9 +85,8 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the clock correction, the waits, the list and the windows are the ones of the table`() {
-        assertThat(settings.clockCorrectionMinPairs).isEqualTo(2)
-        assertThat(settings.clockCorrectionMinMedian).isEqualTo(Duration.ofMinutes(10))
+    fun `the clock error margin, the waits, the list and the windows are the ones of the table`() {
+        assertThat(settings.clockErrorMargin).isEqualTo(Duration.ofHours(14))
         assertThat(settings.aiPendingTimeout).isEqualTo(Duration.ofMinutes(30))
         assertThat(settings.recalculationDebounce).isEqualTo(Duration.ofMinutes(5))
         assertThat(settings.listMax).isEqualTo(20)
@@ -160,10 +148,6 @@ class CombinationSettingsTest {
         assertThatThrownBy { CombinationSettings(memberMaxRatio = 0.0) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(clueMinConfidence = 1.1) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(fingerprintBurstMinSimilarity = 1.1) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(fingerprintSameCompositionMinSimilarity = -0.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)

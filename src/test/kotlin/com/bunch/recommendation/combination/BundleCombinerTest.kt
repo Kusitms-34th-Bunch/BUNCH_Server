@@ -109,18 +109,16 @@ class BundleCombinerTest {
     }
 
     @Test
-    fun `X2 a photo that has no date takes the date and the time of the same picture`() {
+    fun `X2 a photo that has no date is left out of the bundles, and no date is borrowed from the same picture`() {
         val lunch = meals(1, "12:00", 8).map { if (it.photoId == 1L) it.copy(fingerprint = scene(0)) else it }
         val undated = shot(50, null, member = 2, date = null, activity = MEAL, fingerprint = scene(0))
 
         val result = combine(lunch + undated)
 
-        assertThat(result.excludedPhotoIds).isEmpty()
+        assertThat(result.excludedPhotoIds).containsExactly(50L)
         val bundle = (result.days.single() as DayCombination.Bundled).bundles.single()
-        assertThat(photoIds(bundle)).contains(50L)
-        // The picture is not compared any more (R1), so the photo that borrowed the date is a photo of its own.
-        // The borrowing itself is removed by the preparation of the day for the new standard (X2).
-        assertThat(bundle.photoCount).isEqualTo(9)
+        assertThat(photoIds(bundle)).doesNotContain(50L)
+        assertThat(bundle.photoCount).isEqualTo(8)
     }
 
     @Test
@@ -139,23 +137,17 @@ class BundleCombinerTest {
     }
 
     @Test
-    fun `X5 the clock of a member that is 30 minutes slow is corrected before the bundles are made`() {
-        val own = meals(1, "12:00", 8, members = listOf(1)).map {
-            when (it.photoId) {
-                1L -> it.copy(fingerprint = scene(0))
-                2L -> it.copy(fingerprint = scene(1))
-                else -> it
-            }
-        }
+    fun `X5 the clock of a member that is 30 minutes slow is not corrected, the photos keep their own times`() {
+        val own = meals(1, "12:00", 8, members = listOf(1))
         val slow = listOf(
-            shot(101, "11:30", member = 2, activity = MEAL, fingerprint = scene(0)),
-            shot(102, "11:40", member = 2, activity = MEAL, fingerprint = scene(1))
+            shot(101, "11:30", member = 2, activity = MEAL),
+            shot(102, "11:40", member = 2, activity = MEAL)
         )
 
         val bundle = bundles(own + slow).single()
 
-        assertThat(bundle.startAt).isEqualTo(Instant.parse("2026-10-19T03:00:00Z"))
-        // The same scene of two members is not a duplicate any more (R1): all ten photos count.
+        // Nothing is moved: the bundle starts at the earliest time that was recorded, and all ten photos count.
+        assertThat(bundle.startAt).isEqualTo(Instant.parse("2026-10-19T02:30:00Z"))
         assertThat(bundle.photoCount).isEqualTo(10)
         assertThat(bundle.uploaderCount).isEqualTo(2)
     }
@@ -264,10 +256,9 @@ class BundleCombinerTest {
     }
 
     @Test
-    fun `the days that had photos moved are told, and the photos with no date are left out`() {
+    fun `the photos with no date are left out`() {
         val result = combine(meals(1, "12:00", 8) + shot(900, null, date = null))
 
         assertThat(result.excludedPhotoIds).containsExactly(900L)
-        assertThat(result.movedDays).isEmpty()
     }
 }

@@ -51,10 +51,10 @@ internal object PreparationTestSupport {
             RecoPhoto.Upload(
                 memberId = it,
                 uploadBatchId = batch ?: UUID.nameUUIDFromBytes("batch-$id-$it".toByteArray()),
-                uploadedAt = memberUploadedAt[it] ?: Instant.parse("2026-10-20T00:00:00Z").plusSeconds(id)
+                uploadedAt = memberUploadedAt[it] ?: Instant.parse("2030-01-01T00:00:00Z").plusSeconds(id)
             )
         },
-        uploadedAt = Instant.parse("2026-10-20T00:00:00Z").plusSeconds(id),
+        uploadedAt = Instant.parse("2030-01-01T00:00:00Z").plusSeconds(id),
         source = SourceType.CAMERA,
         quality = PhotoQuality.GOOD,
         aiStatus = aiStatus,

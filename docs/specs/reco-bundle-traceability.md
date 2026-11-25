@@ -69,10 +69,10 @@
 | 항목 | 새 기준 | 현재 구현 | 테스트 | 상태 | 이슈 / 비고 |
 | --- | --- | --- | --- | --- | --- |
 | X1 | 번들이 없는 하루는 추천 안 함 | `BundleCombiner`, `RecommendedBundleStore`(없는 하루는 지움) | `BundleCombinerTest`, `RecommendedBundleStoreIntegrationTest` | 구현됨 | |
-| X2 | 날짜 모름은 계산 제외, 날짜를 빌리지 않음 | `DayPreparer`(제외), `DateBorrower`(이미지 유사도로 빌림) | `DayPreparerTest`, `DateBorrowerTest` | 교체 예정 | 빌리기 삭제. 후속 |
-| X3 | 날짜만 있는 사진 붙이기(업로드 묶음 → 번들 하나면 그 번들 → 안 넣음) | `DateOnlyAttacher`(업로드 묶음 → 업로드 멤버 → 사진 수) | `DateOnlyAttacherTest` | 교체 예정 | 후속 |
-| X4 | 시간대 오프셋으로 통일 | `TimeNormalizer`(오프셋이 없으면 `Asia/Seoul`) | `TimeNormalizerTest` | 부분 | 새 기준은 오프셋이 없으면 업로드 기기의 시간대. 서버는 기기 시간대를 모른다. 확인 필요 |
-| X5 | 촬영 시각이 업로드 시각보다 14시간 넘게 뒤면 제외 | `ClockCorrector`(이미지 유사도로 보정) | `ClockCorrectorTest` | 교체 예정 | 후속 |
+| X2 | 날짜 모름은 계산 제외, 날짜를 빌리지 않음 | `DayPreparer`(날짜가 없으면 `excludedPhotoIds`에 담음. `DateBorrower` 삭제) | `DayPreparerTest`, `BundleCombinerTest` | 구현됨(#220) | 지문 유사도로 날짜를 빌리던 경로 삭제 |
+| X3 | 날짜만 있는 사진 붙이기(업로드 묶음 → 번들 하나면 그 번들 → 안 넣음) | `DateOnlyAttacher`(같은 업로드·날짜 묶음의 시각 있는 사진이 가장 많은 번들 → 그날 번들이 하나면 그 번들 → 안 넣음) | `DateOnlyAttacherTest` | 구현됨(#220에서 확인) | 명세 3단계와 같음을 테스트로 확인. 다만 붙은 사진이 번들의 `photoCount`·`uploaderCount`에 들어가는 것은 명세 「장 수 계산에는 끼지 않음」과 다를 수 있어 기획 확인 필요(성립 판단은 붙이기 전에 끝나 추천 조건에는 영향 없음) |
+| X4 | 시간대 오프셋으로 통일 | `TimeNormalizer`(오프셋이 없으면 `Asia/Seoul`) | `TimeNormalizerTest` | 부분(#220에서 결정 기록) | 현재 동작 유지. 새 기준은 오프셋이 없으면 업로드 기기의 시간대이나 서버는 기기 시간대를 모른다(앱이 직접 찍은 사진은 현재 오프셋을 보냄, #145). 기획·프론트 확인 필요 |
+| X5 | 촬영 시각이 업로드 시각보다 14시간 넘게 뒤면 제외 | `ClockErrorFilter`(업로드 묶음 단위로 제외, 오프셋이 없으면 14시간 여유, 있으면 여유 없음. `ClockCorrector` 삭제) | `ClockErrorFilterTest`, `DayPreparerTest` | 구현됨(#220) | 이미지 유사도로 시계를 맞추던 보정 삭제. 여러 멤버가 올린 사진은 모든 묶음이 틀렸을 때만 제외 |
 | X6 | 다음 날 05:00 이후 처음 추천 | `BundleVisibility` | `BundleVisibilityTest` | 구현됨 | 기능명세서는 5분 뒤 반영이라 충돌(아래) |
 | X7 | 사진 변경 시 바뀐 하루만 다시 판단 | `RecommendedBundleRecalcTrigger`(D-1과 D, 초안 제외, 5분 디바운스) | `RecommendedBundleRecalculationIntegrationTest` | 구현됨 | |
 | X8 | 대량 업로드 노출 제한 | `RecommendedListRules`(최대 20개) | `RecommendedListRulesTest` | 부분 | 정책은 기획 결정 |

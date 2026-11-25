@@ -1,7 +1,6 @@
 package com.bunch.recommendation.combination
 
 import com.bunch.recommendation.domain.combination.AiStatus
-import com.bunch.recommendation.domain.combination.CombinationSettings
 import com.bunch.recommendation.domain.combination.FingerprintSimilarity
 import com.bunch.recommendation.domain.combination.ImageSimilarity
 import com.bunch.recommendation.domain.combination.RecoPhoto
@@ -15,7 +14,6 @@ import java.util.UUID
 
 /** The similarity of two photos from their image fingerprints (recommended bundle specification 5-4, 12). */
 class ImageSimilarityTest {
-    private val settings = CombinationSettings()
 
     @Test
     fun `the same fingerprint is the same image and all bits apart is nothing alike`() {
@@ -48,7 +46,8 @@ class ImageSimilarityTest {
     fun `six different bits are still a burst and seven are not`(differentBits: Int, burst: Boolean) {
         val similarity = FingerprintSimilarity.similarity(photo(0L), photo(bitsApart(differentBits)))!!
 
-        assertThat(similarity >= settings.fingerprintBurstMinSimilarity).isEqualTo(burst)
+        // 0.90 of 64 bits is six different bits.
+        assertThat(similarity >= 0.90).isEqualTo(burst)
     }
 
     @ParameterizedTest
@@ -56,7 +55,8 @@ class ImageSimilarityTest {
     fun `three different bits are still the same composition and four are not`(differentBits: Int, same: Boolean) {
         val similarity = FingerprintSimilarity.similarity(photo(0L), photo(bitsApart(differentBits)))!!
 
-        assertThat(similarity >= settings.fingerprintSameCompositionMinSimilarity).isEqualTo(same)
+        // 0.95 of 64 bits is three different bits.
+        assertThat(similarity >= 0.95).isEqualTo(same)
     }
 
     @Test
