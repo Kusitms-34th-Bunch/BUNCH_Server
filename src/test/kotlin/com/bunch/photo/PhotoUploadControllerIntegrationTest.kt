@@ -250,6 +250,89 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `the milliseconds and the device model are stored, and the surrounding blanks of a model are cut`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        upload(
+            ownerId, bunchId, jpeg(60),
+            capturedDate = "2026-10-19", capturedTime = "21:10:05", capturedMillis = "123", deviceModel = "iPhone15,2"
+        ).andExpect(status().isOk).andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(
+            ownerId, bunchId, jpeg(61),
+            capturedDate = "2026-10-19", capturedTime = "21:10:06", capturedMillis = "007", deviceModel = "  SM-S918N "
+        ).andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(
+            ownerId, bunchId, jpeg(62),
+            capturedDate = "2026-10-19", capturedTime = "21:10:07", capturedMillis = "000"
+        ).andExpect(jsonPath("$.data.result").value("STORED"))
+
+        assertThat(momentsOf(bunchId)).containsExactly(123 to "iPhone15,2", 7 to "SM-S918N", 0 to null)
+    }
+
+    @Test
+    fun `empty or blank milliseconds and model count as not sent`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        upload(ownerId, bunchId, jpeg(63), capturedMillis = "", deviceModel = "").andExpect(status().isOk)
+        upload(ownerId, bunchId, jpeg(64), deviceModel = "   ").andExpect(status().isOk)
+        upload(ownerId, bunchId, jpeg(65)).andExpect(status().isOk)
+
+        assertThat(momentsOf(bunchId)).containsExactly(null to null, null to null, null to null)
+    }
+
+    @Test
+    fun `wrong milliseconds are a plain 400 and nothing is stored or uploaded`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        // Fewer than three digits are refused too: "7" could be 7 milliseconds or .7 of a second.
+        val wrongMillis = listOf("-1", "1000", "1.5", "12a", "1 2", "0123", "abc", "١٢٣", "0", "7", "12")
+
+        wrongMillis.forEachIndexed { index, millis ->
+            upload(
+                ownerId, bunchId, jpeg(70 + index),
+                capturedDate = "2026-10-19", capturedTime = "21:10:05", capturedMillis = millis
+            ).expectError(ErrorCode.INVALID_INPUT).andExpect(jsonPath("$.error.detail").doesNotExist())
+        }
+
+        assertThat(photoCount(bunchId)).isZero()
+        verify(storage, never()).upload(anyImage())
+    }
+
+    @Test
+    fun `a model that is cut at its ends is kept, and a strange model is dropped without failing the upload`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val strange = listOf("x".repeat(65), "iPhone\n15", "iPhone\u000014", "\u0000\n")
+
+        // The text of an EXIF tag often ends in a NUL, which is not a part of the model.
+        upload(ownerId, bunchId, jpeg(90), deviceModel = "iPhone 14 Pro\u0000")
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(ownerId, bunchId, jpeg(91), deviceModel = "\t SM-S918N\u0000\u0000\n")
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+        upload(ownerId, bunchId, jpeg(92), deviceModel = "x".repeat(64))
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+        strange.forEachIndexed { index, model ->
+            upload(ownerId, bunchId, jpeg(93 + index), deviceModel = model)
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.data.result").value("STORED"))
+        }
+
+        assertThat(momentsOf(bunchId).map { it.second }).containsExactly(
+            "iPhone 14 Pro", "SM-S918N", "x".repeat(64), null, null, null, null
+        )
+    }
+
+    @Test
+    fun `milliseconds without a capture time are a plain 400 and nothing is stored or uploaded`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+
+        upload(ownerId, bunchId, jpeg(100), capturedMillis = "5").expectError(ErrorCode.INVALID_INPUT)
+        upload(ownerId, bunchId, jpeg(101), capturedDate = "2026-10-19", capturedMillis = "5")
+            .expectError(ErrorCode.INVALID_INPUT)
+
+        assertThat(photoCount(bunchId)).isZero()
+        verify(storage, never()).upload(anyImage())
+    }
+
+    @Test
     fun `the original file hash form field is stored with the photo`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val original = "0123456789abcdef".repeat(4)
@@ -321,7 +404,9 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
         contentType: String = "image/jpeg",
         originalFileHash: String? = null,
         capturedUtcOffset: String? = null,
-        sourceType: String? = null
+        sourceType: String? = null,
+        capturedMillis: String? = null,
+        deviceModel: String? = null
     ): ResultActions {
         val request = multipart(path(bunchId))
             .file(photoPart(bytes, contentType))
@@ -332,8 +417,19 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
         if (originalFileHash != null) request.param("originalFileHash", originalFileHash)
         if (capturedUtcOffset != null) request.param("capturedUtcOffset", capturedUtcOffset)
         if (sourceType != null) request.param("sourceType", sourceType)
+        if (capturedMillis != null) request.param("capturedMillis", capturedMillis)
+        if (deviceModel != null) request.param("deviceModel", deviceModel)
         return mvc.perform(request)
     }
+
+    // The milliseconds and the device model of every photo of the bunch, oldest first.
+    private fun momentsOf(bunchId: Long): List<Pair<Int?, String?>> = jdbc.query(
+        """SELECT p.captured_millis AS millis, f.device_model AS model
+            FROM photos p LEFT JOIN photo_reco_feature f ON f.photo_id = p.id
+            WHERE p.bunch_id = ? ORDER BY p.id""",
+        { rs, _ -> rs.getObject("millis", Int::class.javaObjectType) to rs.getString("model") },
+        bunchId
+    )
 
     // The offset and the original type of every photo of the bunch, oldest first.
     private fun originsOf(bunchId: Long): List<Pair<String?, String?>> = jdbc.query(

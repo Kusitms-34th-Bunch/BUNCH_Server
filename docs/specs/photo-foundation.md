@@ -50,6 +50,8 @@ Photo는 번치 사진함의 한 기록이다. 실제 파일은 `ImageAsset`가 
 | `dateSource` | `EXIF`, `USER`, `UNKNOWN`, varchar(16) |
 | `createdAt` | 필수 `Instant`, `timestamptz` |
 | `capturedUtcOffset` | 선택 `String` `±HH:mm`, varchar(6). 촬영 현지 시각의 UTC 오프셋. 서버는 `-12:00`~`+14:00`을 검사하고 DB CHECK는 모양만 검사한다. 없으면 추천에서 `Asia/Seoul`로 본다 |
+| `capturedMillis` | 선택 `Int` `0`~`999`. 촬영 시각의 초 아래 부분(F7, R1). `capturedTime`이 없으면 가질 수 없고(DB CHECK), 날짜를 비우면 함께 지운다. 없으면 모름이다(`0`이 아니다) |
+| `width`, `height` | 선택 `Int` 양수. 저장된 이미지의 픽셀 크기(R1의 해상도). 서버가 업로드 때 이미지에서 읽고, 둘이 함께 있거나 함께 없다(DB CHECK). 이전에 올린 사진은 없다 |
 
 날짜 출처의 저장 계약은 다음과 같다.
 

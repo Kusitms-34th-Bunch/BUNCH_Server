@@ -1,59 +1,42 @@
 package com.bunch.recommendation.domain.combination
 
-import java.time.Duration
 import java.time.LocalDate
 
 /**
- * The preparation of the days of a bunch before any bundle is made (recommended bundle specification 5). It takes the
- * photos of the bunch as the input builder made them and gives, for each day of the recommendation, the photos ready
- * for the bundles, or the word that the day waits or is not recommended.
+ * The preparation of the days of a bunch before any bundle is made (recommended bundle specification 1, 3-1, 6). It
+ * takes the photos of the bunch as the input builder made them and gives, for each day of the recommendation, the
+ * photos ready for the bundles, or the word that the day waits or is not recommended.
  *
- * In this order: the times of the photos are put on the clocks (5-2); the photos that miss a date or a time borrow it
- * (5-3); the clocks that are wrong are corrected (5-5); the photos are given to their days; the photos of a day that
- * show the same picture are grouped (5-4); and the day is stopped when a photo is still being analyzed, or when a
- * photo shows a funeral or a hospital (5-6). The clocks are corrected before the groups are made, because photos of one
- * scene taken by devices that are ten minutes or more apart are not close in time until the clock is corrected.
+ * In this order: the photos taken with a wrong clock are left out (X5, [ClockErrorFilter]); the photos without a date
+ * are left out (X2); the times of the rest are put on the clocks (X4); the photos are given to their days; the photos
+ * of a day that are the same shot are grouped (R1); and the day is stopped when a photo is still being analyzed, or
+ * when a photo shows a funeral or a hospital. Nothing is borrowed from another photo and no clock is corrected: the
+ * picture is never looked at, and what cannot be told from the metadata is left out.
  *
- * A day with a photo that is still being analyzed waits, and that comes before the sensitive clues: the clues are not
- * all known until the analysis is done. A sensitive clue counts when the AI is sure enough (the setting
- * sensitiveMinConfidence), and one photo is enough, with no other sign (5-6).
+ * A photo with a date and no time stays. It has no place on the time axis, and the step that gives such photos to a
+ * bundle takes it later (X3, [DateOnlyAttacher]). A day with a photo that is still being analyzed waits, and that comes
+ * before the sensitive clues: the clues are not all known until the analysis is done. A sensitive clue counts when the
+ * AI is sure enough (the setting sensitiveMinConfidence), and one photo is enough, with no other sign.
  *
  * The result is the same for the same photos, whatever the order they come in (1.5, 1.8). Nothing is saved, and the
- * photos themselves are not changed: what is borrowed or corrected stays in the result.
+ * photos themselves are not changed.
  */
 class DayPreparer(
-    private val settings: CombinationSettings = CombinationSettings(),
-    similarity: ImageSimilarity = FingerprintSimilarity,
-    burstMinSimilarity: Double = settings.fingerprintBurstMinSimilarity,
-    sameCompositionMinSimilarity: Double = settings.fingerprintSameCompositionMinSimilarity
+    private val settings: CombinationSettings = CombinationSettings()
 ) {
     private val times = TimeNormalizer(settings)
-    private val borrower = DateBorrower(times, similarity, sameCompositionMinSimilarity)
-    private val corrector = ClockCorrector(
-        times,
-        similarity,
-        sameCompositionMinSimilarity,
-        settings.clockCorrectionMinPairs,
-        settings.clockCorrectionMinMedian
-    )
-    private val grouper = DuplicateGrouper(
-        times,
-        similarity,
-        settings.burstMaxGap,
-        burstMinSimilarity,
-        settings.sameCompositionMaxGap,
-        sameCompositionMinSimilarity
-    )
+    private val clockErrors = ClockErrorFilter(times, settings.clockErrorMargin)
+    private val grouper = DuplicateGrouper(times, settings.burstMaxGap)
 
     fun prepare(photos: List<RecoPhoto>): PreparationResult {
-        val borrowed = borrower.borrow(photos.sortedBy { it.photoId }.map(times::start))
-        val dated = borrowed.filter { it.date != null }
-        val corrected = corrector.correct(dated)
-        val days = corrected.groupBy { times.dayKey(it)!! }.toSortedMap()
+        val started = photos.sortedBy { it.photoId }.map(times::start)
+        val wrongClock = clockErrors.find(started)
+        val usable = started.filter { it.photoId !in wrongClock }
+        val (dated, undated) = usable.partition { it.date != null }
+        val days = dated.groupBy { times.dayKey(it)!! }.toSortedMap()
         return PreparationResult(
             days = days.map { (day, dayPhotos) -> prepareDay(day, dayPhotos) },
-            excludedPhotoIds = borrowed.filter { it.date == null }.map { it.photoId }.sorted(),
-            movedDays = movedDays(corrected)
+            excludedPhotoIds = (wrongClock + undated.map { it.photoId }).sorted()
         )
     }
 
@@ -76,18 +59,6 @@ class DayPreparer(
         photo = photo.photo,
         dayKey = times.dayKey(photo)!!,
         localTime = times.localTime(photo),
-        instant = times.instant(photo),
-        borrowedFrom = photo.borrowedFrom,
-        clockShift = photo.shift
+        instant = times.instant(photo)
     )
-
-    // The days a corrected photo left and the days it went to, for a photo that the correction moved to another day.
-    private fun movedDays(corrected: List<TimedPhoto>): Set<LocalDate> = corrected
-        .filter { !it.shift.isZero }
-        .flatMap { photo ->
-            val before = times.dayKey(photo.copy(shift = Duration.ZERO))!!
-            val after = times.dayKey(photo)!!
-            if (before == after) emptyList() else listOf(before, after)
-        }
-        .toSet()
 }

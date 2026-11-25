@@ -10,7 +10,7 @@ import java.time.LocalDateTime
  * gaps, so that members whose devices are in other time zones do not shift each other.
  *
  * The local time is the shooting time; the absolute time is the local time minus the offset, and a photo without an
- * offset is read in the default zone. A correction of the clock ([TimedPhoto.shift]) moves both.
+ * offset is read in the default zone (X4). No clock is corrected: the times are the ones the photos were taken with.
  */
 class TimeNormalizer(
     private val settings: CombinationSettings = CombinationSettings()
@@ -27,13 +27,27 @@ class TimeNormalizer(
     fun localTime(photo: TimedPhoto): LocalDateTime? {
         val date = photo.date ?: return null
         val time = photo.time ?: return null
-        return LocalDateTime.of(date, time).plus(photo.shift)
+        return LocalDateTime.of(date, time)
     }
 
     /** The shooting time on the absolute clock, or null when the date or the time is not known. */
     fun instant(photo: TimedPhoto): Instant? {
         val local = localTime(photo) ?: return null
         return photo.offset?.let { local.toInstant(it) } ?: local.atZone(settings.defaultZone).toInstant()
+    }
+
+    /**
+     * The shooting time of the photo itself on the absolute clock, down to the millisecond, or null when the photo has
+     * no date, no time or no milliseconds. Nothing is borrowed or corrected, and a time known only to the second is not
+     * a time to the millisecond: two photos are told to be the same moment only by a value that was really recorded
+     * (the duplicate group R1).
+     */
+    fun exactInstant(photo: RecoPhoto): Instant? {
+        val date = photo.capturedDate ?: return null
+        val time = photo.capturedTime ?: return null
+        val millis = photo.capturedMillis ?: return null
+        val local = LocalDateTime.of(date, time).plusNanos(millis * NANOS_PER_MILLI)
+        return photo.utcOffset?.let { local.toInstant(it) } ?: local.atZone(settings.defaultZone).toInstant()
     }
 
     /**
@@ -45,5 +59,9 @@ class TimeNormalizer(
         val local = localTime(photo)
         if (local != null) return local.minusHours(settings.dayStartHour.toLong()).toLocalDate()
         return photo.date
+    }
+
+    private companion object {
+        const val NANOS_PER_MILLI = 1_000_000L
     }
 }

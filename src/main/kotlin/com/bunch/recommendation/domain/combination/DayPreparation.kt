@@ -38,12 +38,10 @@ data class SensitiveFinding(
 
 /**
  * The preparation of the photos of a bunch. [days] are in the order of the days. [excludedPhotoIds] are the photos
- * left out because no date is known, not even a borrowed one (3-1). [movedDays] are the days that got photos from
- * another day or lost photos to another one when a clock was corrected (5-5): the calculation of a single day has to
- * calculate them again too.
+ * left out of the calculation: the photos without a date (X2) and the photos of an upload batch taken with a wrong
+ * clock (X5), in the order of the photo IDs (3-1).
  */
 data class PreparationResult(
     val days: List<DayPreparation>,
-    val excludedPhotoIds: List<Long>,
-    val movedDays: Set<LocalDate>
+    val excludedPhotoIds: List<Long>
 )

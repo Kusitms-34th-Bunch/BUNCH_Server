@@ -3,7 +3,6 @@ package com.bunch.recommendation.combination
 import com.bunch.global.image.ImageQualityCriteria
 import com.bunch.recommendation.domain.combination.CombinationSettings
 import com.bunch.recommendation.domain.combination.DayPart
-import com.bunch.recommendation.domain.combination.Pace
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -28,8 +27,9 @@ class CombinationSettingsTest {
 
     @Test
     fun `the gaps are the ones of the table`() {
-        assertThat(settings.continuityShort).isEqualTo(Duration.ofHours(2))
-        assertThat(settings.continuityLong).isEqualTo(Duration.ofHours(4))
+        assertThat(settings.peopleChangeGap).isEqualTo(Duration.ofHours(1))
+        assertThat(settings.slotChangeGap).isEqualTo(Duration.ofHours(2))
+        assertThat(settings.sameSlotGap).isEqualTo(Duration.ofHours(4))
         assertThat(settings.minBoundaryGap).isEqualTo(Duration.ofMinutes(20))
         assertThat(settings.eventSamePlaceGap).isEqualTo(Duration.ofHours(2))
     }
@@ -41,7 +41,6 @@ class CombinationSettingsTest {
         assertThat(settings.peopleSplitMinSide).isEqualTo(3)
         assertThat(settings.subBundleMax).isEqualTo(40)
         assertThat(settings.timeBuckets).isEqualTo(4)
-        assertThat(settings.cardMaxSize).isEqualTo(10)
         assertThat(settings.cardSizeSteps).containsExactly(
             CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 6),
             CombinationSettings.CardSizeStep(fromPhotos = 16, cardSize = 8),
@@ -50,36 +49,35 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the ratios and the weights of the card are the ones of the table`() {
-        assertThat(settings.clueMaxRatio).isEqualTo(0.5)
-        assertThat(settings.subjectMaxRatio).isEqualTo(0.5)
+    fun `the member limit, the window of the card and the share of the part of the day are the ones of the table`() {
         assertThat(settings.memberMaxRatio).isEqualTo(0.6)
-        assertThat(settings.representativenessWeight).isEqualTo(0.4)
-        assertThat(settings.qualityWeight).isEqualTo(0.2)
-        assertThat(settings.diversityWeight).isEqualTo(0.4)
+        assertThat(settings.cardWindow).isEqualTo(Duration.ofMinutes(10))
+        assertThat(settings.dayPartMainShare).isEqualTo(0.70)
     }
 
     @Test
-    fun `the confidences and the similarities are the ones of the table`() {
+    fun `the confidences are the ones of the table`() {
         assertThat(settings.clueMinConfidence).isEqualTo(0.70)
         assertThat(settings.sensitiveMinConfidence).isEqualTo(0.50)
         assertThat(settings.activityMinConfidence).isEqualTo(0.50)
-        assertThat(settings.sameSceneMinSimilarity).isEqualTo(0.85)
-        assertThat(settings.burstMaxGap).isEqualTo(Duration.ofSeconds(3))
-        assertThat(settings.burstMinSimilarity).isEqualTo(0.90)
-        assertThat(settings.sameCompositionMaxGap).isEqualTo(Duration.ofSeconds(120))
-        assertThat(settings.sameCompositionMinSimilarity).isEqualTo(0.95)
     }
 
     @Test
-    fun `the similarities of the fingerprint start at the numbers of the table and are kept apart from them`() {
-        assertThat(settings.fingerprintBurstMinSimilarity).isEqualTo(0.90)
-        assertThat(settings.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
+    fun `the together window is 30 minutes, the new standard R2, and it must be above zero`() {
+        assertThat(settings.togetherWindow).isEqualTo(Duration.ofMinutes(30))
+        assertThat(CombinationSettings(togetherWindow = Duration.ofMinutes(45)).togetherWindow)
+            .isEqualTo(Duration.ofMinutes(45))
+        assertThatThrownBy { CombinationSettings(togetherWindow = Duration.ZERO) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { CombinationSettings(togetherWindow = Duration.ofMinutes(-1)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 
-        val changed = CombinationSettings(fingerprintBurstMinSimilarity = 0.85)
-
-        assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
-        assertThat(changed.burstMinSimilarity).isEqualTo(0.90)
+    @Test
+    fun `the burst of one member with one device is two seconds, the new standard R1`() {
+        assertThat(settings.burstMaxGap).isEqualTo(Duration.ofSeconds(2))
+        assertThat(CombinationSettings(burstMaxGap = Duration.ofSeconds(3)).burstMaxGap)
+            .isEqualTo(Duration.ofSeconds(3))
     }
 
     @Test
@@ -93,13 +91,11 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `the clock correction, the waits, the list and the windows are the ones of the table`() {
-        assertThat(settings.clockCorrectionMinPairs).isEqualTo(2)
-        assertThat(settings.clockCorrectionMinMedian).isEqualTo(Duration.ofMinutes(10))
+    fun `the clock error margin, the waits, the list and the windows are the ones of the table`() {
+        assertThat(settings.clockErrorMargin).isEqualTo(Duration.ofHours(14))
         assertThat(settings.aiPendingTimeout).isEqualTo(Duration.ofMinutes(30))
         assertThat(settings.recalculationDebounce).isEqualTo(Duration.ofMinutes(5))
         assertThat(settings.listMax).isEqualTo(20)
-        assertThat(settings.sameActivityGeneralMax).isEqualTo(3)
         assertThat(settings.yearEndWindows).containsExactly(
             CombinationSettings.MonthDayWindow(MonthDay.of(12, 24), MonthDay.of(12, 25)),
             CombinationSettings.MonthDayWindow(MonthDay.of(12, 31), MonthDay.of(1, 1))
@@ -130,13 +126,6 @@ class CombinationSettingsTest {
     }
 
     @Test
-    fun `a short pace is two hours, a long pace four, and a day pace is not cut by time`() {
-        assertThat(settings.continuityOf(Pace.SHORT)).isEqualTo(Duration.ofHours(2))
-        assertThat(settings.continuityOf(Pace.LONG)).isEqualTo(Duration.ofHours(4))
-        assertThat(settings.continuityOf(Pace.DAY)).isNull()
-    }
-
-    @Test
     fun `a value can be changed without a change of the code`() {
         val changed = CombinationSettings(minPhotos = 8, clueMinConfidence = 0.65, configVersion = "reco-cfg-2")
 
@@ -152,20 +141,17 @@ class CombinationSettingsTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(nightStartHour = 24) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(diversityWeight = 0.5) }
-            .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(memberMaxRatio = 0.0) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(clueMinConfidence = 1.1) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(fingerprintBurstMinSimilarity = 1.1) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(fingerprintSameCompositionMinSimilarity = -0.1) }
-            .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(subBundleMax = 5) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { CombinationSettings(cardMaxSize = 5) }
+        assertThatThrownBy { CombinationSettings(cardWindow = Duration.ZERO) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            CombinationSettings(cardSizeSteps = listOf(CombinationSettings.CardSizeStep(fromPhotos = 6, cardSize = 7)))
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { CombinationSettings(cardSizeSteps = emptyList()) }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy {

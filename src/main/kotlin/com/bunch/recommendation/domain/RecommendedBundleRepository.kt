@@ -15,6 +15,12 @@ interface RecommendedBundleRepository : JpaRepository<RecommendedBundle, Long> {
     /** Every recommended bundle of a bunch, which the calculation of the bunch replaces (10-3). */
     fun findByBunchId(bunchId: Long): List<RecommendedBundle>
 
+    /** The recommended bundles of a bunch that are shown at [now], not before the day is over (10-4, X6). */
+    fun findByBunchIdAndVisibleFromLessThanEqual(bunchId: Long, now: Instant): List<RecommendedBundle>
+
+    /** One recommended bundle of the bunch, or none when it was deleted or belongs to another bunch. */
+    fun findByIdAndBunchId(id: Long, bunchId: Long): RecommendedBundle?
+
     /**
      * Deletes the recommended bundles whose last photo was added before [cutoff] and returns how many (4.2.9 rule 4).
      * Their photos go with them (the database deletes them), and they are not recorded.

@@ -233,6 +233,32 @@ class RecommendedBundleSchemaIntegrationTest : PhotoHttpTestSupport() {
         assertThat(count("photos", "id = $photoId")).isEqualTo(1)
     }
 
+    @Test
+    fun `the cover of a bundle is a photo, empty for a bundle with no card, and cleared when the photo is deleted`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoId = photo(bunchId, ownerId, "20:00:00")
+        val withCover = bundleEntity(bunchId, day).also {
+            it.coverPhotoId = photoId
+            bundles.saveAndFlush(it)
+        }
+        val noCard = bundleEntity(bunchId, day)
+
+        assertThat(bundles.findById(withCover.id).orElseThrow().coverPhotoId).isEqualTo(photoId)
+        assertThat(bundles.findById(noCard.id).orElseThrow().coverPhotoId).isNull()
+
+        jdbc.update("DELETE FROM photos WHERE id = ?", photoId)
+
+        assertThat(bundles.findById(withCover.id).orElseThrow().coverPhotoId).isNull()
+    }
+
+    @Test
+    fun `a cover that is not a photo is refused`() {
+        val (_, bunchId) = bunchWithOwner()
+        val entity = bundleEntity(bunchId, day).also { it.coverPhotoId = 999_999_999L }
+
+        assertThatThrownBy { bundles.saveAndFlush(entity) }.isInstanceOf(DataIntegrityViolationException::class.java)
+    }
+
     // --- the entities ---
 
     @Test

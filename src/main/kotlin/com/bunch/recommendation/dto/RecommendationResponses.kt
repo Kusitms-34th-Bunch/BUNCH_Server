@@ -1,7 +1,9 @@
 package com.bunch.recommendation.dto
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.OffsetDateTime
 
 /** The cards of the recommended bundle sheet, in the order of the list (4.2.1, 4.2.9 rule 6). */
 data class RecommendedBundleListResponse(val bundles: List<RecommendedBundleCard>)
@@ -10,7 +12,8 @@ data class RecommendedBundleListResponse(val bundles: List<RecommendedBundleCard
  * One card (4.2.2). [photoCount] is the number of photos of the card. [endDate] is set only for a bundle that was
  * taken over midnight. [uploaders] are the members who uploaded the photos of the card, the one with the most
  * photos first. The app shortens them to 「name 외 N명」 by the width of the row. [coverImageUrl] is the first
- * photo of the card.
+ * photo of the card in the old recommended bundles and the cover in the new ones. [startAt] and [endAt] are when the
+ * bundle starts and ends, for the time range of the card (D5); they are only in the new recommended bundles.
  */
 data class RecommendedBundleCard(
     val id: Long,
@@ -19,7 +22,11 @@ data class RecommendedBundleCard(
     val endDate: LocalDate?,
     val photoCount: Int,
     val uploaders: List<RecommendedUploader>,
-    val coverImageUrl: String
+    val coverImageUrl: String,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val startAt: OffsetDateTime? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val endAt: OffsetDateTime? = null
 )
 
 /** The photos of the card in the order they are applied in (4.2.3), the same ones the detail screen shows (4.2.5). */

@@ -8,6 +8,7 @@ import com.bunch.recommendation.domain.RecommendedBundlePhotoRepository
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.RecommendedBundleRepository
 import com.bunch.recommendation.domain.combination.BundleExpiry
+import com.bunch.recommendation.service.RecommendedBundleReader
 import com.bunch.recommendation.service.RecommendedBundleScheduler
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -43,6 +44,9 @@ class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationS
 
     @Autowired
     private lateinit var scheduler: RecommendedBundleScheduler
+
+    @Autowired
+    private lateinit var reader: RecommendedBundleReader
 
     @Autowired
     private lateinit var bundles: RecommendedBundleRepository
@@ -146,10 +150,52 @@ class RecommendedBundleRecalculationIntegrationTest : RecommendationIntegrationS
 
         assertThat(looked).isEqualTo(1)
         val saved = bundles.findByBunchId(bunchId).single()
-        assertThat(saved.title).contains("오전 식사")
+        assertThat(saved.title).isEqualTo("10월 19일 오전")
         assertThat(bundlePhotos.findByBundleIdIn(listOf(saved.id)).map { it.photoId })
             .containsExactlyInAnyOrderElementsOf(photoIds)
         assertThat(queuedDays(bunchId)).isEmpty()
+    }
+
+    @Test
+    fun `the photos of a bundle that a draft was made from are not recommended again until a photo is added to them`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoIds = lunch(bunchId, ownerId)
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+        scheduler.runOnce(Instant.now())
+        val id = bundles.findByBunchId(bunchId).single().id
+
+        TransactionTemplate(transactions).executeWithoutResult { reader.use(bunchId, id) }
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId)).isEmpty()
+
+        val added = insertPhoto(bunchId, "2026-10-19", "11:20", uploaders = listOf(ownerId))
+        features.markDone(added, "test-model", answer, Instant.now())
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+        scheduler.runOnce(Instant.now())
+
+        val again = bundles.findByBunchId(bunchId).single()
+        assertThat(bundlePhotos.findByBundleIdIn(listOf(again.id)).map { it.photoId })
+            .containsExactlyInAnyOrderElementsOf(photoIds + added)
+    }
+
+    @Test
+    fun `the photos of a draft that is deleted are recommended again, they are not noted as used any more`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val photoIds = lunch(bunchId, ownerId)
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+        scheduler.runOnce(Instant.now())
+        val id = bundles.findByBunchId(bunchId).single().id
+        TransactionTemplate(transactions).executeWithoutResult { reader.use(bunchId, id) }
+        val draft = bundleWith(bunchId, ownerId, "DRAFT", *photoIds.toLongArray())
+
+        publish(BundleChangedEvent(bunchId, draft, 1L, "request", BundleEventType.DELETED, null))
+        deleteBundle(draft)
+        queue.put(bunchId, day, Instant.now().minusSeconds(60))
+        scheduler.runOnce(Instant.now())
+
+        assertThat(bundles.findByBunchId(bunchId)).hasSize(1)
     }
 
     @Test

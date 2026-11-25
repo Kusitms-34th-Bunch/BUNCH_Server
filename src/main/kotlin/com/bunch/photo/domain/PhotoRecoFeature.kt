@@ -35,5 +35,10 @@ class PhotoRecoFeature(
 
     @Enumerated(EnumType.STRING)
     @Column(name = "quality", length = 8)
-    val quality: ImageQualityGrade? = null
+    val quality: ImageQualityGrade? = null,
+
+    // The model of the device that took the photo, as the app told it (F7). It is written by its own statement
+    // ([PhotoRecoFeatureRepository.fillDeviceModel]) and only read through the entity.
+    @Column(name = "device_model", length = 64, insertable = false, updatable = false)
+    val deviceModel: String? = null
 )

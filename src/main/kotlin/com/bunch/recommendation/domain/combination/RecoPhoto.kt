@@ -22,6 +22,11 @@ import java.util.UUID
  * read. A photo that has neither an embedding nor a fingerprint cannot be told alike to another one, so it is only
  * joined to the same picture (5-4).
  *
+ * [capturedMillis] is the part of the shooting time below the second, [deviceModel] is the model of the device that
+ * took the photo, and [width] and [height] are the size of the stored image (specification 2-1, F7 and R1). The app
+ * leaves out what the device did not record, and an upload before they were stored has none. A value that is null is
+ * not known: it is not 0 milliseconds and not an unknown device, and it never makes two photos alike.
+ *
  * [dateBatchId] is the batch of the photos whose dates the user set in one request; only a photo the user dated has
  * one. Photos of the same batch of an upload ([Upload.uploadBatchId]) or of the same date batch belong together
  * (photo box 4.2.7 rule 3). Whether two photos belong together is asked by the steps that use it; this value only
@@ -40,11 +45,21 @@ data class RecoPhoto(
     val analysis: AiAnalysis = AiAnalysis.NONE,
     val embedding: Embedding? = null,
     val fingerprint: Long? = null,
-    val dateBatchId: UUID? = null
+    val dateBatchId: UUID? = null,
+    val capturedMillis: Int? = null,
+    val deviceModel: String? = null,
+    val width: Int? = null,
+    val height: Int? = null
 ) {
     init {
         require(capturedTime == null || capturedDate != null) {
             "capturedTime requires capturedDate"
+        }
+        require(capturedMillis == null || (capturedMillis in 0..MAX_MILLIS && capturedTime != null)) {
+            "milliseconds are from 0 to 999 and need a capturedTime"
+        }
+        require((width == null) == (height == null) && (width ?: 1) > 0 && (height ?: 1) > 0) {
+            "the width and the height are given together and are above zero"
         }
         require(dateBatchId == null || capturedDate != null) {
             "a date batch requires capturedDate"
@@ -80,4 +95,8 @@ data class RecoPhoto(
         val uploadBatchId: UUID,
         val uploadedAt: Instant
     )
+
+    private companion object {
+        const val MAX_MILLIS = 999
+    }
 }

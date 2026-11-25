@@ -74,6 +74,9 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
         assertThat(card.path("startDate").asText()).isEqualTo(gatheringDay)
         assertThat(card.path("endDate").isNull).isTrue()
         assertThat(card.path("photoCount").asInt()).isEqualTo(8)
+        // The time range is only in the new recommended bundles, so the response is the same while the switch is off.
+        assertThat(card.has("startAt")).isFalse()
+        assertThat(card.has("endAt")).isFalse()
         val coverPhotoId = photosOf(candidate.id).filter { it.second != null }.minBy { it.second!! }.first
         assertSignedImageUrl(
             card.path("coverImageUrl").asText(),

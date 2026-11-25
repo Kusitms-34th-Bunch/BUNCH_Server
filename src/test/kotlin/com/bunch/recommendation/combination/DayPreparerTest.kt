@@ -14,14 +14,13 @@ import com.bunch.recommendation.domain.combination.SourceType
 import com.bunch.recommendation.domain.combination.TimeState
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneOffset
 import java.util.Random
+import java.util.UUID
 
-/** The days of a bunch before any bundle is made (recommended bundle spec 5; scenarios X2 to X7, X12, C1, E25). */
+/** The days of a bunch before any bundle is made (recommended bundle spec 3-1, 6; scenarios X2 to X7, X12, C1, E25). */
 class DayPreparerTest {
     private val preparer = DayPreparer()
 
@@ -43,7 +42,6 @@ class DayPreparerTest {
 
         assertThat(result.days).isEmpty()
         assertThat(result.excludedPhotoIds).isEmpty()
-        assertThat(result.movedDays).isEmpty()
     }
 
     @Test
@@ -72,25 +70,10 @@ class DayPreparerTest {
     }
 
     @Test
-    fun `X2 a photo without a date takes the date and the time of a photo that looks the same`() {
+    fun `X2 a photo without a date is left out and no date is borrowed from a photo that looks the same`() {
         val result = prepare(
             photo(1, date = "2026-10-19", time = "21:10", fingerprint = scene(0)),
-            photo(2, date = null, fingerprint = scene(0, bitsApart = 1))
-        )
-
-        val borrowed = ready(result, "2026-10-19").photos.single { it.photoId == 2L }
-        assertThat(borrowed.localTime?.toLocalTime()).isEqualTo(LocalTime.of(21, 10))
-        assertThat(borrowed.borrowedFrom).isEqualTo(1L)
-        assertThat(borrowed.timeState).isEqualTo(TimeState.FULL)
-        assertThat(borrowed.photo.capturedDate).isNull()
-        assertThat(result.excludedPhotoIds).isEmpty()
-    }
-
-    @Test
-    fun `X2 a photo without a date that nothing looks like is left out`() {
-        val result = prepare(
-            photo(1, date = "2026-10-19", time = "21:10", fingerprint = scene(0)),
-            photo(2, date = null, fingerprint = scene(1)),
+            photo(2, date = null, fingerprint = scene(0, bitsApart = 1)),
             photo(3, date = null, fingerprint = null)
         )
 
@@ -99,7 +82,7 @@ class DayPreparerTest {
     }
 
     @Test
-    fun `X3 a photo with a date only takes the time of a photo that looks the same, or stays with its date`() {
+    fun `X3 a photo with a date only stays on its day without a time, and no time is borrowed`() {
         val result = prepare(
             photo(1, date = "2026-10-19", time = "21:10", fingerprint = scene(0)),
             photo(2, date = "2026-10-19", fingerprint = scene(0)),
@@ -107,22 +90,23 @@ class DayPreparerTest {
         )
 
         val photos = ready(result, "2026-10-19").photos.associateBy { it.photoId }
-        assertThat(photos.getValue(2).timeState).isEqualTo(TimeState.FULL)
-        assertThat(photos.getValue(2).borrowedFrom).isEqualTo(1L)
+        assertThat(photos.getValue(1).timeState).isEqualTo(TimeState.FULL)
+        assertThat(photos.getValue(2).timeState).isEqualTo(TimeState.DATE_ONLY)
+        assertThat(photos.getValue(2).instant).isNull()
         assertThat(photos.getValue(3).timeState).isEqualTo(TimeState.DATE_ONLY)
-        assertThat(photos.getValue(3).instant).isNull()
-        assertThat(ready(result, "2026-10-19").photos.last().photoId).isEqualTo(3L)
+        assertThat(ready(result, "2026-10-19").photos.map { it.photoId }).containsExactly(1L, 2L, 3L)
+        assertThat(result.excludedPhotoIds).isEmpty()
     }
 
     @Test
     fun `X4 members in other time zones have the day by the local clock and the gap by the absolute one`() {
-        val seoul = photo(1, time = "10:00:00", offset = ZoneOffset.ofHours(9), fingerprint = scene(0))
+        // One member with one device shoots in two places: a burst on the absolute clock (R1), two seconds apart.
+        val seoul = photo(1, time = "10:00:00", offset = ZoneOffset.ofHours(9), model = "iPhone15,2")
         val tokyoSide = photo(
             2,
             time = "09:00:02",
-            members = listOf(2),
             offset = ZoneOffset.ofHours(8),
-            fingerprint = scene(0, bitsApart = 1)
+            model = "iPhone15,2"
         )
         val newYork = photo(3, date = "2026-10-18", time = "19:00:00", offset = ZoneOffset.ofHours(-5))
 
@@ -139,46 +123,31 @@ class DayPreparerTest {
     }
 
     @Test
-    fun `X5 a clock that is slow is corrected and the photos of the same scene then belong together`() {
+    fun `X5 an upload batch taken with a clock that is ahead of its upload is left out, the other photos stay`() {
+        val uploadedAt = mapOf(1L to Instant.parse("2026-10-19T00:00:00Z"))
+        val batch = UUID.nameUUIDFromBytes("wrong".toByteArray())
+        // 14 hours and a second after the upload, without an offset: the clock is wrong, so is the whole batch.
         val result = prepare(
-            photo(1, time = "10:00", members = listOf(1), fingerprint = scene(0, bitsApart = 1)),
-            photo(2, time = "10:10", members = listOf(1), fingerprint = scene(1, bitsApart = 1)),
-            photo(3, time = "09:30", members = listOf(2), fingerprint = scene(0)),
-            photo(4, time = "09:40", members = listOf(2), fingerprint = scene(1))
+            photo(1, date = "2026-10-19", time = "23:00:01", batch = batch, memberUploadedAt = uploadedAt),
+            photo(2, date = "2026-10-19", time = "09:00", batch = batch, memberUploadedAt = uploadedAt),
+            photo(3, date = "2026-10-19", time = "10:00", members = listOf(2))
+        )
+
+        assertThat(result.excludedPhotoIds).containsExactly(1L, 2L)
+        assertThat(ready(result, "2026-10-19").photos.map { it.photoId }).containsExactly(3L)
+    }
+
+    @Test
+    fun `X5 a clock that is only slow is not corrected, the photos keep their own times`() {
+        val result = prepare(
+            photo(1, time = "10:00", members = listOf(1), fingerprint = scene(0)),
+            photo(2, time = "09:30", members = listOf(2), fingerprint = scene(0))
         )
 
         val prepared = ready(result, "2026-10-19")
-        assertThat(prepared.photos.single { it.photoId == 3L }.clockShift).isEqualTo(Duration.ofMinutes(30))
-        assertThat(prepared.photos.single { it.photoId == 3L }.photo.capturedTime).isEqualTo(LocalTime.of(9, 30))
-        assertThat(prepared.duplicateGroups.map { it.photoIds }).containsExactly(listOf(1L, 3L), listOf(2L, 4L))
-        assertThat(result.movedDays).isEmpty()
-    }
-
-    @Test
-    fun `X5 a correction that takes a photo to another day tells both days`() {
-        val result = prepare(
-            photo(1, time = "04:10", members = listOf(1), fingerprint = scene(2)),
-            photo(2, time = "04:50", members = listOf(1), fingerprint = scene(0, bitsApart = 1)),
-            photo(3, time = "04:55", members = listOf(1), fingerprint = scene(1, bitsApart = 1)),
-            photo(4, time = "04:20", members = listOf(2), fingerprint = scene(0)),
-            photo(5, time = "04:25", members = listOf(2), fingerprint = scene(1)),
-            photo(6, time = "04:45", members = listOf(2), fingerprint = scene(3))
-        )
-
-        assertThat(result.movedDays).containsExactlyInAnyOrder(LocalDate.of(2026, 10, 18), LocalDate.of(2026, 10, 19))
-        assertThat(ready(result, "2026-10-19").photos.map { it.photoId }).containsExactly(6L)
-        assertThat(ready(result, "2026-10-18").photos.map { it.photoId }).doesNotContain(6L)
-    }
-
-    @Test
-    fun `X5 with nothing to compare the clock is left as it is`() {
-        val result = prepare(
-            photo(1, time = "10:00", members = listOf(1), fingerprint = scene(0)),
-            photo(2, time = "09:00", members = listOf(2), fingerprint = scene(1))
-        )
-
-        assertThat(ready(result, "2026-10-19").photos.map { it.clockShift }).containsOnly(Duration.ZERO)
-        assertThat(result.movedDays).isEmpty()
+        assertThat(prepared.photos.map { it.photoId }).containsExactly(2L, 1L)
+        assertThat(prepared.photos.map { it.localTime?.toLocalTime().toString() }).containsExactly("09:30", "10:00")
+        assertThat(result.excludedPhotoIds).isEmpty()
     }
 
     @Test
@@ -243,9 +212,10 @@ class DayPreparerTest {
 
     @Test
     fun `C1 the same photo uploaded by several members is one photo and all of them count`() {
+        // The same original saved again by another member: the same moment to the millisecond, model and size (R1).
         val result = prepare(
-            photo(1, time = "10:00:00", members = listOf(1, 2), fingerprint = scene(0)),
-            photo(2, time = "10:00:10", members = listOf(3), fingerprint = scene(0, bitsApart = 1))
+            photo(1, time = "10:00:00", members = listOf(1, 2), millis = 120, model = "A", size = 4032 to 3024),
+            photo(2, time = "10:00:00", members = listOf(3), millis = 120, model = "A", size = 4032 to 3024)
         )
 
         val group = ready(result, "2026-10-19").duplicateGroups.single()
@@ -255,12 +225,12 @@ class DayPreparerTest {
 
     @Test
     fun `the photos themselves are not changed`() {
-        val original = photo(2, date = null, fingerprint = scene(0, bitsApart = 1))
-        val lender = photo(1, date = "2026-10-19", time = "21:10", fingerprint = scene(0))
+        val dated = photo(1, date = "2026-10-19", time = "21:10", fingerprint = scene(0))
+        val dateOnly = photo(2, date = "2026-10-19", fingerprint = scene(0, bitsApart = 1))
 
-        val result = prepare(lender, original)
+        val result = prepare(dated, dateOnly)
 
-        assertThat(ready(result, "2026-10-19").photos.map { it.photo }).containsExactlyInAnyOrder(lender, original)
+        assertThat(ready(result, "2026-10-19").photos.map { it.photo }).containsExactlyInAnyOrder(dated, dateOnly)
     }
 
     @Test

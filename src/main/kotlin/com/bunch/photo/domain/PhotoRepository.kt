@@ -149,10 +149,20 @@ interface PhotoRepository : JpaRepository<Photo, Long> {
     @Query("update Photo p set p.capturedUtcOffset = :offset where p.id = :id and p.capturedUtcOffset is null")
     fun fillUtcOffset(@Param("id") id: Long, @Param("offset") offset: String): Int
 
+    // The same for the milliseconds, and only for a photo that has a capture time: they are the part of that time below
+    // the second, and the database refuses them without it.
+    @Modifying(flushAutomatically = true)
+    @Query(
+        "update Photo p set p.capturedMillis = :millis " +
+            "where p.id = :id and p.capturedMillis is null and p.capturedTime is not null"
+    )
+    fun fillCapturedMillis(@Param("id") id: Long, @Param("millis") millis: Int): Int
+
+    // The milliseconds go with the time: a photo without a capture time has none.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
-        "update Photo p set p.capturedDate = null, p.capturedTime = null, p.dateBatchId = null, " +
-            "p.dateSource = com.bunch.photo.domain.DateSource.UNKNOWN where p.id in :ids"
+        "update Photo p set p.capturedDate = null, p.capturedTime = null, p.capturedMillis = null, " +
+            "p.dateBatchId = null, p.dateSource = com.bunch.photo.domain.DateSource.UNKNOWN where p.id in :ids"
     )
     fun clearCapturedDate(@Param("ids") ids: Collection<Long>): Int
 
