@@ -39,13 +39,6 @@ class AuthController(private val authService: AuthService) {
         request: AuthRequests.NonceLoginRequest
     ) = response(authService.login(AuthProvider.KAKAO, request.idToken, request.nonce))
 
-    @PostMapping("/dev/token")
-    fun devToken(
-        @Valid
-        @RequestBody
-        request: AuthRequests.DevTokenRequest
-    ) = ResponseEntity.ok(ApiResponse.ok(authService.issueDevToken(request.nickname)))
-
     @PostMapping("/ws-token")
     fun wsToken(authentication: Authentication): ResponseEntity<ApiResponse<AuthResponses.WsTokenResponse>> {
         val userId = (authentication.principal as? String)?.toLongOrNull()

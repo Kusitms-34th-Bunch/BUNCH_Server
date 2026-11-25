@@ -58,7 +58,7 @@ docker volume create bunch-prod-redis-data
    새 운영 볼륨에 연결한다. 실제 마운트가 `bunch-prod-pgdata`·`bunch-prod-redis-data`인지 확인한다.
    아래 순서로 운영 앱 DB를 초기화한 뒤 앱을 기동한다. 빈 DB는 기존 마이그레이션과 R2 V55·사진 크기 V56을 적용한다.
 3. `~/prod`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
-   내부 health·운영 DB·Redis·R2와 대시보드를 확인하고 개발 토큰 API 차단을 확인한 뒤 기존 Tunnel을 기동한다.
+   내부 health·운영 DB·Redis·R2와 대시보드를 확인하고 개발 토큰 API 제거을 확인한 뒤 기존 Tunnel을 기동한다.
    `api.bunch.kr → http://app:8080`, `grafana.bunch.kr → http://grafana:3000`으로 접근되는지 확인한다.
    기존 Tunnel의 다른 API 주소도 운영으로 연결되므로 공개할 주소를 확인한다.
 4. 이후 개발 환경을 준비할 때 기존 PostgreSQL·Redis 볼륨을 `~/dev`에 연결한다. 개발 앱 기동 전에
