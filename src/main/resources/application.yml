@@ -75,6 +75,10 @@ cloudinary:
 reco:
   combination:
     enabled: ${RECO_COMBINATION_ENABLED:false}
+    # The first calculation of the photos that were there before it was switched on. Run once at the start; leave it
+    # off except for the start that follows switching the above on.
+    backfill:
+      enabled: ${RECO_COMBINATION_BACKFILL_ENABLED:false}
 bunch:
   bundle:
     stage-thresholds: ${BUNCH_BUNDLE_STAGE_THRESHOLDS:0,2,6,10}

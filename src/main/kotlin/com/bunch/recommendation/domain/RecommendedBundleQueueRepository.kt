@@ -48,6 +48,23 @@ interface RecommendedBundleQueueRepository : Repository<RecommendedBundle, Long>
     )
     fun putAllDays(@Param("bunchId") bunchId: Long, @Param("dueAt") dueAt: Instant): Int
 
+    /**
+     * Puts every day of the dated photos of every bunch in the queue to be calculated at [dueAt], and returns how many
+     * rows it wrote (the first calculation of the photos that were there before the new recommended bundles were
+     * switched on). A day that is already queued only gets its time moved, so running it twice makes no second row.
+     */
+    @Transactional
+    @Modifying(flushAutomatically = true)
+    @Query(
+        """INSERT INTO recommended_bundle_recalc_queue (bunch_id, day_key, due_at)
+            SELECT p.bunch_id, p.captured_date, CAST(:dueAt AS timestamptz) FROM photos p
+            WHERE p.captured_date IS NOT NULL AND p.processing_status = 'READY'
+            GROUP BY p.bunch_id, p.captured_date
+            ON CONFLICT (bunch_id, day_key) DO UPDATE SET due_at = EXCLUDED.due_at""",
+        nativeQuery = true
+    )
+    fun putAllDaysOfAllBunches(@Param("dueAt") dueAt: Instant): Int
+
     /** The bunches that have a day due at [now] or before, in the order of their numbers. */
     @Query(
         """SELECT DISTINCT bunch_id FROM recommended_bundle_recalc_queue
