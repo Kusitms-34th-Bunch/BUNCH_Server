@@ -31,7 +31,8 @@ HTTP API는 이 범위에 포함하지 않는다. 업로드 저장 규칙은 [�
 
 `width`·`height`는 EXIF 회전 뒤 보이는 원본의 픽셀 크기다. 신규 업로드 검사 결과를 저장하며
 두 값 모두 양수이거나 둘 다 `null`이다. 기존 사진은 V56에서 `null`로 유지하고 직접 이전 때 채울 수 있다.
-썸네일의 정사각형 크기를 저장하지 않는다.
+썸네일 크기는 저장하지 않는다. 썸네일 생성은 원본 `width`·`height`와 원본 바이트를
+변경하지 않는다.
 
 
 Photo는 번치 사진함의 한 기록이다. 실제 파일은 `ImageAsset`가 가리키며, Photo가
@@ -254,14 +255,16 @@ FK와 API `imageUrl`이 모두 `null`이다. 세부 순서와 복구는 [R2 이�
 
 `PhotoImageStorage.upload`는 DB transaction 밖에서 다음을 한 번 수행한다.
 
-1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 1080px이고 작은
-   이미지는 확대하지 않으며 JPEG 품질은 85다.
+1. ImageIO로 EXIF 방향을 반영해 원본 비율과 전체 영역을 유지하는 fit 썸네일을 만든다.
+   긴 변은 최대 1080px이고 작은 이미지는 확대하지 않으며 JPEG 품질은 85다. 예를 들어
+   1920x2560 원본은 810x1080 썸네일이 된다. 원본 바이트와 원본 `width`·`height`는
+   변경하지 않는다.
 2. 원본을 `original.jpg`로, 방금 만든 썸네일을 `thumbnail.jpg`로 각각 서로 다른 object key에
    `Cache-Control: private, max-age=3600` metadata와 함께 R2에 PUT한다.
 
 썸네일은 큐나 별도 비동기 작업으로 만들지 않는다. JPEG 전체를 대상으로 ImageIO의 bounded
-source subsampling을 적용해 디코딩한 뒤 중앙을 잘라 최종 크기로 줄인다. 따라서 crop 바깥의
-손상도 검출 대상이며, 원본 보관본의 바이트와 해시는 이 과정에서 바뀌지 않는다. 두 PUT 중
+source subsampling을 적용해 디코딩한 뒤 원본 비율을 유지해 전체 영역을 최종 크기로 줄인다.
+중앙 crop은 하지 않으며, 원본 보관본의 바이트와 해시는 이 과정에서 바뀌지 않는다. 두 PUT 중
 하나라도 실패하면 생성한 사진 객체를 보상 정리하고 업로드 실패로 처리한다.
 
 프로필은 `ProfileImageStorage`가 기존 JPEG 정제 결과를 `profiles/<UUID>/profile.jpg`로
@@ -289,6 +292,9 @@ credentials·UTC 시간 슬롯에서는 같은 URL을 만들고 다음 UTC 정�
   덮어쓰기 파라미터로 넣으므로 기존 객체 metadata를 다시 쓸 필요가 없다. 신규 PUT metadata는
   위 Cache-Control을 사용한다. URL 만료는 새 요청 URL의 유효성만 끝내며 이미 캐시된 바이트를
   자동으로 회수·폐기하지 않는다.
+- 기존 정사각형 `thumbnail.jpg` 교체 시 이전 캐시와 구분하기 위해 썸네일 signed GET에만
+  `response-content-disposition=inline; filename="thumbnail-fit.jpg"`를 추가한다. 원본·프로필
+  signed URL에는 이 override를 추가하지 않는다.
 - 서명 URL 자체는 DB·Redis·멱등성 결과·이벤트에 저장하거나 재생하지 않는다. 멱등 성공 재생도
   저장된 object key로 현재 권한을 다시 확인한 뒤 현재 UTC 시간 슬롯의 signed URL을 만든다.
   URL이 만료되면 전용 refresh API를 만들지 않고 같은 기존 조회 API를 다시 호출한다.
@@ -300,8 +306,10 @@ credentials·UTC 시간 슬롯에서는 같은 URL을 만들고 다음 UTC 정�
 
 저장소 테스트는 DB와 실제 R2 없이 로컬 stub으로 R2 PUT·부분 실패 보상·삭제 경계를 검증한다.
 입력 30MiB/헤더 4096px 경계, EXIF 방향·위치 메타데이터, 두 limiter의 동시성, 전체 JPEG를
-bounded source subsampling으로 읽는 썸네일, 1080px·JPEG 품질 85, object key 경로와 UTC 시간 슬롯
-기준의 deterministic signed GET·`response-cache-control`·신규 PUT Cache-Control 계약을 포함한다.
+bounded source subsampling으로 읽는 원본 비율 유지·전체 영역 fit 썸네일, 긴 변 최대 1080px·확대 없음·
+JPEG 품질 85·1920x2560→810x1080, 원본 바이트·`width`·`height` 불변, object key 경로와 UTC 시간 슬롯
+기준의 deterministic signed GET·`response-cache-control`·신규 PUT Cache-Control·썸네일 전용
+`response-content-disposition` 계약을 포함한다.
 
 ## 테스트 기준
 
