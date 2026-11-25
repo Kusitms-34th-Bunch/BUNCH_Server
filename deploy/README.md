@@ -91,8 +91,14 @@ openssl rand 64 | openssl base64 -A
   비워 두면 Apple 회원의 탈퇴가 503으로 거절된다.
 - `TERMS_*`: 앱 약관 원문과 같은 버전. 가입·온보딩 배포 전 4개를 채운다.
 - `CLOUDINARY_*`: 사진 저장 설정. 사진 기능 배포 전에 채운다.
-- `RECO_COMBINATION_ENABLED`: 새 추천 번들의 계산·저장 스위치. 기본 꺼짐이며, 목록·적용 API가 새 저장소를 읽도록 바뀌기 전에는
-  켜지 않는다. 꺼져 있으면 큐에 넣지도 계산하지도 않아서 보이는 추천은 기존 그대로다.
+- `RECO_COMBINATION_ENABLED`: 새 추천 번들 스위치. 기본 꺼짐이다. 켜면 목록·상세·적용이 새 저장소를 읽고 옛 추천
+  계산은 멈춘다. 꺼져 있으면 큐에 넣지도 계산하지도 않아서 보이는 추천은 기존 그대로다. 값은 기동할 때 한 번 읽으므로
+  바꾼 뒤 `docker compose up -d --no-deps --force-recreate app`으로 앱을 다시 만든다.
+- `RECO_COMBINATION_BACKFILL_ENABLED`: 켜기 전부터 쌓인 사진의 첫 계산(백필). 기본 꺼짐이다. 켜는 날에만 켠다.
+  1) `RECO_COMBINATION_ENABLED=true`와 함께 켜고 앱을 다시 만들면 기동 직후 한 번 모든 번치의 모든 날을 큐에 넣고,
+  기존 스케줄러(30초마다 20번치)가 계산한다. 2) 로그의 `Recommended bundle backfill queued days`로 넣은 날 수를 보고,
+  계산이 끝나면 이 값을 지우고(또는 `false`) 앱을 다시 만든다. 켜 둔 채 재시작하면 매번 전체를 다시 계산한다.
+  `RECO_COMBINATION_ENABLED`가 꺼져 있으면 아무것도 하지 않는다.
 - `BUNCH_INVITATION_BASE_URL`: 실제 공개 초대장 URL 접두사.
 - `PROFANITY_DICTIONARY_PATH`: 비워 두면 이미지에 번들된 사전을 사용한다. 외부 사전을 쓸 때는
   아래 [금칙어 외부 사전](#profanity-dictionary)을 먼저 준비하고 `/app/profanity/dictionary.json`을 지정한다.
