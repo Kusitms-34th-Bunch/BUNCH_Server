@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.*
 import com.bunch.bunch.dto.*
 import com.bunch.global.exception.BusinessException
@@ -19,6 +20,7 @@ import java.util.UUID
 
 @Service
 class InvitationService(
+    private val imageUrls: ImageUrls,
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
     private val invitations: InvitationRepository,
@@ -100,7 +102,7 @@ class InvitationService(
                 entityManager.refresh(it)
                 it.lastUsedAt = Instant.now()
             }
-            return JoinResponse(replay.outcome, BunchResponse.from(bunch))
+            return JoinResponse(replay.outcome, BunchResponse.from(bunch, imageUrls.profile(bunch.imageKey)))
         }
 
         if (resolved == null) rateLimiter.invalidInvitation(userId)
@@ -116,7 +118,7 @@ class InvitationService(
         if (existing != null) {
             existing.lastUsedAt = now
             existing.rememberJoin(key, fingerprint(current), JoinOutcome.ALREADY_MEMBER)
-            return JoinResponse(JoinOutcome.ALREADY_MEMBER, BunchResponse.from(bunch))
+            return JoinResponse(JoinOutcome.ALREADY_MEMBER, BunchResponse.from(bunch, imageUrls.profile(bunch.imageKey)))
         }
 
         if (memberships.countByBunchIdAndStatus(bunch.id) >= 8) fail(ErrorCode.BUNCH_FULL)
@@ -134,7 +136,7 @@ class InvitationService(
         accessNotices.removeForRejoin(userId, bunch.id)
         bunch.membershipVersion++
         notifications.memberJoined(bunch.id, membership.id, userId, member.nickname!!, now)
-        return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch))
+        return JoinResponse(JoinOutcome.JOINED, BunchResponse.from(bunch, imageUrls.profile(bunch.imageKey)))
     }
 
     private fun eligibility(userId: Long, bunchId: Long): InviteEligibility = when {
@@ -149,7 +151,7 @@ class InvitationService(
         return InvitationCard(
             bunch.name,
             bunch.introduction,
-            bunch.imageUrl,
+            imageUrls.profile(bunch.imageKey),
             memberships.inviterNickname(invitation.issuerMemberId, invitation.bunchId),
             invitation.code,
             bunch.characterType

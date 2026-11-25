@@ -2,42 +2,19 @@ package com.bunch.global.image
 
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.fasterxml.jackson.databind.JsonNode
-import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.core.io.ByteArrayResource
-import org.springframework.http.HttpEntity
-import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Service
-import org.springframework.util.LinkedMultiValueMap
-import org.springframework.web.client.RestClient
 import org.springframework.web.multipart.MultipartFile
 import java.io.IOException
-import java.net.URI
-import java.net.http.HttpClient
-import java.time.Duration
 import java.util.UUID
 
 @Service
 class PhotoImageStorage(
-    @Value("\${cloudinary.cloud-name:}")
-    private val cloudName: String = "",
-    @Value("\${cloudinary.api-key:}")
-    private val apiKey: String = "",
-    @Value("\${cloudinary.api-secret:}")
-    private val apiSecret: String = "",
-    @Value("\${cloudinary.upload-base-url:https://api.cloudinary.com}")
-    private val uploadBaseUrl: String = "https://api.cloudinary.com",
-    @Value("\${photo-image.max-dimension:$DEFAULT_MAX_DIMENSION}")
-    private val maxDimension: Int = DEFAULT_MAX_DIMENSION,
-    @Value("\${photo-image.read-timeout-seconds:$DEFAULT_READ_TIMEOUT_SECONDS}")
-    readTimeoutSeconds: Long = DEFAULT_READ_TIMEOUT_SECONDS,
-    private val client: RestClient = restClient(readTimeoutSeconds)
+    private val objects: R2ObjectStorage = R2ObjectStorage(),
+    @Value("\${photo-image.max-dimension:4096}")
+    private val maxDimension: Int = 4096
 ) {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
     /**
      * Checks a client upload without decoding it. The bytes are returned untouched so the caller can hash
      * them once and decide whether to [upload] at all.
@@ -63,113 +40,38 @@ class PhotoImageStorage(
         }
         if (maxOf(header.width, header.height) > maxDimension) reject(PhotoImageRejection.RESOLUTION_EXCEEDED)
         if (header.hasLocationMetadata) reject(PhotoImageRejection.LOCATION_METADATA)
-        return PhotoImage(bytes, header.width, header.height)
+        val orientation = try {
+            JpegOrientation.read(bytes)
+        } catch (_: IllegalArgumentException) {
+            reject(PhotoImageRejection.UNSUPPORTED_FORMAT)
+        }
+        return if (orientation >= 5) {
+            PhotoImage(bytes, header.height, header.width)
+        } else {
+            PhotoImage(bytes, header.width, header.height)
+        }
     }
 
     fun upload(image: PhotoImage): StoredImage {
-        val publicId = "photos/${UUID.randomUUID()}"
-        val endpoint = endpoint("upload")
-        try {
-            val body = LinkedMultiValueMap<String, Any>().apply {
-                val resource = object : ByteArrayResource(image.bytes) {
-                    override fun getFilename() = "photo.jpg"
-                }
-                add(
-                    "file",
-                    HttpEntity(
-                        resource,
-                        HttpHeaders().apply {
-                            contentType = MediaType.IMAGE_JPEG
-                        }
-                    )
-                )
-                add("public_id", publicId)
-                add("overwrite", "false")
-            }
-            val response = client.post().uri(endpoint)
-                .headers { it.setBasicAuth(apiKey, apiSecret) }
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(body).retrieve()
-                .onStatus(
-                    { !it.is2xxSuccessful }
-                ) { _, _ -> throw IllegalStateException() }
-                .body(JsonNode::class.java)
-                ?: throw IllegalStateException()
-            val url = response.path("secure_url").takeIf { it.isTextual }?.textValue()
-                ?: throw IllegalStateException()
-            val secureUrl = URI(url)
-            check(
-                secureUrl.scheme == "https" &&
-                    !secureUrl.host.isNullOrBlank() &&
-                    secureUrl.rawUserInfo == null &&
-                    secureUrl.rawFragment == null
-            )
-            check(response.path("public_id").isTextual && response.path("public_id").textValue() == publicId)
-            check(
-                response.path("resource_type").textValue() == "image" &&
-                    response.path("format").textValue() == "jpg"
-            )
-            check(
-                response.path("width").isIntegralNumber &&
-                    response.path("width").canConvertToInt() &&
-                    response.path("width").intValue() == image.width &&
-                    response.path("height").isIntegralNumber &&
-                    response.path("height").canConvertToInt() &&
-                    response.path("height").intValue() == image.height
-            )
-            return StoredImage(publicId, url)
+        // Validate/decode before any remote write; the original is never re-encoded.
+        val thumbnail = try {
+            PhotoThumbnail.create(image.bytes)
         } catch (_: Exception) {
-            // The request may have succeeded remotely even when its response was lost or invalid.
-            delete(publicId)
+            reject(PhotoImageRejection.UNSUPPORTED_FORMAT)
+        }
+        val key = "photos/${UUID.randomUUID()}/original.jpg"
+        try {
+            objects.put(key, image.bytes)
+            objects.put(ImageObjectKeys.thumbnail(key), thumbnail)
+            return StoredImage(key)
+        } catch (_: Exception) {
+            // PUT may have succeeded before its response was lost. Attempt both objects independently.
+            objects.deleteImage(key)
             throw BusinessException(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED)
         }
     }
 
-    fun delete(publicId: String?) {
-        if (publicId.isNullOrBlank()) return
-        try {
-            val body = LinkedMultiValueMap<String, String>().apply {
-                add("public_id", publicId)
-                add("invalidate", "true")
-            }
-            val response = client.post().uri(endpoint("destroy"))
-                .headers { it.setBasicAuth(apiKey, apiSecret) }
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .body(body).retrieve()
-                .onStatus(
-                    { !it.is2xxSuccessful }
-                ) { _, _ -> throw IllegalStateException() }
-                .body(JsonNode::class.java)
-            check(response?.path("result")?.textValue() in setOf("ok", "not found"))
-        } catch (_: Exception) {
-            // Never include the exception: HTTP failures can contain URLs, headers or credentials.
-            logger.warn("Photo image deletion failed: publicId={}", publicId)
-        }
-    }
-
-    private fun endpoint(action: String): URI {
-        try {
-            check(
-                cloudName.matches(Regex("[A-Za-z0-9_-]+")) &&
-                    apiKey.isNotBlank() &&
-                    apiSecret.isNotBlank()
-            )
-            val base = URI(uploadBaseUrl.trimEnd('/'))
-            val localStub = base.scheme == "http" && base.host in setOf("127.0.0.1", "localhost", "[::1]")
-            check(
-                (base.scheme == "https" || localStub) &&
-                    !base.host.isNullOrBlank() &&
-                    base.rawUserInfo == null &&
-                    base.rawQuery == null &&
-                    base.rawFragment == null &&
-                    base.rawPath.isNullOrEmpty()
-            )
-            return URI("$base/v1_1/$cloudName/image/$action")
-        } catch (_: Exception) {
-            // Missing or invalid settings disable storage, never application startup.
-            throw BusinessException(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED)
-        }
-    }
+    fun delete(objectKey: String?) = objects.deleteImage(objectKey)
 
     private fun reject(reason: PhotoImageRejection): Nothing = throw PhotoImageRejectedException(reason)
 
@@ -177,20 +79,3 @@ class PhotoImageStorage(
         const val MAX_BYTES = 30 * 1024 * 1024
     }
 }
-
-private const val DEFAULT_MAX_DIMENSION = 4096
-private const val DEFAULT_READ_TIMEOUT_SECONDS = 60L
-
-private fun restClient(readTimeoutSeconds: Long): RestClient = RestClient.builder()
-    .requestFactory(
-        JdkClientHttpRequestFactory(
-            HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3))
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build()
-        ).apply {
-            // A 30 MB upload needs far longer than the 10 seconds a small profile image gets.
-            setReadTimeout(Duration.ofSeconds(readTimeoutSeconds))
-        }
-    )
-    .build()

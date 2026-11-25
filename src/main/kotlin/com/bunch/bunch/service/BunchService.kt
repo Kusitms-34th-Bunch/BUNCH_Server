@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.*
 import com.bunch.bunch.dto.*
 import com.bunch.global.common.ProfileText
@@ -23,6 +24,7 @@ import java.util.UUID
 
 @Service
 class BunchService(
+    private val imageUrls: ImageUrls,
     private val bunches: BunchRepository,
     private val memberships: BunchMembershipRepository,
     private val members: MemberRepository,
@@ -71,8 +73,10 @@ class BunchService(
 
         bunches.findByCreatedByAndCreationRequestKey(userId, key)?.let { previous ->
             if (previous.creationFingerprint != fingerprint) fail(ErrorCode.IDEMPOTENCY_CONFLICT)
-            memberships.findByMemberIdAndBunchIdAndStatus(userId, previous.id)?.let { it.lastUsedAt = now }
-            return BunchResponse.from(previous)
+            val membership = memberships.findByMemberIdAndBunchIdAndStatus(userId, previous.id)
+                ?: fail(ErrorCode.FORBIDDEN)
+            membership.lastUsedAt = now
+            return BunchResponse.from(previous, imageUrls.profile(previous.imageKey))
         }
 
         if (memberships.countByMemberIdAndStatus(userId) >= 10) fail(ErrorCode.MEMBERSHIP_LIMIT_EXCEEDED)
@@ -102,7 +106,7 @@ class BunchService(
         )
 
         bunch.membershipVersion++
-        return BunchResponse.from(bunch)
+        return BunchResponse.from(bunch, imageUrls.profile(bunch.imageKey))
     }
 
     @Transactional(readOnly = true)
@@ -112,7 +116,7 @@ class BunchService(
     @Transactional(readOnly = true)
     fun defaultBunch(userId: Long): BunchResponse? =
         memberships.findFirstByMemberIdAndStatusOrderByLastUsedAtDescIdDesc(userId)
-            ?.let { BunchResponse.from(it.bunch) }
+            ?.let { BunchResponse.from(it.bunch, imageUrls.profile(it.bunch.imageKey)) }
 
     @Transactional
     fun updateLastUsed(userId: Long, bunchId: Long) {
@@ -137,10 +141,10 @@ class BunchService(
                 current.profileVersion++
                 imageAssets.releaseAfterCommit(previousAssetId)
                 bunches.flush()
-                BunchResponse.from(current)
+                BunchResponse.from(current, imageUrls.profile(current.imageKey))
             }!!
         } catch (ex: Exception) {
-            images.delete(uploaded.publicId)
+            images.delete(uploaded.objectKey)
             throw ex
         }
         return result
@@ -155,7 +159,7 @@ class BunchService(
             current.profileImageAsset = null
             imageAssets.releaseAfterCommit(previousAssetId)
             bunches.flush()
-            BunchResponse.from(current)
+            BunchResponse.from(current, imageUrls.profile(current.imageKey))
         }!!
         return result
     }

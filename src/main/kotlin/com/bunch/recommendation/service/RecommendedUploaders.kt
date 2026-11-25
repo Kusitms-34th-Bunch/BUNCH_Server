@@ -1,5 +1,6 @@
 package com.bunch.recommendation.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.dto.RecommendedUploader
 import org.springframework.stereotype.Component
@@ -10,12 +11,13 @@ import org.springframework.stereotype.Component
  */
 @Component
 class RecommendedUploaders(
-    private val recommendations: RecommendationRepository
+    private val recommendations: RecommendationRepository,
+    private val imageUrls: ImageUrls
 ) {
     /** The members who uploaded each photo, as the badge shows them: the nickname and the profile image now. */
     fun of(photoIds: List<Long>): Map<Long, List<RecommendedUploader>> =
         recommendations.findUploaderProfiles(photoIds.distinct())
-            .groupBy({ it.photoId }, { RecommendedUploader(it.memberId, it.nickname, it.imageUrl) })
+            .groupBy({ it.photoId }, { RecommendedUploader(it.memberId, it.nickname, imageUrls.profile(it.imageKey)) })
 
     /**
      * The members of a card, the one who uploaded the most photos of it first and the lower member number first when

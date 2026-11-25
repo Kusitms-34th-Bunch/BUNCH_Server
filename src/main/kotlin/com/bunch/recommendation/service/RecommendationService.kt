@@ -1,5 +1,6 @@
 package com.bunch.recommendation.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchRepository
 import com.bunch.bunch.service.BunchAccessNoticeService
@@ -7,7 +8,6 @@ import com.bunch.bundle.domain.BundleEventType
 import com.bunch.bundle.dto.BundleChangedEvent
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.bunch.global.image.PhotoImageUrls
 import com.bunch.photo.service.PhotoChangedEvent
 import com.bunch.recommendation.domain.BundleCandidate
 import com.bunch.recommendation.domain.CandidateExpiry
@@ -40,6 +40,7 @@ import java.time.LocalDate
 
 @Service
 class RecommendationService(
+    private val imageUrls: ImageUrls,
     private val recommendations: RecommendationRepository,
     private val entityManager: EntityManager,
     private val bunches: BunchRepository,
@@ -85,7 +86,7 @@ class RecommendationService(
                 endDate = candidate.endDate,
                 photoCount = photos.size,
                 uploaders = chipsOf(photos.map { uploadersOf[it.photoId].orEmpty() }),
-                coverImageUrl = PhotoImageUrls.full(photos.first().imageUrl)
+                coverImageUrl = imageUrls.thumbnail(photos.first().imageKey)
             )
         }
         return RecommendedBundleListResponse(cards)
@@ -110,8 +111,8 @@ class RecommendationService(
         val photos = rows.map { row ->
             RecommendedBundlePhoto(
                 photoId = row.photoId,
-                thumbnailUrl = PhotoImageUrls.thumbnail(row.imageUrl),
-                imageUrl = PhotoImageUrls.full(row.imageUrl),
+                thumbnailUrl = imageUrls.thumbnail(row.imageKey),
+                imageUrl = imageUrls.full(row.imageKey),
                 capturedDate = row.capturedDate,
                 capturedTime = row.capturedTime,
                 uploaders = uploadersOf[row.photoId].orEmpty()

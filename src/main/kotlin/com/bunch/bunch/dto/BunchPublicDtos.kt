@@ -69,4 +69,4 @@ data class BunchPublicBundleDetail(
     val commentCount: Long
 )
 
-data class BunchPublicBundleCover(val bundleId: Long, val imageUrl: String)
+data class BunchPublicBundleCover(val bundleId: Long, val objectKey: String)

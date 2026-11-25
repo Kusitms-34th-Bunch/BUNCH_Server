@@ -70,7 +70,7 @@ class RecommendedBundleReaderIntegrationTest : PhotoHttpTestSupport() {
         jdbc.update("DELETE FROM recommended_bundles")
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-http/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-http-%/original.jpg'")
     }
 
     // --- the list (4.2.1, 4.2.2, 4.2.9 rule 6) ---
@@ -122,7 +122,7 @@ class RecommendedBundleReaderIntegrationTest : PhotoHttpTestSupport() {
         val detail = reader.photos(ownerId, bunchId, card.id)
 
         assertThat(detail.photos.first().photoId).isEqualTo(onCard[3])
-        assertThat(card.coverImageUrl).isEqualTo(detail.photos.first().imageUrl)
+        assertThat(card.coverImageUrl).isEqualTo(detail.photos.first().thumbnailUrl)
     }
 
     @Test

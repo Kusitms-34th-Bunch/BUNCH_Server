@@ -3,7 +3,7 @@ package com.bunch.recommendation.service
 import com.bunch.bunch.service.BunchAccessNoticeService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.bunch.global.image.PhotoImageUrls
+import com.bunch.global.image.ImageUrls
 import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.RecommendationRepository.CardPhotoRow
 import com.bunch.recommendation.domain.RecommendedBundle
@@ -43,6 +43,7 @@ class RecommendedBundleReader(
     private val bundles: RecommendedBundleRepository,
     private val recommendations: RecommendationRepository,
     private val uploaders: RecommendedUploaders,
+    private val imageUrls: ImageUrls,
     private val accessNotices: BunchAccessNoticeService,
     private val settings: CombinationSettings,
     private val clock: Clock
@@ -82,7 +83,7 @@ class RecommendedBundleReader(
                 endDate = endDateOf(bundle),
                 photoCount = photos.size,
                 uploaders = uploaders.chipsOf(photos.map { uploadersOf[it.photoId].orEmpty() }),
-                coverImageUrl = PhotoImageUrls.full(coverFirst(photos, bundle.coverPhotoId).first().imageUrl),
+                coverImageUrl = imageUrls.thumbnail(coverFirst(photos, bundle.coverPhotoId).first().imageKey),
                 startAt = bundle.startAt.atZone(settings.defaultZone).toOffsetDateTime(),
                 endAt = bundle.endAt.atZone(settings.defaultZone).toOffsetDateTime()
             )
@@ -107,8 +108,8 @@ class RecommendedBundleReader(
         val photos = ordered.map { row ->
             RecommendedBundlePhoto(
                 photoId = row.photoId,
-                thumbnailUrl = PhotoImageUrls.thumbnail(row.imageUrl),
-                imageUrl = PhotoImageUrls.full(row.imageUrl),
+                thumbnailUrl = imageUrls.thumbnail(row.imageKey),
+                imageUrl = imageUrls.full(row.imageKey),
                 capturedDate = row.capturedDate,
                 capturedTime = row.capturedTime,
                 uploaders = uploadersOf[row.photoId].orEmpty()
