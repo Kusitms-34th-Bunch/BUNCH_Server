@@ -8,8 +8,8 @@
 - `dev → main` 릴리스 PR에 새 workflow가 포함됐는지 확인하고 기존 홈 배포가 실행 중이면 종료를 기다린다.
   과거 홈 배포 실행을 다시 실행하지 않는다. 새 `main` push는 검증한 앱 이미지를 GHCR에 게시하고 서버에서 받는다.
   서버에서 이미지를 받을 때 기존 SSH Secrets와 Actions의 `GITHUB_TOKEN`을 사용한다.
-- #226을 먼저 반영하고 #225를 함께 적용한다. R2는 현재 V53에서 V55로 넘어간다.
-  #217을 나중에 반영할 경우 아직 적용하지 않은 V54의 번호를 V55 이후로 조정한다.
+- #226을 먼저 반영하고 #225를 함께 적용한다. 현재 V53에서 R2 V55와 사진 원본 크기 V56으로 넘어간다.
+  #217을 나중에 반영할 경우 아직 적용하지 않은 V54의 번호를 V56 이후로 조정한다.
   두 `.env`의 `APP_IMAGE`에는 CI 요약의 같은 GHCR digest를 입력한다.
 - 현재 홈 Compose·환경 파일·실행 이미지 digest·마운트·볼륨을 확인하고 복구할 수 있게 보관한다.
   DB dump와 Redis 볼륨(AOF 포함)은 별도 저장소에 보관하고 별도 DB/Redis에서 복구를 시험한다.
@@ -56,7 +56,7 @@ docker volume create bunch-prod-redis-data
    기존 DB·Redis를 정지한다. 기존 데이터 볼륨은 개발용으로 보존한다. 이때 Grafana 외부 접근도 잠시 중단된다.
 2. `~/prod`에서 `docker compose up -d --wait postgres redis`로 기존 `bunch` 프로젝트의 DB·Redis를
    새 운영 볼륨에 연결한다. 실제 마운트가 `bunch-prod-pgdata`·`bunch-prod-redis-data`인지 확인한다.
-   아래 순서로 운영 앱 DB를 초기화한 뒤 앱을 기동한다. 빈 DB는 기존 마이그레이션과 R2 V55를 적용한다.
+   아래 순서로 운영 앱 DB를 초기화한 뒤 앱을 기동한다. 빈 DB는 기존 마이그레이션과 R2 V55·사진 크기 V56을 적용한다.
 3. `~/prod`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
    내부 health·운영 DB·Redis·R2와 대시보드를 확인하고 개발 토큰 API 차단을 확인한 뒤 기존 Tunnel을 기동한다.
    `api.bunch.kr → http://app:8080`, `grafana.bunch.kr → http://grafana:3000`으로 접근되는지 확인한다.
