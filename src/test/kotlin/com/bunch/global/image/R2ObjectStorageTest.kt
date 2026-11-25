@@ -72,8 +72,8 @@ class R2ObjectStorageTest {
             assertEquals(2, puts.size)
             assertArrayEquals(bytes, puts.first().body)
             val thumbnail = ImageIO.read(puts.last().body.inputStream())
-            assertEquals(300, thumbnail.width)
-            assertEquals(300, thumbnail.height)
+            assertEquals(600, thumbnail.width)
+            assertEquals(600, thumbnail.height)
         }
     }
 

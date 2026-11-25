@@ -12,7 +12,7 @@
 - 사진은 `photos/<ID>/original.jpg`, `photos/<ID>/thumbnail.jpg`에 저장한다.
   신규 ID는 UUID이며 기존 자산은 ImageAsset ID를 사용한다.
 - 프로필은 `profiles/<ID>/profile.jpg` 한 장을 저장한다. DB에는 `image_assets.object_key`만 저장한다.
-- 원본 바이트와 Photo 해시는 유지한다. 사진 썸네일은 EXIF 방향을 반영한 최대 300px 중앙 정사각 JPEG 품질75다.
+- 원본 바이트와 Photo 해시는 유지한다. 사진 썸네일은 EXIF 방향을 반영한 최대 1080px 중앙 정사각 JPEG 품질85다.
 - 목록은 썸네일, 상세는 원본을 제공한다. 권한 검사 뒤 1800초 GET URL을 서명한다.
 
 ## 운영 우선 전환

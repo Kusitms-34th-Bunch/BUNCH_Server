@@ -61,7 +61,7 @@ GET /api/v1/bunches/{bunchId}/photos/undated
 | --- | --- |
 | `totalCount` | **멤버 필터를 적용한** 날짜 미확인 사진 수. 「촬영 날짜를 확인할 사진 N장」의 N이다(3.1.2 로직 3, 3.1.5 상세 1). `size`와 무관하다 |
 | `photos[].photoId` | 사진 ID |
-| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 비공개 R2 `thumbnail.jpg`의 정확히 1800초 유효한 서명 URL(300px). 별도 배지는 붙이지 않는다(3.1.4) |
+| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 비공개 R2 `thumbnail.jpg`의 정확히 1800초 유효한 서명 URL(1080px). 별도 배지는 붙이지 않는다(3.1.4) |
 | `photos[].width`, `photos[].height` | EXIF 회전을 적용한 원본의 표시 픽셀 크기(Int). 기존 사진의 크기가 없으면 두 값 모두 `null`이다. |
 | `photos[].uploaderIds` | 올린 멤버 ID 목록. 함께 올린 사진은 여러 명이며 올린 순서다. 닉네임·프로필은 `GET /api/v1/bunches/{bunchId}/members`(#43)를 쓴다 |
 | `photos[].usedInDraftBundle` | 작성 중인(초안) 번들에 들어 있는 사진이면 `true`. 발행된 번들에만 쓰였거나 안 쓰였으면 `false`. 선택 모드에서 삭제할 때 확인 창의 문구를 고르는 데 쓴다(3.1.5 상세 4, 3.3.5) |

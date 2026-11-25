@@ -252,8 +252,8 @@ FK와 API `imageUrl`이 모두 `null`이다. 세부 순서와 복구는 [R2 이�
 
 `PhotoImageStorage.upload`는 DB transaction 밖에서 다음을 한 번 수행한다.
 
-1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 300px이고 작은
-   이미지는 확대하지 않으며 JPEG 품질은 75다.
+1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 1080px이고 작은
+   이미지는 확대하지 않으며 JPEG 품질은 85다.
 2. 원본을 `original.jpg`로, 방금 만든 썸네일을 `thumbnail.jpg`로 R2에 PUT한다.
 
 썸네일은 큐나 별도 비동기 작업으로 만들지 않는다. JPEG 전체를 대상으로 ImageIO의 bounded
@@ -286,7 +286,7 @@ PUT한다. 사진·프로필 모두 외부 저장소 I/O는 DB transaction 밖�
 
 저장소 테스트는 DB와 실제 R2 없이 로컬 stub으로 R2 PUT·부분 실패 보상·삭제 경계를 검증한다.
 입력 30MiB/헤더 4096px 경계, EXIF 방향·위치 메타데이터, 두 limiter의 동시성, 전체 JPEG를
-bounded source subsampling으로 읽는 썸네일, 300px·JPEG 품질 75, object key 경로와 정확한 1800초 서명
+bounded source subsampling으로 읽는 썸네일, 1080px·JPEG 품질 85, object key 경로와 정확한 1800초 서명
 계약을 포함한다.
 
 ## 테스트 기준
