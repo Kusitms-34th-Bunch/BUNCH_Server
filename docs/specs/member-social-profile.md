@@ -17,7 +17,7 @@
 
 | 필드 | 의미 |
 | --- | --- |
-| `memberId`, `nickname`, `imageUrl` | 대상의 공개 정보. 기존 소셜 접근 확인 뒤 `profiles/<UUID>/profile.jpg`의 정확히 1800초 유효한 서명 URL을 만들며 사진이 없으면 `null` |
+| `memberId`, `nickname`, `imageUrl` | 대상의 공개 정보. 기존 소셜 접근 확인 뒤 `profiles/<UUID>/profile.jpg`의 UTC 정시 기준 2시간 후 만료되는 서명 URL을 만들며 사진이 없으면 `null` |
 | `currentBunchId` | 조회자의 현재 번치 ID. 소속 0개는 null |
 | `bunches` | 대상의 현재 ACTIVE 소속만 포함하는 전체 목록. 없으면 빈 배열 |
 | `bunches[].bunch` | 기존 `BunchSocialCard`: id/name/imageUrl/characterType/visibility. `imageUrl`은 같은 권한·서명 규칙의 번치 프로필 URL |

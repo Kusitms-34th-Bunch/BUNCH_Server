@@ -355,7 +355,7 @@ class FeedIntegrationTest : BunchIntegrationSupport() {
         assertThat(card.title).isEqualTo("제목")
         assertThat(card.date.toString()).isEqualTo("2026-10-30")
         assertThat(card.photos).hasSize(2)
-        assertThat(card.photos[0].imageUrl).contains("/photos/feed-cover-").contains("/thumbnail.jpg?").contains("X-Amz-Expires=1800")
+        assertThat(card.photos[0].imageUrl).contains("/photos/feed-cover-").contains("/thumbnail.jpg?").contains("X-Amz-Expires=7200")
         assertThat(card.photos[1].imageUrl).contains("/photos/feed-later-").contains("/thumbnail.jpg?")
         assertThat(card.coverImageUrl).isEqualTo(card.photos.first().imageUrl)
         assertThat(card.locations.map { it.position }).containsExactly(0, 1)

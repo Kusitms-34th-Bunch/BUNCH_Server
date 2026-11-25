@@ -76,7 +76,7 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
   R2 endpoint/bucket/credentials 환경변수 계약과 이전 순서는 [사진함 기반 계약](photo-foundation.md)과
   [R2 이미지 이전 문서](../r2-migration.md)를 따른다. 사용자 입력 URL을 원격 다운로드하지 않는다.
 - 응답의 `imageUrl`은 기존 필드명과 null 계약을 유지한다. 기존 유스케이스의 인증·소속·공개 범위를
-  확인한 뒤 정확히 1800초 유효한 signed GET URL을 생성하며, URL은 DB·멱등 재생 결과·이벤트에
+  확인한 뒤 UTC 정시 기준 2시간 후 만료되는 signed GET URL을 생성하며, URL은 DB·멱등 재생 결과·이벤트에
   저장하지 않는다. 만료되면 같은 기존 조회 API를 다시 호출하고 별도 refresh API는 만들지 않는다.
   회원 사진은 가입 multipart 요청에서 최종 저장한다. 사진 검증/저장만 실패하면 null로 가입을 완료한다.
   필수 프로필 오류·요청 전체의 파싱/전송 실패는 가입을 완료하지 않는다.
@@ -221,7 +221,7 @@ DB 무변경·요청 키 없이 성공, 최종 생성 재검사를 확인한다.
 | --- | --- |
 | memberId | Long, 인증된 본인 ID |
 | nickname | String 또는 null. 가입 완료 전 미저장 상태는 null |
-| imageUrl | String 또는 null. 권한 확인 뒤 1800초 signed profile URL을 생성하며, 미등록·사진 저장 실패·기본 이미지이면 null이고 앱이 기본 프로필을 표시 |
+| imageUrl | String 또는 null. 권한 확인 뒤 UTC 정시 기준 2시간 후 만료되는 signed profile URL을 생성하며, 미등록·사진 저장 실패·기본 이미지이면 null이고 앱이 기본 프로필을 표시 |
 | defaultBunch | 기존 BunchResponse 형식의 {id,name,characterType,imageUrl} 또는 null |
 
 `defaultBunch`는 가입 완료 회원의 서버 current 번치를 기존 `BunchResponse`로 보여주는
@@ -333,7 +333,7 @@ ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책�
 | --- | --- |
 | memberId | Long |
 | nickname | String 또는 null. 가입 완료 멤버는 항상 있다 |
-| imageUrl | String 또는 null. 기존 멤버 조회 권한 확인 뒤 1800초 signed profile URL을 생성하며, 미등록이면 null이고 앱이 기본 이미지를 표시 |
+| imageUrl | String 또는 null. 기존 멤버 조회 권한 확인 뒤 UTC 정시 기준 2시간 후 만료되는 signed profile URL을 생성하며, 미등록이면 null이고 앱이 기본 이미지를 표시 |
 | role | `OWNER`(메인 관리자) / `CO_OWNER`(공동 관리자) / `MEMBER` |
 
 - 활성 멤버만 포함한다. 나가기·내보내짐으로 소속이 끝난 멤버와 탈퇴·정지 계정은 제외한다(3.1.2).

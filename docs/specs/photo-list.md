@@ -36,7 +36,7 @@ GET /api/v1/bunches/{bunchId}/photos
     "photos": [
       {
         "photoId": 5021,
-        "thumbnailUrl": "<signed-1800-second-url-for-photos/UUID/thumbnail.jpg>",
+        "thumbnailUrl": "<hourly-signed-url-for-photos/UUID/thumbnail.jpg>",
         "width": 3024,
         "height": 4032,
         "capturedDate": "2026-10-19",
@@ -55,7 +55,7 @@ GET /api/v1/bunches/{bunchId}/photos
 | --- | --- |
 | `totalCount` | **번치 전체** 사진 수. 멤버 필터·날짜 없는 사진·처리 상태와 무관하다. 1,000장이면 앱이 사진 올리기 시트를 열지 않는다(3.2.1) |
 | `photos[].photoId` | 사진 ID |
-| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 `photos/<UUID>/thumbnail.jpg`의 정확히 1800초 유효한 서명 URL(300px). URL은 저장·재생하지 않으며 만료되면 이 목록 API를 다시 호출한다. NEW 같은 표시는 없다(3.1.4) |
+| `photos[].thumbnailUrl` | 권한 확인 뒤 생성한 `photos/<UUID>/thumbnail.jpg`의 UTC 정시 기준 2시간 후 만료되는 서명 URL(1080px). URL은 저장·재생하지 않으며 만료되면 이 목록 API를 다시 호출한다. NEW 같은 표시는 없다(3.1.4) |
 | `photos[].width`, `photos[].height` | EXIF 회전을 적용한 원본의 표시 픽셀 크기(Int). 크기를 저장하지 않은 기존 사진은 두 값 모두 `null`이다. 앱이 상세 화면의 초기 비율에 사용한다. |
 | `photos[].capturedDate` | 촬영 날짜. 사용자가 조정한 사진은 조정한 날짜(3.1.3 로직 1). 앱이 날짜 섹션으로 묶는다 |
 | `photos[].capturedTime` | 촬영 시각 또는 `null`(시각 없이 날짜만 있는 사진) |

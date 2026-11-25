@@ -11,11 +11,15 @@ import software.amazon.awssdk.core.checksums.RequestChecksumCalculation
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.S3Configuration
-import software.amazon.awssdk.services.s3.model.GetObjectRequest
-import software.amazon.awssdk.services.s3.presigner.S3Presigner
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest
+import software.amazon.awssdk.http.SdkHttpMethod
+import software.amazon.awssdk.http.SdkHttpRequest
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4HttpSigner
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4FamilyHttpSigner.AuthLocation
 import java.net.URI
+import java.time.Clock
 import java.time.Duration
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /** R2 only. Signing uses the local credentials and never performs a HEAD or GET. */
 @Service
@@ -27,14 +31,11 @@ class R2ObjectStorage(
     @Value("\${r2.access-key-id:}")
     private val accessKeyId: String = "",
     @Value("\${r2.secret-access-key:}")
-    private val secretAccessKey: String = ""
+    private val secretAccessKey: String = "",
+    private val clock: Clock = Clock.systemUTC()
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val presigningConfiguration = S3Configuration.builder()
-        .pathStyleAccessEnabled(true)
-        .chunkedEncodingEnabled(false)
-        .checksumValidationEnabled(false)
-        .build()
+    private val signer = AwsV4HttpSigner.create()
     private val clientDelegate = lazy {
         S3Client.builder()
             .endpointOverride(validEndpoint())
@@ -52,31 +53,34 @@ class R2ObjectStorage(
             }
             .build()
     }
-    private val signerDelegate = lazy {
-        S3Presigner.builder()
-            .endpointOverride(validEndpoint())
-            .credentialsProvider(credentials())
-            .region(Region.of("auto"))
-            .serviceConfiguration(presigningConfiguration)
-            .build()
-    }
-
     fun put(key: String, bytes: ByteArray) {
         ImageObjectKeys.requireImage(key)
         clientDelegate.value.putObject(
-            { it.bucket(bucket).key(key).contentType("image/jpeg").cacheControl("private, max-age=1800") },
+            { it.bucket(bucket).key(key).contentType("image/jpeg").cacheControl(IMAGE_CACHE_CONTROL) },
             RequestBody.fromBytes(bytes)
         )
     }
 
     fun sign(key: String): String {
         ImageObjectKeys.requireImage(key)
-        return signerDelegate.value.presignGetObject(
-            GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofSeconds(1800))
-                .getObjectRequest(GetObjectRequest.builder().bucket(bucket).key(key).build())
-                .build()
-        ).url().toExternalForm()
+        val request = SdkHttpRequest.builder()
+            .uri(validEndpoint().resolve("/$bucket/$key"))
+            .method(SdkHttpMethod.GET)
+            .appendRawQueryParameter("response-cache-control", IMAGE_CACHE_CONTROL)
+            .build()
+        val signingTime = clock.instant().truncatedTo(ChronoUnit.HOURS)
+        return signer.sign {
+            it.identity(credentials().resolveCredentials())
+                .request(request)
+                .putProperty(AwsV4HttpSigner.SERVICE_SIGNING_NAME, "s3")
+                .putProperty(AwsV4HttpSigner.REGION_NAME, "auto")
+                .putProperty(AwsV4HttpSigner.DOUBLE_URL_ENCODE, false)
+                .putProperty(AwsV4HttpSigner.NORMALIZE_PATH, false)
+                .putProperty(AwsV4HttpSigner.PAYLOAD_SIGNING_ENABLED, false)
+                .putProperty(AwsV4HttpSigner.AUTH_LOCATION, AuthLocation.QUERY_STRING)
+                .putProperty(AwsV4HttpSigner.EXPIRATION_DURATION, Duration.ofHours(2))
+                .putProperty(AwsV4HttpSigner.SIGNING_CLOCK, Clock.fixed(signingTime, ZoneOffset.UTC))
+        }.request().getUri().toString()
     }
 
     fun deleteImage(key: String?) {
@@ -117,6 +121,9 @@ class R2ObjectStorage(
     @PreDestroy
     fun close() {
         if (clientDelegate.isInitialized()) clientDelegate.value.close()
-        if (signerDelegate.isInitialized()) signerDelegate.value.close()
+    }
+
+    private companion object {
+        const val IMAGE_CACHE_CONTROL = "private, max-age=3600"
     }
 }

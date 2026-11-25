@@ -205,7 +205,7 @@ class RegistrationIntegrationTest @Autowired constructor(
             StoredImage(publicId)
         }
         val result = registrations.complete(member.id, RegistrationRequest("사진성공"), photo)
-        assertThat(result.imageUrl).contains("/bunch-test/$publicId?").contains("X-Amz-Expires=1800")
+        assertThat(result.imageUrl).contains("/bunch-test/$publicId?").contains("X-Amz-Expires=7200")
         assertThat(members.findById(member.id).get().imageKey).isEqualTo(publicId)
     }
 
