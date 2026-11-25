@@ -43,11 +43,8 @@ class Member(
     @Column(length = 64)
     var registrationFingerprint: String? = null
 ) {
-    val imagePublicId: String?
-        get() = profileImageAsset?.publicId
-
-    val imageUrl: String?
-        get() = profileImageAsset?.url
+    val imageKey: String?
+        get() = profileImageAsset?.objectKey
 
     fun requireActive(): Member {
         if (accountStatus != AccountStatus.ACTIVE) throw BusinessException(ErrorCode.UNAUTHORIZED)

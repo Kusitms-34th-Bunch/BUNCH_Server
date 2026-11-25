@@ -72,10 +72,10 @@ class ImageAssetIntegrationTest : BunchIntegrationSupport() {
             doAnswer {
                 assertThat(assets.existsById(asset.id)).isFalse()
                 null
-            }.`when`(storage).delete(asset.publicId)
+            }.`when`(storage).delete(asset.objectKey)
             jdbc.update("DELETE FROM photos WHERE id = ?", photoId)
             release(service, asset.id)
-            org.mockito.Mockito.verify(storage).delete(asset.publicId)
+            org.mockito.Mockito.verify(storage).delete(asset.objectKey)
             assertThat(assets.existsById(asset.id)).isFalse()
         } finally {
             jdbc.update("DELETE FROM photos WHERE id = ?", photoId)
@@ -97,7 +97,7 @@ class ImageAssetIntegrationTest : BunchIntegrationSupport() {
         verifyNoInteractions(storage)
         release(service, asset.id)
         release(service, asset.id)
-        org.mockito.Mockito.verify(storage, org.mockito.Mockito.times(1)).delete(asset.publicId)
+        org.mockito.Mockito.verify(storage, org.mockito.Mockito.times(1)).delete(asset.objectKey)
     }
 
     @Test
@@ -115,7 +115,7 @@ class ImageAssetIntegrationTest : BunchIntegrationSupport() {
         assertThatThrownBy { assets.deleteById(asset.id) }.isInstanceOf(DataIntegrityViolationException::class.java)
         jdbc.update("DELETE FROM image_test_retained_references")
         release(service, asset.id)
-        org.mockito.Mockito.verify(storage).delete(asset.publicId)
+        org.mockito.Mockito.verify(storage).delete(asset.objectKey)
     }
 
     @Test
@@ -124,7 +124,7 @@ class ImageAssetIntegrationTest : BunchIntegrationSupport() {
         val asset = asset()
         jdbc.update("UPDATE members SET profile_image_asset_id = ? WHERE id = ?", asset.id, owner)
         val storage = mock(ProfileImageStorage::class.java)
-        doAnswer { throw IllegalStateException("sensitive upstream detail") }.`when`(storage).delete(asset.publicId)
+        doAnswer { throw IllegalStateException("sensitive upstream detail") }.`when`(storage).delete(asset.objectKey)
         val service = ImageAssetService(assets, storage, transactionManager)
         val logger = LoggerFactory.getLogger(ImageAssetService::class.java) as Logger
         val events = ListAppender<ILoggingEvent>().also { it.start() }
@@ -185,7 +185,7 @@ class ImageAssetIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun asset(): ImageAsset = assets.saveAndFlush(
-        ImageAsset(publicId = "test/${UUID.randomUUID()}", url = "https://images.example/retained.jpg")
+        ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
     ).also { ownedAssets.add(it.id) }
 
     private fun release(service: ImageAssetService, id: Long) {

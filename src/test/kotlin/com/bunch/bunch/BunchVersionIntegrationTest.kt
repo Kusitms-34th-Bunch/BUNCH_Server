@@ -18,6 +18,16 @@ class BunchVersionIntegrationTest : BunchIntegrationSupport() {
     private lateinit var content: BunchPublicService
 
     @Test
+    fun `creation replay cannot issue an image URL after membership ended`() {
+        val owner = member()
+        val key = UUID.randomUUID()
+        val input = request()
+        val bunch = bunches.create(owner, key, input)
+        jdbc.update("UPDATE bunch_memberships SET status = 'LEFT' WHERE bunch_id = ? AND member_id = ?", bunch.id, owner)
+        assertError(ErrorCode.FORBIDDEN) { bunches.create(owner, key, input) }
+    }
+
+    @Test
     fun `creation and each new join increment membership version once but replay and reads do not`() {
         val owner = member()
         val key = UUID.randomUUID()

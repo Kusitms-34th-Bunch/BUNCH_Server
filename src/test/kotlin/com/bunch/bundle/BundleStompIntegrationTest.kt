@@ -1057,7 +1057,7 @@ class BundleStompIntegrationTest : BunchIntegrationSupport() {
         val guest = credential(member())
         val bunchId = create(owner.memberId).id
         join(guest.memberId, issue(owner.memberId, bunchId))
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "stomp/${UUID.randomUUID()}", url = "https://example.test/p.jpg"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         ownAssets.add(asset.id)
         val photo = photoRows.saveAndFlush(Photo(
             bunch = bunchRows.findById(bunchId).orElseThrow(), imageAsset = asset,

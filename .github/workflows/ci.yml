@@ -126,52 +126,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push image
+        id: publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success' && needs.changes.outputs.app == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/kusitms-34th-bunch/bunch_server:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: Pull published image on server
+        if: steps.publish.outputs.digest != ''
         env:
-          IMAGE: ghcr.io/kusitms-34th-bunch/bunch_server:latest
-        run: |
-          docker build -t "$IMAGE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
-          docker push "$IMAGE"
-      - name: Deploy over SSH
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.result == 'success'
-        env:
+          APP_IMAGE: ghcr.io/kusitms-34th-bunch/bunch_server@${{ steps.publish.outputs.digest }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
           SSH_PORT: ${{ vars.SSH_PORT || '22' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_CHANGED: ${{ needs.changes.outputs.app }}
-          MONITORING_CHANGED: ${{ needs.changes.outputs.monitoring }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y sshpass
-          install -m 700 -d ~/.ssh
-          target="$SSH_USER@$SSH_HOST"
-          ssh_options=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
-          sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" \
-            deploy/compose.yaml "$target:compose.yaml" 3<<< "$SSH_PASSWORD"
-          if [[ "$MONITORING_CHANGED" == 'true' ]]; then
-            sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" \
-              'set -eu; cd ~; mkdir -p monitoring' 3<<< "$SSH_PASSWORD"
-            sshpass -d 3 scp "${ssh_options[@]}" -P "$SSH_PORT" -r \
-              deploy/monitoring/. "$target:monitoring/" 3<<< "$SSH_PASSWORD"
-          fi
-          printf '%s' "$GITHUB_TOKEN" | sshpass -d 3 ssh "${ssh_options[@]}" -p "$SSH_PORT" "$target" "
-            set -eu
-            cd ~
-            docker compose config --quiet
-            if [ '$APP_CHANGED' = 'true' ]; then
-              trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-              docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
-              docker compose pull app
-              docker compose up -d --no-deps app
-            fi
-            if [ '$MONITORING_CHANGED' = 'true' ]; then
-              docker compose pull alloy loki prometheus grafana
-              docker compose up -d --no-deps --force-recreate alloy loki prometheus grafana
-            fi
-          " 3<<< "$SSH_PASSWORD"
+          printf '%s' "$GITHUB_TOKEN" |
+            sshpass -d 3 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+              -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+                set -eu
+                export DOCKER_CONFIG=\$(mktemp -d)
+                trap 'rm -r -- \"\$DOCKER_CONFIG\"' EXIT
+                docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin
+                docker pull '$APP_IMAGE'
+              " 3<<< "$SSH_PASSWORD"
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4

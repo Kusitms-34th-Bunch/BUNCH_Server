@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchListRepository
 import com.bunch.bunch.dto.BunchCardResponse
 import com.bunch.bunch.dto.MyBunchItem
@@ -17,6 +18,7 @@ import java.time.Duration
 
 @Service
 class BunchListService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val memberships: BunchListRepository,
     private val notices: BunchAccessNoticeService,
@@ -40,7 +42,7 @@ class BunchListService(
             defaultBunchId = active.firstOrNull()?.bunch?.id,
             activeBunches = active.map { membership ->
                 MyBunchItem(
-                    bunch = BunchCardResponse.from(membership.bunch),
+                    bunch = BunchCardResponse.from(membership.bunch, imageUrls.profile(membership.bunch.imageKey)),
                     myMembership = membership.toHomeMembershipResponse(),
                     unreadCount = notifications.countByRecipientMemberIdAndBunchIdAndCreatedAtAfterAndReadAtIsNull(
                         memberId,

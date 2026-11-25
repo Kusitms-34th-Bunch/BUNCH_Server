@@ -8,8 +8,6 @@ import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import com.bunch.global.profanity.ProfanityFilter
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.bunch.member.domain.*
 import com.bunch.member.service.SocialMemberRegistry
 import com.bunch.notification.service.PushDeviceService
@@ -35,31 +33,7 @@ class AuthServiceTest {
         override fun reserve(provider: AuthProvider, idToken: String, acceptedUntil: Instant) = consumed.add("$provider:$idToken")
     }
     private val pushDevices = mock(PushDeviceService::class.java)
-    private val profanity = ProfanityFilter(ObjectMapper(), "", "classpath:profanity/dictionary-test.json")
-    private val service = AuthService(tokens, refresh, replay, registry, members, verifierList, pushDevices, profanity)
-
-    @Test
-    fun `new dev account rejects prohibited nickname`() {
-        `when`(members.findByNickname("fuck")).thenReturn(null)
-
-        val error = assertThrows(BusinessException::class.java) {
-            service.issueDevToken("fuck")
-        }
-
-        assertEquals(ErrorCode.PROHIBITED_WORD, error.errorCode)
-        verify(members, never()).save(any(Member::class.java))
-    }
-
-    @Test
-    fun `existing legacy dev account with prohibited nickname can still receive a token`() {
-        val existing = Member(id = 1, nickname = "fuck")
-        `when`(members.findByNickname("fuck")).thenReturn(existing)
-
-        val response = service.issueDevToken("fuck")
-
-        assertEquals(existing.id, response.memberId)
-        verify(members, never()).save(any(Member::class.java))
-    }
+    private val service = AuthService(tokens, refresh, replay, registry, members, verifierList, pushDevices)
 
     @Test fun `all providers create independent sessions and preserve OIDC replay protection`() {
         AuthProvider.entries.forEachIndexed { index, provider ->
@@ -231,7 +205,7 @@ class AuthServiceTest {
         val sid = java.util.UUID.randomUUID().toString()
         `when`(sessions.isActive(sid, 1))
             .thenThrow(DataAccessResourceFailureException("private connection details"))
-        val auth = AuthService(issuer, sessions, replay, registry, members, verifierList, pushDevices, profanity)
+        val auth = AuthService(issuer, sessions, replay, registry, members, verifierList, pushDevices)
 
         val exception = assertThrows(BusinessException::class.java) { auth.issueWsToken(1, sid) }
 

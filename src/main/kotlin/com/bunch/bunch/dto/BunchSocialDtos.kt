@@ -56,10 +56,10 @@ data class BunchSocialCard(
     val visibility: Visibility
 ) {
     companion object {
-        fun from(bunch: Bunch) = BunchSocialCard(
+        fun from(bunch: Bunch, imageUrl: String?) = BunchSocialCard(
             bunch.id,
             bunch.name,
-            bunch.imageUrl,
+            imageUrl,
             bunch.characterType,
             bunch.visibility
         )

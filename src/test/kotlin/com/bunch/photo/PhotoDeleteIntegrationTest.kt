@@ -102,7 +102,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     fun `a member deletes a photo only they uploaded`() {
         val fixture = fixture()
         val mine = photo(fixture.bunchId, listOf(fixture.guest))
-        val assetPublicId = mine.imageAsset.publicId
+        val assetObjectKey = mine.imageAsset.objectKey
 
         delete(fixture.guest, fixture.bunchId, listOf(mine.id))
             .andExpect(status().isOk)
@@ -111,7 +111,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
 
         assertThat(photos.existsById(mine.id)).isFalse()
         assertThat(assets.existsById(mine.imageAsset.id)).isFalse()
-        verify(storage, times(1)).delete(assetPublicId)
+        verify(storage, times(1)).delete(assetObjectKey)
     }
 
     @Test
@@ -158,7 +158,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
         assertThat(photos.existsById(others.id)).isFalse()
         assertThat(uploaderIds(others.id)).isEmpty()
         assertThat(assets.existsById(others.imageAsset.id)).isFalse()
-        verify(storage, times(1)).delete(others.imageAsset.publicId)
+        verify(storage, times(1)).delete(others.imageAsset.objectKey)
     }
 
     @ParameterizedTest(name = "{0}")
@@ -331,7 +331,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
             .andExpect(jsonPath("$.error.code").value("PHOTO_004"))
             .andExpect(jsonPath("$.error.detail.missingPhotoIds[0]").value(mine.id))
 
-        verify(storage, times(1)).delete(mine.imageAsset.publicId)
+        verify(storage, times(1)).delete(mine.imageAsset.objectKey)
     }
 
     @Test
@@ -394,7 +394,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
         }
 
         assertThat(photos.existsById(joint.id)).isFalse()
-        verify(storage, times(1)).delete(joint.imageAsset.publicId)
+        verify(storage, times(1)).delete(joint.imageAsset.objectKey)
     }
 
     // ---- Telling the recommended bundles (4.2.9) ----
@@ -530,8 +530,7 @@ class PhotoDeleteIntegrationTest : PhotoHttpTestSupport() {
     ): Photo {
         val asset = assets.saveAndFlush(
             ImageAsset(
-                publicId = "photo-delete/${UUID.randomUUID()}",
-                url = "https://images.example/photo-delete/${UUID.randomUUID()}.jpg"
+                objectKey = "photos/photo-delete-${UUID.randomUUID()}/original.jpg"
             )
         )
         ownedAssetIds += asset.id

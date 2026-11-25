@@ -22,11 +22,11 @@ data class BunchResponse(
     val imageUrl: String?
 ) {
     companion object {
-        fun from(bunch: Bunch) = BunchResponse(
+        fun from(bunch: Bunch, imageUrl: String?) = BunchResponse(
             bunch.id,
             bunch.name,
             bunch.characterType,
-            bunch.imageUrl
+            imageUrl
         )
     }
 }
@@ -39,10 +39,10 @@ data class BunchMemberResponse(
     val role: MembershipRole
 ) {
     companion object {
-        fun from(membership: BunchMembership) = BunchMemberResponse(
+        fun from(membership: BunchMembership, imageUrl: String?) = BunchMemberResponse(
             membership.member.id,
             membership.member.nickname,
-            membership.member.imageUrl,
+            imageUrl,
             membership.role
         )
     }

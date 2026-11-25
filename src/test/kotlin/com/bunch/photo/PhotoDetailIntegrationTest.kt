@@ -23,8 +23,11 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
         jdbc.update("UPDATE members SET profile_image_asset_id = NULL WHERE profile_image_asset_id IN " +
-            "(SELECT id FROM image_assets WHERE public_id LIKE 'test-detail/%')")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-detail/%'")
+            "(SELECT id FROM image_assets WHERE object_key LIKE 'profiles/test-detail-%/profile.jpg')")
+        jdbc.update(
+            "DELETE FROM image_assets WHERE object_key LIKE 'photos/test-detail-%/original.jpg' " +
+                "OR object_key LIKE 'profiles/test-detail-%/profile.jpg'"
+        )
     }
 
     @Test
@@ -34,17 +37,19 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
             bunchId,
             "2026-10-19",
             uploaders = listOf(ownerId),
-            url = "https://res.cloudinary.com/test/image/upload/test-detail/original.jpg"
+            objectKey = "photos/test-detail-original/original.jpg"
         )
 
         detail(ownerId, bunchId, photoId)
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.photoId").value(photoId))
-            .andExpect(
-                jsonPath("$.data.imageUrl")
-                    .value("https://res.cloudinary.com/test/image/upload/test-detail/original.jpg")
-            )
+            .andDo { result ->
+                assertSignedImageUrl(
+                    mapper.readTree(result.response.contentAsString).path("data").path("imageUrl").asText(),
+                    "photos/test-detail-original/original.jpg"
+                )
+            }
             .andExpect(jsonPath("$.data.capturedDate").value("2026-10-19"))
             .andExpect(jsonPath("$.data.uploaders.length()").value(1))
             .andExpect(jsonPath("$.data.usedInDraftBundle").value(false))
@@ -78,7 +83,7 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
         val third = joined(ownerId, bunchId)
         val photoId = photo(bunchId, "2026-10-19", uploaders = listOf(third, ownerId, second))
         jdbc.update("UPDATE members SET nickname = 'renamed' WHERE id = ?", third)
-        setProfileImage(ownerId, "https://res.cloudinary.com/test/image/upload/test-detail/owner.jpg")
+        setProfileImage(ownerId, "profiles/test-detail-owner/profile.jpg")
 
         detail(second, bunchId, photoId)
             .andExpect(jsonPath("$.data.uploaders.length()").value(3))
@@ -86,10 +91,13 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
             .andExpect(jsonPath("$.data.uploaders[0].nickname").value("renamed"))
             .andExpect(jsonPath("$.data.uploaders[0].imageUrl").isEmpty)
             .andExpect(jsonPath("$.data.uploaders[1].memberId").value(ownerId))
-            .andExpect(
-                jsonPath("$.data.uploaders[1].imageUrl")
-                    .value("https://res.cloudinary.com/test/image/upload/test-detail/owner.jpg")
-            )
+            .andDo { result ->
+                assertSignedImageUrl(
+                    mapper.readTree(result.response.contentAsString).path("data").path("uploaders")[1]
+                        .path("imageUrl").asText(),
+                    "profiles/test-detail-owner/profile.jpg"
+                )
+            }
             .andExpect(jsonPath("$.data.uploaders[2].memberId").value(second))
     }
 
@@ -119,11 +127,14 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
         val photoId = photo(bunchId, "2026-10-19", uploaders = listOf(ownerId))
 
         detail(ownerId, bunchId, photoId).andExpect(jsonPath("$.data.uploaders[0].imageUrl").isEmpty)
-        setProfileImage(ownerId, "https://res.cloudinary.com/test/image/upload/test-detail/new.jpg")
-        detail(ownerId, bunchId, photoId).andExpect(
-            jsonPath("$.data.uploaders[0].imageUrl")
-                .value("https://res.cloudinary.com/test/image/upload/test-detail/new.jpg")
-        )
+        setProfileImage(ownerId, "profiles/test-detail-new/profile.jpg")
+        detail(ownerId, bunchId, photoId).andDo { result ->
+            assertSignedImageUrl(
+                mapper.readTree(result.response.contentAsString).path("data").path("uploaders")[0]
+                    .path("imageUrl").asText(),
+                "profiles/test-detail-new/profile.jpg"
+            )
+        }
     }
 
     @Test
@@ -208,12 +219,11 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
 
     private fun base(bunchId: Long) = "/api/v1/bunches/$bunchId/photos"
 
-    private fun setProfileImage(memberId: Long, url: String) {
+    private fun setProfileImage(memberId: Long, objectKey: String) {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-detail/${UUID.randomUUID()}",
-            url
+            objectKey
         )!!
         jdbc.update("UPDATE members SET profile_image_asset_id = ? WHERE id = ?", assetId, memberId)
     }
@@ -224,13 +234,12 @@ class PhotoDetailIntegrationTest : PhotoHttpTestSupport() {
         date: String?,
         status: String = "READY",
         uploaders: List<Long> = emptyList(),
-        url: String = "https://res.cloudinary.com/test/image/upload/test-detail/photo.jpg"
+        objectKey: String = "photos/test-detail-${UUID.randomUUID()}/original.jpg"
     ): Long {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-detail/${UUID.randomUUID()}",
-            url
+            objectKey
         )!!
         val photoId = jdbc.queryForObject(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,

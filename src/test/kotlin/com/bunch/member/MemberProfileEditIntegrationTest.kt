@@ -84,7 +84,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         memberIds.forEach { jdbc.update("DELETE FROM notifications WHERE recipient_member_id = ?", it) }
         memberIds.forEach { jdbc.update("DELETE FROM bunches WHERE created_by = ?", it) }
         memberIds.forEach { members.deleteById(it) }
-        publicIds.forEach { jdbc.update("DELETE FROM image_assets WHERE public_id = ?", it) }
+        publicIds.forEach { jdbc.update("DELETE FROM image_assets WHERE object_key = ?", it) }
     }
 
     @Test
@@ -187,10 +187,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         val old = asset("profile-profanity-old")
         val member = consenting(member(image = old, birthYear = 1990, gender = Gender.MALE))
         val photo = photo(4, 5, 6)
-        val uploaded = StoredImage(
-            publicId("profile-profanity-new"),
-            "https://res.cloudinary.com/test/profile-profanity-new.jpg"
-        )
+        val uploaded = StoredImage(publicId("profile-profanity-new"))
         `when`(images.upload(photo)).thenAnswer {
             dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
             uploaded
@@ -211,7 +208,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         assertThat(saved(member).profileImageAsset?.id).isEqualTo(old.id)
         assertThat(saved(member).birthYear).isEqualTo(1990)
         assertThat(saved(member).gender).isEqualTo(Gender.MALE)
-        verify(images).delete(uploaded.publicId)
+        verify(images).delete(uploaded.objectKey)
     }
 
     @Test
@@ -381,7 +378,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
 
         assertThat(saved(member).profileImageAsset).isNull()
         assertThat(assets.findById(old.id)).isEmpty
-        verify(images).delete(old.publicId)
+        verify(images).delete(old.objectKey)
     }
 
     @Test
@@ -392,7 +389,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         edit(member, nickname = unique("유지"))
 
         assertThat(saved(member).profileImageAsset?.id).isEqualTo(old.id)
-        verify(images, never()).delete(old.publicId)
+        verify(images, never()).delete(old.objectKey)
     }
 
     @Test
@@ -400,15 +397,15 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         val old = asset("before")
         val member = member(image = old)
         val photo = photo(1, 2, 3)
-        val uploaded = StoredImage(publicId("after"), "https://res.cloudinary.com/test/after.jpg")
+        val uploaded = StoredImage(publicId("after"))
         `when`(images.upload(photo)).thenReturn(uploaded)
 
         edit(member, action = ProfileImageAction.REPLACE, photo = photo)
 
-        assertThat(saved(member).imageUrl).isEqualTo(uploaded.url)
+        assertThat(saved(member).imageKey).isEqualTo(uploaded.objectKey)
         assertThat(assets.findById(old.id)).isEmpty
-        verify(images).delete(old.publicId)
-        verify(images, never()).delete(uploaded.publicId)
+        verify(images).delete(old.objectKey)
+        verify(images, never()).delete(uploaded.objectKey)
     }
 
     @Test
@@ -451,7 +448,7 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
         val taken = member()
         val member = member(image = old)
         val photo = photo(7, 8, 9)
-        val uploaded = StoredImage(publicId("orphan"), "https://res.cloudinary.com/test/orphan.jpg")
+        val uploaded = StoredImage(publicId("orphan"))
         `when`(images.upload(photo)).thenReturn(uploaded)
 
         val error = assertThrows<BusinessException> {
@@ -460,16 +457,16 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
 
         assertThat(error.errorCode).isEqualTo(ErrorCode.NICKNAME_TAKEN)
         assertThat(saved(member).profileImageAsset?.id).isEqualTo(old.id)
-        verify(images).delete(uploaded.publicId)
-        verify(images, never()).delete(old.publicId)
+        verify(images).delete(uploaded.objectKey)
+        verify(images, never()).delete(old.objectKey)
     }
 
     @Test
     fun `a retried request ends in the same state and the first upload is released`() {
         val member = member()
         val photo = photo(1, 3, 5)
-        val first = StoredImage(publicId("first"), "https://res.cloudinary.com/test/first.jpg")
-        val second = StoredImage(publicId("second"), "https://res.cloudinary.com/test/second.jpg")
+        val first = StoredImage(publicId("first"))
+        val second = StoredImage(publicId("second"))
         `when`(images.upload(photo)).thenReturn(first, second)
         val nickname = unique("재시도")
 
@@ -478,10 +475,10 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
 
         val saved = saved(member)
         assertThat(saved.nickname).isEqualTo(nickname)
-        assertThat(saved.imageUrl).isEqualTo(second.url)
+        assertThat(saved.imageKey).isEqualTo(second.objectKey)
         verify(images, times(2)).upload(photo)
-        verify(images).delete(first.publicId)
-        verify(images, never()).delete(second.publicId)
+        verify(images).delete(first.objectKey)
+        verify(images, never()).delete(second.objectKey)
     }
 
     @Test
@@ -588,10 +585,10 @@ class MemberProfileEditIntegrationTest @Autowired constructor(
     private fun saved(member: Member): Member = members.findById(member.id).get()
 
     private fun asset(name: String): ImageAsset = assets.saveAndFlush(
-        ImageAsset(publicId = publicId(name), url = "https://res.cloudinary.com/test/$name.jpg")
+        ImageAsset(objectKey = publicId(name))
     )
 
-    private fun publicId(name: String): String = "profiles/$name-${UUID.randomUUID()}".also { publicIds += it }
+    private fun publicId(name: String): String = "profiles/$name-${UUID.randomUUID()}/profile.jpg".also { publicIds += it }
 
     private fun photo(vararg bytes: Byte) = MockMultipartFile("photo", "profile.jpg", "image/jpeg", bytes)
 
