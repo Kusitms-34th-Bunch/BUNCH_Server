@@ -1,5 +1,6 @@
 package com.bunch.member.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.service.BunchService
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service
 
 @Service
 class MemberService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val sessions: RefreshTokenRepository,
     private val bunches: BunchService
@@ -25,7 +27,7 @@ class MemberService(
         return MemberResponse(
             member.id,
             member.nickname,
-            member.imageUrl,
+            imageUrls.profile(member.imageKey),
             if (member.signupStatus == SignupStatus.COMPLETED) bunches.defaultBunch(member.id) else null
         )
     }

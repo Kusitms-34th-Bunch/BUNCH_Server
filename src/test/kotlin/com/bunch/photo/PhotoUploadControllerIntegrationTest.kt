@@ -87,6 +87,29 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
     }
 
     @Test
+    fun `an EXIF rotated upload persists display dimensions rather than encoded or thumbnail dimensions`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val original = jpeg(1, width = 120, height = 80)
+        val exif = byteArrayOf(
+            0x45, 0x78, 0x69, 0x66, 0, 0, // Exif header
+            0x49, 0x49, 42, 0, 8, 0, 0, 0, // Little endian TIFF, first IFD at offset 8
+            1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, // Orientation 6
+            0, 0, 0, 0
+        )
+        val length = exif.size + 2
+        val segment = byteArrayOf(0xff.toByte(), 0xe1.toByte(), 0, length.toByte()) + exif
+        val rotated = original.copyOfRange(0, 2) + segment + original.copyOfRange(2, original.size)
+
+        upload(ownerId, bunchId, rotated)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.result").value("STORED"))
+
+        val dimensions = jdbc.queryForMap("SELECT width, height FROM photos WHERE bunch_id = ?", bunchId)
+        assertThat(dimensions["width"]).isEqualTo(80)
+        assertThat(dimensions["height"]).isEqualTo(120)
+    }
+
+    @Test
     fun `the same file again is excluded and another member's upload is merged`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val otherId = joined(ownerId, bunchId)
@@ -440,11 +463,11 @@ class PhotoUploadControllerIntegrationTest : PhotoUploadTestSupport() {
         ArgumentMatchers.any(MultipartFile::class.java) ?: MockMultipartFile("x", ByteArray(0))
 
     // A different color per seed gives a different file, so each test controls which uploads are the same.
-    private fun jpeg(seed: Int): ByteArray {
-        val image = BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB)
+    private fun jpeg(seed: Int, width: Int = 64, height: Int = 64): ByteArray {
+        val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
         val graphics = image.createGraphics()
         graphics.color = Color(seed * 20 % 256, seed * 37 % 256, seed * 53 % 256)
-        graphics.fillRect(0, 0, 64, 64)
+        graphics.fillRect(0, 0, width, height)
         graphics.dispose()
         return ByteArrayOutputStream().also { ImageIO.write(image, "jpeg", it) }.toByteArray()
     }

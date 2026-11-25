@@ -3,7 +3,9 @@ package com.bunch.feed
 import com.bunch.feed.service.AdvertisementSelector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.io.File
 import java.util.Random
+import java.util.concurrent.TimeUnit
 
 class AdvertisementSelectorTest {
     private val selector = AdvertisementSelector()
@@ -55,6 +57,30 @@ class AdvertisementSelectorTest {
             listOf(2L, 1L, 3L), listOf(2L, 3L, 1L),
             listOf(3L, 1L, 2L), listOf(3L, 2L, 1L)
         )
+    }
+
+    @Test
+    fun `default random works without optional JDK random module`() {
+        val classpath = listOf(
+            AdvertisementRuntimeProbe::class.java,
+            AdvertisementSelector::class.java,
+            kotlin.Unit::class.java
+        ).map { File(it.protectionDomain.codeSource.location.toURI()).path }
+            .distinct().joinToString(File.pathSeparator)
+        val process = ProcessBuilder(
+            File(System.getProperty("java.home"), "bin/java").path,
+            "--limit-modules", "java.base",
+            "-cp", classpath,
+            AdvertisementRuntimeProbe::class.java.name
+        ).redirectErrorStream(true).start()
+        try {
+            assertThat(process.waitFor(20, TimeUnit.SECONDS)).isTrue()
+            val output = process.inputStream.bufferedReader().readText()
+            assertThat(process.exitValue()).withFailMessage(output).isZero()
+            assertThat(output).contains("Advertisement runtime probe passed")
+        } finally {
+            process.destroyForcibly()
+        }
     }
 
     private class ScriptedRandom(vararg indices: Int) : Random(0) {

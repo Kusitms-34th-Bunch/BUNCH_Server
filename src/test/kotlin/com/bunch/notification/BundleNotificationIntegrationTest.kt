@@ -655,10 +655,7 @@ class BundleNotificationIntegrationTest : BunchIntegrationSupport() {
         status: ProcessingStatus = ProcessingStatus.READY
     ): Photo {
         val asset = assets.saveAndFlush(
-            ImageAsset(
-                publicId = "bundle-notification-test/${UUID.randomUUID()}",
-                url = "https://images.example/bundle-notification/${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg")
         )
         ownedAssetIds += asset.id
         val saved = photos.saveAndFlush(

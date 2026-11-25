@@ -304,8 +304,8 @@ class BunchPublicIntegrationTest : BunchIntegrationSupport() {
 
     private fun photo(bundleId: Long, owner: Long): Long {
         val asset = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id,url,created_at) VALUES (?,'https://example.com/public.jpg',now()) RETURNING id",
-            Long::class.java, "public-test/${UUID.randomUUID()}"
+            "INSERT INTO image_assets (object_key,created_at) VALUES (?,now()) RETURNING id",
+            Long::class.java, "photos/public-test-${UUID.randomUUID()}/original.jpg"
         )!!
         assetIds += asset
         return jdbc.queryForObject(
