@@ -37,6 +37,20 @@ class TimeNormalizer(
     }
 
     /**
+     * The shooting time of the photo itself on the absolute clock, down to the millisecond, or null when the photo has
+     * no date, no time or no milliseconds. Nothing is borrowed or corrected, and a time known only to the second is not
+     * a time to the millisecond: two photos are told to be the same moment only by a value that was really recorded
+     * (the duplicate group R1).
+     */
+    fun exactInstant(photo: RecoPhoto): Instant? {
+        val date = photo.capturedDate ?: return null
+        val time = photo.capturedTime ?: return null
+        val millis = photo.capturedMillis ?: return null
+        val local = LocalDateTime.of(date, time).plusNanos(millis * NANOS_PER_MILLI)
+        return photo.utcOffset?.let { local.toInstant(it) } ?: local.atZone(settings.defaultZone).toInstant()
+    }
+
+    /**
      * The day of the recommendation the photo belongs to, or null when its date is not known. A day starts at
      * [CombinationSettings.dayStartHour]: a photo with a time belongs to the day of the local time minus that many
      * hours, so 02:00 on the 20th is a photo of the 19th. A photo with a date only belongs to that date.
@@ -45,5 +59,9 @@ class TimeNormalizer(
         val local = localTime(photo)
         if (local != null) return local.minusHours(settings.dayStartHour.toLong()).toLocalDate()
         return photo.date
+    }
+
+    private companion object {
+        const val NANOS_PER_MILLI = 1_000_000L
     }
 }

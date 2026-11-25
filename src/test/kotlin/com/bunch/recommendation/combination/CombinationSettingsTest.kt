@@ -65,21 +65,24 @@ class CombinationSettingsTest {
         assertThat(settings.sensitiveMinConfidence).isEqualTo(0.50)
         assertThat(settings.activityMinConfidence).isEqualTo(0.50)
         assertThat(settings.sameSceneMinSimilarity).isEqualTo(0.85)
-        assertThat(settings.burstMaxGap).isEqualTo(Duration.ofSeconds(3))
-        assertThat(settings.burstMinSimilarity).isEqualTo(0.90)
-        assertThat(settings.sameCompositionMaxGap).isEqualTo(Duration.ofSeconds(120))
-        assertThat(settings.sameCompositionMinSimilarity).isEqualTo(0.95)
     }
 
     @Test
-    fun `the similarities of the fingerprint start at the numbers of the table and are kept apart from them`() {
+    fun `the burst of one member with one device is two seconds, the new standard R1`() {
+        assertThat(settings.burstMaxGap).isEqualTo(Duration.ofSeconds(2))
+        assertThat(CombinationSettings(burstMaxGap = Duration.ofSeconds(3)).burstMaxGap)
+            .isEqualTo(Duration.ofSeconds(3))
+    }
+
+    @Test
+    fun `the similarities of the fingerprint start at their first numbers and can be moved`() {
         assertThat(settings.fingerprintBurstMinSimilarity).isEqualTo(0.90)
         assertThat(settings.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
 
         val changed = CombinationSettings(fingerprintBurstMinSimilarity = 0.85)
 
         assertThat(changed.fingerprintBurstMinSimilarity).isEqualTo(0.85)
-        assertThat(changed.burstMinSimilarity).isEqualTo(0.90)
+        assertThat(changed.fingerprintSameCompositionMinSimilarity).isEqualTo(0.95)
     }
 
     @Test

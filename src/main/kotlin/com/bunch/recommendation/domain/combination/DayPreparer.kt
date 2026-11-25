@@ -24,7 +24,6 @@ import java.time.LocalDate
 class DayPreparer(
     private val settings: CombinationSettings = CombinationSettings(),
     similarity: ImageSimilarity = FingerprintSimilarity,
-    burstMinSimilarity: Double = settings.fingerprintBurstMinSimilarity,
     sameCompositionMinSimilarity: Double = settings.fingerprintSameCompositionMinSimilarity
 ) {
     private val times = TimeNormalizer(settings)
@@ -36,14 +35,7 @@ class DayPreparer(
         settings.clockCorrectionMinPairs,
         settings.clockCorrectionMinMedian
     )
-    private val grouper = DuplicateGrouper(
-        times,
-        similarity,
-        settings.burstMaxGap,
-        burstMinSimilarity,
-        settings.sameCompositionMaxGap,
-        sameCompositionMinSimilarity
-    )
+    private val grouper = DuplicateGrouper(times, settings.burstMaxGap)
 
     fun prepare(photos: List<RecoPhoto>): PreparationResult {
         val borrowed = borrower.borrow(photos.sortedBy { it.photoId }.map(times::start))

@@ -297,8 +297,8 @@
 
 | 절 | 상태 | 이슈 |
 | --- | --- | --- |
-| 입력: 사진 한 장(`RecoPhoto`) | 교체 예정: AI 필드(단서·활동·피사체·인물 수·임베딩)와 AI 상태 삭제, F7과 R2 추가 | #198(AI 호출), 후속 |
-| 입력 만들기(`RecoPhotoInputBuilder`, #147) | 수정 예정: AI 상태 읽기 삭제, F7 읽기 추가 | 후속 |
+| 입력: 사진 한 장(`RecoPhoto`) | **F7 추가됨**(`capturedMillis`·`deviceModel`·`width`·`height`, 없으면 null, #218). 교체 예정: AI 필드(단서·활동·피사체·인물 수·임베딩)와 AI 상태 삭제, R2 추가 | #218, #198(AI 호출), 후속 |
+| 입력 만들기(`RecoPhotoInputBuilder`, #147) | **F7 읽기 추가됨**(#218). 수정 예정: AI 상태 읽기 삭제 | #218, 후속 |
 | 코드 | 유지: `EventClueCode`·`EventType`·`EstablishedBy` 등은 카드 고르기와 AI 모양 입력이 아직 쓴다. 재작성 이슈에서 이벤트·활동·피사체·인물 수 코드 삭제 | 후속 |
 | 단서 매핑(`EventClueMapping`) | 유지: 카드 고르기의 단서 사진 판단(`EventClues`)이 쓴다. 카드 고르기 재작성 때 삭제 | 후속 |
 | 이벤트 결과, 번들, 규칙 추적 | `EventResult` **삭제됨**. 번들·규칙 추적의 이벤트 필드는 저장·API 정리 이슈에서 삭제 | #199, 후속 |
@@ -404,9 +404,8 @@ AI 공통 결과(`AiAnalysis`)는 모델과 상관없이 같다: 단서(코드, 
 | `TIME_BUCKETS`, `EVENT_SAME_PLACE_GAP` | `timeBuckets`, `eventSamePlaceGap` | 4, 2시간 |
 | `CLUE_MIN_CONF` / `SENSITIVE_MIN_CONF` / `ACTIVITY_MIN_CONF` | `clueMinConfidence` / `sensitiveMinConfidence` / `activityMinConfidence` | 0.70 / 0.50 / 0.50 |
 | `SAME_SCENE_MIN_SIM` | `sameSceneMinSimilarity` | 0.85 |
-| 연사 | `burstMaxGap`, `burstMinSimilarity` | 3초, 0.90 |
-| 거의 같은 구도 | `sameCompositionMaxGap`, `sameCompositionMinSimilarity` | 120초, 0.95 |
-| 연사·같은 구도(지문) | `fingerprintBurstMinSimilarity`, `fingerprintSameCompositionMinSimilarity` | 0.90, 0.95 (개발 제안, 아래 해석한 부분) |
+| 연사(같은 업로더·같은 기기 모델, R1) | `burstMaxGap` | 2초 (#218. 이전 3초, 유사도 0.90과 거의 같은 구도 120초·0.95 설정은 삭제) |
+| 지문 유사도(날짜 빌리기·시계 보정·카드 점수가 아직 씀) | `fingerprintBurstMinSimilarity`, `fingerprintSameCompositionMinSimilarity` | 0.90, 0.95 (개발 제안, 아래 해석한 부분. 중복 묶음은 쓰지 않음) |
 | 시계 보정 | `clockCorrectionMinPairs`, `clockCorrectionMinMedian` | 2쌍, 10분 |
 | 품질 | `quality`(`ImageQualityCriteria`): 흔들림 60·200, 평균 밝기 35·225와 60~200, 양 끝 픽셀 비율 40%·10%(≤5, ≥250), 짧은 변 480·1080, 계산 크기 긴 변 1024px | 4-4 표 |
 | 점수 가중치 | `representativenessWeight`, `qualityWeight`, `diversityWeight` | 0.4, 0.2, 0.4 |
@@ -441,7 +440,7 @@ AI 공통 결과(`AiAnalysis`)는 모델과 상관없이 같다: 단서(코드, 
 | 2 | 날짜·시각 빌리기(`DateBorrower`): 날짜를 모르는 사진은 날짜와 시각을, 시각 없는 사진은 시각을 닮은 사진에서 빌림. 빌린 뒤에도 날짜를 모르면 계산 제외(`excludedPhotoIds`) | 5-3, X2, 기획 원문 X2·X3 |
 | 3 | 기기 시계 보정(`ClockCorrector`): 같은 하루에서 멤버의 사진과 다른 멤버의 닮은 사진의 시각 차이가 2쌍 이상이고 중앙값이 10분 이상이면 그 멤버의 그날 사진 시각을 중앙값만큼 옮김 | 5-5, X5 |
 | 4 | 하루로 나눔. 보정으로 하루가 바뀐 사진이 있으면 오가는 하루를 `movedDays`에 담음 | 5-5 |
-| 5 | 중복 묶음(`DuplicateGrouper`): 하루 안에서 연사(3초, 유사도 0.90)와 거의 같은 구도(120초, 0.95)를 이행적으로 묶음. 지문이 없는 사진과 시각이 없는 사진은 혼자 | 5-4, C1 |
+| 5 | 중복 묶음(`DuplicateGrouper`, **새 기준 R1, #218**): 하루 안에서 ① 밀리초·기기 모델·해상도가 모두 있고 같은 사진(같은 원본을 다시 저장), ② 같은 업로더·같은 기기 모델·`burstMaxGap`(2초) 안의 연사를 이행적으로 묶음. 이미지는 보지 않는다. 값이 없으면(null) 같다고 보지 않으므로 그 사진은 혼자이고, 시각이 없는 사진도 혼자. 같은 파일은 업로드 때 이미 한 사진이라 따로 묶지 않는다 | 새 기준 R1, C1·C2·C8 |
 | 6 | 하루 차단: 계산 대상 중 `PENDING`이 1장이라도 있으면 보류(`Held`), 아니면 확신도 0.50 이상의 민감 단서가 1장이라도 있으면 차단(`Blocked`), 아니면 준비됨(`Ready`) | 5-6, X6, X7, X12, E25 |
 
 결과는 하루별 `DayPreparation`(`Ready`: 사진과 중복 묶음, `Held`: 대기 중인 사진, `Blocked`: 민감 단서)과 계산 제외 사진, 다시 계산할 하루

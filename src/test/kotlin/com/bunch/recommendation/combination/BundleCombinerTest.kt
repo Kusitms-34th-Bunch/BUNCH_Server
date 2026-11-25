@@ -118,7 +118,9 @@ class BundleCombinerTest {
         assertThat(result.excludedPhotoIds).isEmpty()
         val bundle = (result.days.single() as DayCombination.Bundled).bundles.single()
         assertThat(photoIds(bundle)).contains(50L)
-        assertThat(bundle.photoCount).isEqualTo(8)
+        // The picture is not compared any more (R1), so the photo that borrowed the date is a photo of its own.
+        // The borrowing itself is removed by the preparation of the day for the new standard (X2).
+        assertThat(bundle.photoCount).isEqualTo(9)
     }
 
     @Test
@@ -153,7 +155,8 @@ class BundleCombinerTest {
         val bundle = bundles(own + slow).single()
 
         assertThat(bundle.startAt).isEqualTo(Instant.parse("2026-10-19T03:00:00Z"))
-        assertThat(bundle.photoCount).isEqualTo(8)
+        // The same scene of two members is not a duplicate any more (R1): all ten photos count.
+        assertThat(bundle.photoCount).isEqualTo(10)
         assertThat(bundle.uploaderCount).isEqualTo(2)
     }
 

@@ -17,11 +17,10 @@ import kotlin.math.abs
  * morning starts at [dayStartHour], the afternoon at [afternoonStartHour] and the night at [nightStartHour], and the
  * night goes on to the start of the next day.
  *
- * The similarities of a burst and of the same composition come in two kinds because what a similarity is made of
- * changes its scale: the plain ones are for the cosine of two embeddings (the table), the ones of the fingerprint are
- * for [FingerprintSimilarity], the share of equal bits of two 64-bit fingerprints. Their first values are the same
- * numbers (0.90 is 6 different bits, 0.95 is 3) and are to be moved on real photos (14 V6). The gaps in time are the
- * same for both.
+ * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds). The
+ * similarities of the fingerprint are for [FingerprintSimilarity], the share of equal bits of two 64-bit fingerprints
+ * (0.90 is 6 different bits, 0.95 is 3). The duplicate group does not use them any more; the steps that borrow a date,
+ * correct a clock and score a card still do, until those steps are rewritten for the new standard.
  *
  * The numbers of the quality table (4-4) are [quality]. The photo box calculates the quality when a photo is uploaded,
  * so the type of the numbers is in the shared image code and this class only holds them with the others (12).
@@ -59,10 +58,7 @@ data class CombinationSettings(
     val sensitiveMinConfidence: Double = 0.50,
     val activityMinConfidence: Double = 0.50,
     val sameSceneMinSimilarity: Double = 0.85,
-    val burstMaxGap: Duration = Duration.ofSeconds(3),
-    val burstMinSimilarity: Double = 0.90,
-    val sameCompositionMaxGap: Duration = Duration.ofSeconds(120),
-    val sameCompositionMinSimilarity: Double = 0.95,
+    val burstMaxGap: Duration = Duration.ofSeconds(2),
     val fingerprintBurstMinSimilarity: Double = 0.90,
     val fingerprintSameCompositionMinSimilarity: Double = 0.95,
     val clockCorrectionMinPairs: Int = 2,
@@ -115,8 +111,6 @@ data class CombinationSettings(
                 sensitiveMinConfidence,
                 activityMinConfidence,
                 sameSceneMinSimilarity,
-                burstMinSimilarity,
-                sameCompositionMinSimilarity,
                 fingerprintBurstMinSimilarity,
                 fingerprintSameCompositionMinSimilarity
             ).all { it in 0.0..1.0 }
