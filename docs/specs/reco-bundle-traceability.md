@@ -61,7 +61,7 @@
 | 4순위 구성 | 함께 찍은 순간 1장 이상, 10분 구간 최대 절반, 4등분 | `CardPicker.composition`, `CardQuarters`, `TogetherMoments`(#222) | `CardSelectorTest`(C3·C6·C7), `CardQuartersTest` | 구현됨(#229) | 단서·피사체·단체사진 규칙은 삭제 |
 | 5순위 | 시각 간격 10분 → 멤버 많은 순간 → 품질 | `CardPicker.prefer`, `MomentMembers`, `CardSelector` | `CardSelectorTest`, `MomentMembersTest` | 구현됨(#229) | `CardScorer`·`ImageSimilarity`(이미지 지문)·`EventClues` 삭제 |
 | 장 수 | 6~15장 6, 16~25장 8, 26장 이상 10 | `CardSelector`(`CombinationSettings.cardSizeFor`) | `CardSelectorTest` | 구현됨(#229) | 기능명세서(후보 10장 이하면 전부)와 달라 1119를 따름. 기획 확인 대기 |
-| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | `CardCover`(전면 카메라 단계는 렌즈 정보가 입력에 없어 제외), `recommended_bundles.cover_photo_id`(V55) | `CardCoverTest`, `CardSelectorTest`, `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchemaIntegrationTest` | 구현됨(#229) | 읽어서 내려주고 적용 때 맨 앞에 두는 것은 목록·적용 API 이슈. D4 법무 대기 |
+| 커버 | 전면 카메라(D4) → 함께 찍은 순간 → 품질 | `CardCover`(전면 카메라 단계는 렌즈 정보가 입력에 없어 제외), `recommended_bundles.cover_photo_id`(V58) | `CardCoverTest`, `CardSelectorTest`, `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchemaIntegrationTest` | 구현됨(#229) | 읽어서 내려주고 적용 때 맨 앞에 두는 것은 목록·적용 API 이슈. D4 법무 대기 |
 | 이름 | 「날짜 + 시간대」 | `BundleNamer`, `BundleNames`(이벤트·활동 이름) | `BundleNamerTest` | 교체 예정 | 후속 |
 | 카드 정보(D5) | 장 수·멤버 수·시간 범위 | 기존 흐름의 응답에 장 수·멤버 칩·날짜. 새 저장소 연결(#184 PR)도 같은 필드 | `RecommendationApiIntegrationTest`(기존 흐름) | 부분 | 시간 범위 없음. 기획 확정 대기 |
 
