@@ -25,6 +25,25 @@ class PhotoImageStorageTest {
     }
 
     @Test
+    fun `reports display dimensions for all EXIF orientations without changing original bytes`() {
+        for (orientation in 1..8) {
+            val exif = byteArrayOf(
+                0x45, 0x78, 0x69, 0x66, 0, 0,
+                0x49, 0x49, 0x2a, 0, 8, 0, 0, 0,
+                1, 0, 0x12, 1, 3, 0, 1, 0, 0, 0,
+                orientation.toByte(), 0, 0, 0, 0, 0, 0, 0
+            )
+            val bytes = withSegment(jpeg(120, 80), 0xe1, segmentLength(exif.size + 2) + exif)
+
+            val image = storage.inspect(file(bytes))
+
+            assertEquals(if (orientation >= 5) 80 else 120, image.width, "orientation=$orientation")
+            assertEquals(if (orientation >= 5) 120 else 80, image.height, "orientation=$orientation")
+            assertArrayEquals(bytes, image.bytes)
+        }
+    }
+
+    @Test
     fun `does not require a square image and allows the long side limit exactly`() {
         assertDoesNotThrow { storage.inspect(file(jpeg(4096, 1))) }
         assertDoesNotThrow { storage.inspect(file(jpeg(1, 4096))) }

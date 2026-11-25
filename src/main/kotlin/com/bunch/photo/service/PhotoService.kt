@@ -156,7 +156,7 @@ class PhotoService(
         val quality = imageQuality.of(image)
         val file = storage.upload(image)
         val result = try {
-            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint, quality) }!!
+            transaction.execute<PhotoUploadResult> { saveUpload(command, image, hash, file, fingerprint, quality) }!!
         } catch (ex: Exception) {
             discardUnlessSaved(file)
             throw ex
@@ -175,6 +175,7 @@ class PhotoService(
 
     private fun saveUpload(
         command: PhotoUploadCommand,
+        image: PhotoImage,
         hash: String,
         file: StoredImage,
         fingerprint: Long?,
@@ -196,7 +197,9 @@ class PhotoService(
                 dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF,
                 // A bunch keeps one photo per original hash, so a hash another photo already owns is not stored again.
                 originalFileHash = command.originalFileHash.takeUnless { same.originalHashTaken },
-                capturedUtcOffset = command.capturedUtcOffset
+                capturedUtcOffset = command.capturedUtcOffset,
+                width = image.width,
+                height = image.height
             )
         )
         // Every new photo gets its row, so the features that come later have a place to be filled in (4-5).
@@ -344,7 +347,9 @@ class PhotoService(
                     capturedDate = it.capturedDate,
                     capturedTime = it.capturedTime,
                     uploaderIds = uploaderIds[it.id].orEmpty(),
-                    usedInDraftBundle = it.id in inDraft
+                    usedInDraftBundle = it.id in inDraft,
+                    width = it.width,
+                    height = it.height
                 )
             },
             nextCursor = nextCursor
@@ -385,7 +390,9 @@ class PhotoService(
                     photoId = it.id,
                     thumbnailUrl = imageUrls.thumbnail(it.imageKey),
                     uploaderIds = uploaderIds[it.id].orEmpty(),
-                    usedInDraftBundle = it.id in inDraft
+                    usedInDraftBundle = it.id in inDraft,
+                    width = it.width,
+                    height = it.height
                 )
             },
             nextCursor = nextCursor
@@ -403,7 +410,9 @@ class PhotoService(
             capturedDate = photo.capturedDate,
             uploaders = photos.findUploaderProfiles(photoId)
                 .map { PhotoDetailUploader(it.memberId, it.nickname, imageUrls.profile(it.imageKey)) },
-            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty()
+            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty(),
+            width = photo.width,
+            height = photo.height
         )
     }
 

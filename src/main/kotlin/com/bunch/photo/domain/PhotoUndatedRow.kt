@@ -4,4 +4,6 @@ package com.bunch.photo.domain
 interface PhotoUndatedRow {
     val id: Long
     val imageKey: String
+    val width: Int?
+    val height: Int?
 }

@@ -53,7 +53,7 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(result.kind).isEqualTo(PhotoUploadKind.STORED)
         val row = jdbc.queryForMap(
             """SELECT p.bunch_id, p.file_hash, p.processing_status, p.captured_date, p.captured_time,
-                p.date_source, a.object_key FROM photos p JOIN image_assets a ON a.id = p.image_asset_id
+                p.date_source, p.width, p.height, a.object_key FROM photos p JOIN image_assets a ON a.id = p.image_asset_id
                 WHERE p.id = ?""",
             result.photoId
         )
@@ -63,6 +63,8 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(row["captured_date"].toString()).isEqualTo("2026-10-03")
         assertThat(row["captured_time"].toString()).isEqualTo("14:05:09")
         assertThat(row["date_source"]).isEqualTo("EXIF")
+        assertThat(row["width"]).isEqualTo(photo.width)
+        assertThat(row["height"]).isEqualTo(photo.height)
         assertThat(row["object_key"].toString()).matches("photos/test-[A-Za-z0-9-]+/original\\.jpg")
         val uploader = jdbc.queryForMap(
             "SELECT member_id, upload_batch_id FROM photo_uploaders WHERE photo_id = ?",
@@ -146,6 +148,26 @@ class PhotoUploadServiceIntegrationTest : PhotoUploadTestSupport() {
         assertThat(uploaderCount(first.photoId)).isEqualTo(1)
         verify(storage, times(1)).upload(anyImage())
         assertThat(changeEvents()).hasSize(1)
+    }
+
+    @Test
+    fun `reuploading or merging a legacy photo leaves its unknown dimensions null`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val otherId = joined(ownerId, bunchId)
+        val incoming = image("legacy-dimensions")
+        val photoId = insertPhoto(bunchId, hashOf(incoming), uploaderId = ownerId)
+
+        val again = uploads.upload(command(bunchId, ownerId), incoming)
+        val merged = uploads.upload(command(bunchId, otherId), incoming)
+
+        assertThat(again.kind).isEqualTo(PhotoUploadKind.ALREADY_UPLOADED)
+        assertThat(merged.kind).isEqualTo(PhotoUploadKind.MERGED)
+        assertThat(again.photoId).isEqualTo(photoId)
+        assertThat(merged.photoId).isEqualTo(photoId)
+        val dimensions = jdbc.queryForMap("SELECT width, height FROM photos WHERE id = ?", photoId)
+        assertThat(dimensions["width"]).isNull()
+        assertThat(dimensions["height"]).isNull()
+        verifyNoInteractions(storage)
     }
 
     @Test

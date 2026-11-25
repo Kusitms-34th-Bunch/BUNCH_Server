@@ -40,7 +40,16 @@ class PhotoImageStorage(
         }
         if (maxOf(header.width, header.height) > maxDimension) reject(PhotoImageRejection.RESOLUTION_EXCEEDED)
         if (header.hasLocationMetadata) reject(PhotoImageRejection.LOCATION_METADATA)
-        return PhotoImage(bytes, header.width, header.height)
+        val orientation = try {
+            JpegOrientation.read(bytes)
+        } catch (_: IllegalArgumentException) {
+            reject(PhotoImageRejection.UNSUPPORTED_FORMAT)
+        }
+        return if (orientation >= 5) {
+            PhotoImage(bytes, header.height, header.width)
+        } else {
+            PhotoImage(bytes, header.width, header.height)
+        }
     }
 
     fun upload(image: PhotoImage): StoredImage {

@@ -9,4 +9,6 @@ interface PhotoListRow {
     val capturedDate: LocalDate
     val capturedTime: LocalTime?
     val imageKey: String
+    val width: Int?
+    val height: Int?
 }
