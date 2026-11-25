@@ -1,5 +1,6 @@
 package com.bunch.member.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchActionRequestRepository
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
@@ -34,6 +35,7 @@ import java.util.UUID
 
 @Service
 class MemberWithdrawalService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val memberships: BunchMembershipRepository,
     private val bunches: BunchRepository,
@@ -172,7 +174,7 @@ class MemberWithdrawalService(
     private fun BunchMembership.toOwnerBunch() = WithdrawalOwnerBunch(
         bunchId = bunch.id,
         name = bunch.name,
-        imageUrl = bunch.imageUrl,
+        imageUrl = imageUrls.profile(bunch.imageKey),
         myMembershipId = id,
         membershipVersion = bunch.membershipVersion
     )

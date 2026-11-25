@@ -11,5 +11,5 @@ interface ImageAssetRepository : JpaRepository<ImageAsset, Long> {
     @Query("select asset from ImageAsset asset where asset.id = :id")
     fun findLockedById(@Param("id") id: Long): ImageAsset?
 
-    fun existsByPublicId(publicId: String): Boolean
+    fun existsByObjectKey(objectKey: String): Boolean
 }

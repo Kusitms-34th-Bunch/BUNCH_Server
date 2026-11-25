@@ -25,7 +25,7 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
         deleteInsertedBundles()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-undated/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-undated-%/original.jpg'")
     }
 
     @Test
@@ -189,18 +189,20 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
     @Test
     fun `the thumbnail is the square transformation of the stored image and nothing else is returned`() {
         val (ownerId, bunchId) = bunchWithOwner()
+        val objectKey = "photos/test-undated-abc/original.jpg"
         photo(
             bunchId,
             null,
             uploaders = listOf(ownerId),
-            url = "https://res.cloudinary.com/test/image/upload/test-undated/abc.jpg"
+            objectKey = objectKey
         )
 
+        val data = undated(ownerId, bunchId).andExpect(status().isOk).andReturn().data()
+        assertSignedImageUrl(
+            data.path("photos")[0].path("thumbnailUrl").asText(),
+            "photos/test-undated-abc/thumbnail.jpg"
+        )
         undated(ownerId, bunchId)
-            .andExpect(
-                jsonPath("$.data.photos[0].thumbnailUrl")
-                    .value("https://res.cloudinary.com/test/image/upload/c_fill,w_300,h_300/test-undated/abc.jpg")
-            )
             .andExpect(jsonPath("$.data.photos[0].capturedDate").doesNotExist())
             .andExpect(jsonPath("$.data.photos[0].capturedTime").doesNotExist())
             .andExpect(jsonPath("$.data.photos[0].imageUrl").doesNotExist())
@@ -305,13 +307,12 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
         status: String = "READY",
         dateSource: String = if (date == null) "UNKNOWN" else "EXIF",
         uploaders: List<Long> = emptyList(),
-        url: String = "https://res.cloudinary.com/test/image/upload/test-undated/photo.jpg"
+        objectKey: String = "photos/test-undated-${UUID.randomUUID()}/original.jpg"
     ): Long {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-undated/${UUID.randomUUID()}",
-            url
+            objectKey
         )!!
         val photoId = jdbc.queryForObject(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,
@@ -340,10 +341,9 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
 
     private fun seedPhotos(bunchId: Long, count: Int) {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-undated/${UUID.randomUUID()}",
-            "https://res.cloudinary.com/test/image/upload/test-undated/seed.jpg"
+            "photos/test-undated-seed-${UUID.randomUUID()}/original.jpg"
         )!!
         jdbc.update(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,

@@ -38,8 +38,6 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
     @MockitoBean
     private lateinit var storage: ProfileImageStorage
 
-    private val imageUrl = "https://res.cloudinary.com/test/image/upload/test-http/photo.jpg"
-
     @Test
     fun `a bunch without recommended bundles gets an empty list`() {
         val (ownerId, bunchId) = bunchWithOwner()
@@ -76,7 +74,11 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
         assertThat(card.path("startDate").asText()).isEqualTo(gatheringDay)
         assertThat(card.path("endDate").isNull).isTrue()
         assertThat(card.path("photoCount").asInt()).isEqualTo(8)
-        assertThat(card.path("coverImageUrl").asText()).isEqualTo(imageUrl)
+        val coverPhotoId = photosOf(candidate.id).filter { it.second != null }.minBy { it.second!! }.first
+        assertSignedImageUrl(
+            card.path("coverImageUrl").asText(),
+            objectKeyOf(coverPhotoId).replace("/original.jpg", "/thumbnail.jpg")
+        )
     }
 
     @Test
@@ -151,8 +153,9 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
         val shared = detail[2]
         assertThat(shared.path("uploaders").map { it.path("memberId").asLong() }).containsExactly(ownerId, other)
         assertThat(shared.path("uploaders")[0].path("nickname").asText()).isNotBlank()
-        assertThat(shared.path("imageUrl").asText()).isEqualTo(imageUrl)
-        assertThat(shared.path("thumbnailUrl").asText()).contains("c_fill").endsWith("photo.jpg")
+        val objectKey = objectKeyOf(photos[2])
+        assertSignedImageUrl(shared.path("imageUrl").asText(), objectKey)
+        assertSignedImageUrl(shared.path("thumbnailUrl").asText(), objectKey.replace("/original.jpg", "/thumbnail.jpg"))
         assertThat(shared.path("capturedDate").asText()).isEqualTo(gatheringDay)
         assertThat(shared.path("capturedTime").asText()).isEqualTo("19:10:00")
         assertThat(detail[1].path("uploaders")).hasSize(1)
@@ -305,4 +308,10 @@ class RecommendationApiIntegrationTest : RecommendationIntegrationSupport() {
                 .content("""{"photoIds":[${photoIds.joinToString(",")}]}""")
         ).andExpect(status().isOk)
     }
+
+    private fun objectKeyOf(photoId: Long): String = jdbc.queryForObject(
+        "SELECT a.object_key FROM photos p JOIN image_assets a ON a.id = p.image_asset_id WHERE p.id = ?",
+        String::class.java,
+        photoId
+    )!!
 }

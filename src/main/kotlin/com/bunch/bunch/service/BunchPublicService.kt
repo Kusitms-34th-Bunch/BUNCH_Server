@@ -1,5 +1,7 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
+import com.bunch.bunch.domain.PublicBundlePhotoRow
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bunch.domain.BunchPublicRepository
 import com.bunch.bunch.dto.BunchPublicBundleCard
@@ -29,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional
 
 @Service
 class BunchPublicService(
+    private val imageUrls: ImageUrls,
     private val access: BunchSocialAccessService,
     private val feedAccess: FeedAccessService,
     private val publicRepository: BunchPublicRepository,
@@ -43,7 +46,7 @@ class BunchPublicService(
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun members(userId: Long, targetId: Long): List<BunchMemberResponse> {
         val target = access.target(userId, targetId, requireContent = true)
-        return memberships.findActiveMembers(target.id).map(BunchMemberResponse::from)
+        return memberships.findActiveMembers(target.id).map { BunchMemberResponse.from(it, imageUrls.profile(it.member.imageKey)) }
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -59,7 +62,7 @@ class BunchPublicService(
             emptyMap()
         } else {
             publicRepository.findFirstCoverImages(result.content.map { it.id })
-                .associate { it.bundleId to it.imageUrl }
+                .associate { it.bundleId to imageUrls.thumbnail(it.objectKey) }
         }
         val ids = result.content.map { it.id }
         val places = locations.listForBundles(ids)
@@ -119,7 +122,7 @@ class BunchPublicService(
     private fun bundleDetail(
         userId: Long,
         bundle: Bundle,
-        photoRows: List<BunchPublicBundlePhoto>
+        photoRows: List<PublicBundlePhotoRow>
     ): BunchPublicBundleDetail {
         val people = attribution.published(bundle)
         val photoPicks = picks.summaries(bundle, userId, people.participants)
@@ -128,11 +131,11 @@ class BunchPublicService(
             id = bundle.id,
             bunchId = bundle.bunchId,
             title = bundle.title,
-            coverImageUrl = photoRows.firstOrNull()?.imageUrl,
+            coverImageUrl = photoRows.firstOrNull()?.let { imageUrls.thumbnail(it.objectKey) },
             date = bundle.date,
             publishedAt = bundle.publishedAt,
             photos = photoRows.map {
-                it.copy(picks = photoPicks.getValue(it.id))
+                BunchPublicBundlePhoto(it.id, imageUrls.full(it.objectKey), it.position, photoPicks.getValue(it.id))
             },
             contributors = people.participants.map {
                 BunchPublicBundleContributor(it.memberId, it.nickname, it.imageUrl, it.profileAvailable)

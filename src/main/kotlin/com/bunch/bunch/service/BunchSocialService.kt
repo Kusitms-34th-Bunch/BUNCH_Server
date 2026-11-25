@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchBlock
 import com.bunch.bunch.domain.BunchBlockRepository
@@ -41,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional
 
 @Service
 class BunchSocialService(
+    private val imageUrls: ImageUrls,
     private val bunches: BunchRepository,
     private val members: MemberRepository,
     private val follows: BunchFollowRepository,
@@ -281,7 +283,7 @@ class BunchSocialService(
         .requireCompleted()
 
     private fun cards(ids: Collection<Long>): Map<Long, BunchSocialCard> =
-        if (ids.isEmpty()) emptyMap() else follows.findCardBunches(ids).associate { it.id to BunchSocialCard.from(it) }
+        if (ids.isEmpty()) emptyMap() else follows.findCardBunches(ids).associate { it.id to BunchSocialCard.from(it, imageUrls.profile(it.imageKey)) }
 
     private fun pageable(page: Int, size: Int, time: String): PageRequest {
         if (page < 0 || size !in 1..50 || page.toLong() * size > Int.MAX_VALUE) fail(ErrorCode.INVALID_INPUT)

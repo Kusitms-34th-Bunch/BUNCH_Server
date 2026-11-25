@@ -85,7 +85,9 @@ J6/J7(접근 재검사·복구), J8/K8(주소 복사), I9/J9/K9(삭제·되돌�
 `data`는 `{bunchId, selectedMemberId, totalCount, members, items, nextCursor}`다.
 `selectedMemberId=null`은 전체이며 필터 이탈 때 앱의 선택 칩을 이 값으로 맞춘다.
 `totalCount`는 필터와 관계없는 번치 전체 핀 수다. `members`는
-`{membershipId, memberId, nickname, imageUrl, count}`이며 0개 멤버도 포함한다.
+`{membershipId, memberId, nickname, imageUrl, count}`이며 0개 멤버도 포함한다. `imageUrl`은
+기존 핀 목록 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 대해 UTC 정시 기준 2시간 후 만료되도록 서명하고,
+프로필이 없으면 `null`이다. URL 만료 시 이 기존 핀 목록 API를 다시 호출한다.
 기존 멤버 관리 `findActiveMembers`의 OWNER → CO_OWNER → MEMBER, 닉네임·소속 ID 순서를 쓴다.
 이탈·내보내짐·탈퇴 멤버 핀과 개인 계정 삭제로 등록자가 null인 핀은 전체에 남는다.
 현재 계정의 재가입은 기존 핀 최초 등록자를 바꾸지 않으며 해당 계정 칩에서 다시 센다.

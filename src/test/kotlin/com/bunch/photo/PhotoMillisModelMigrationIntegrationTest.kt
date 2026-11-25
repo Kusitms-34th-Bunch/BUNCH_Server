@@ -29,7 +29,7 @@ class PhotoMillisModelMigrationIntegrationTest @Autowired constructor(private va
     fun `an old photo keeps no milliseconds and no device model, and the migration can be repeated`() {
         val schema = "photo_millis_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            val version = MigrationVersion.fromVersion("54")
+            val version = MigrationVersion.fromVersion("57")
             val previous = configure(schema).info().all().mapNotNull { it.version }.filter { it < version }.max()
             configure(schema, previous.toString()).migrate()
             val photo = insertOldPhoto(schema)
@@ -42,14 +42,7 @@ class PhotoMillisModelMigrationIntegrationTest @Autowired constructor(private va
             assertThat(
                 jdbc.queryForMap("SELECT captured_millis FROM $schema.photos WHERE id = ?", photo)["captured_millis"]
             ).isNull()
-            // The old photo has no size either, and the database refuses a size that is only half given.
-            jdbc.queryForMap("SELECT width, height FROM $schema.photos WHERE id = ?", photo).let {
-                assertThat(it["width"]).isNull()
-                assertThat(it["height"]).isNull()
-            }
-            assertThatThrownBy {
-                jdbc.update("UPDATE $schema.photos SET width = 100 WHERE id = ?", photo)
-            }.isInstanceOf(DataIntegrityViolationException::class.java)
+            // The size of the image (width, height) comes with V56__photo_dimensions.sql and is tested there.
             jdbc.update("INSERT INTO $schema.photo_reco_feature (photo_id, source) VALUES (?, 'CAMERA')", photo)
             assertThat(
                 jdbc.queryForList(
@@ -82,10 +75,10 @@ class PhotoMillisModelMigrationIntegrationTest @Autowired constructor(private va
             UUID.randomUUID()
         )!!
         val asset = jdbc.queryForObject(
-            """INSERT INTO $schema.image_assets(public_id, url, created_at)
-                VALUES (?, 'https://images.example/migration.jpg', CURRENT_TIMESTAMP) RETURNING id""",
+            """INSERT INTO $schema.image_assets(object_key, created_at)
+                VALUES (?, CURRENT_TIMESTAMP) RETURNING id""",
             Long::class.java,
-            "millis-migration-${UUID.randomUUID()}"
+            "photos/millis-${UUID.randomUUID()}/original.jpg"
         )!!
         return jdbc.queryForObject(
             """INSERT INTO $schema.photos(bunch_id, image_asset_id, file_hash, processing_status, date_source,
