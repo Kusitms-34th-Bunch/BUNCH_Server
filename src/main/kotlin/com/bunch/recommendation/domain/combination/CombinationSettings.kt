@@ -19,6 +19,9 @@ import kotlin.math.abs
  *
  * [burstMaxGap] is the gap of a burst of the same member with the same device (the duplicate group R1, 2 seconds).
  *
+ * [togetherWindow] is how close in time the photos of two different members must be to make a moment they took together
+ * (the together moment R2, 30 minutes). A gap of exactly this length still counts.
+ *
  * [clockErrorMargin] is how far later than its upload a photo without an offset may be taken before its upload batch is
  * taken for a wrong clock (exception X5, 14 hours: the biggest difference between two time zones). A photo with an
  * offset is compared without it.
@@ -60,6 +63,7 @@ data class CombinationSettings(
     val activityMinConfidence: Double = 0.50,
     val sameSceneMinSimilarity: Double = 0.85,
     val burstMaxGap: Duration = Duration.ofSeconds(2),
+    val togetherWindow: Duration = Duration.ofMinutes(30),
     val clockErrorMargin: Duration = Duration.ofHours(14),
     val representativenessWeight: Double = 0.4,
     val qualityWeight: Double = 0.2,
@@ -90,6 +94,9 @@ data class CombinationSettings(
         }
         require(minPhotos >= 1 && minUploaders >= 1 && peopleSplitMinSide >= 1 && subBundleMax >= minPhotos) {
             "the sizes of a bundle are at least one and a part is not below the minimum"
+        }
+        require(!burstMaxGap.isNegative && togetherWindow > Duration.ZERO) {
+            "a burst gap is not negative and the together window is above zero"
         }
         require(cardMaxSize >= minPhotos) {
             "a card holds at least as many photos as the smallest bundle"

@@ -29,7 +29,7 @@
 | F6 | 품질 | `ImageQuality`(긴 변 1024px 회색조, 흔들림·노출·해상도), `PhotoRecoFeature.quality` | `PhotoUploadQualityIntegrationTest`, `PhotoRecoFeatureQualityMigrationIntegrationTest` | 구현됨 | D3·L3 법무 확인 대기. 업로드 때 동기 계산, 비동기 분리는 별도 이슈 |
 | F7 | 기기 모델, 렌즈, 연사 ID, 밀리초 시각 | 업로드 필드 `deviceModel`(`photo_reco_feature.device_model`), `capturedMillis`(3자리, `photos.captured_millis`). R1용 해상도는 서버가 읽어 `photos.width`·`height`에 저장 | `PhotoUploadMillisModelIntegrationTest`, `PhotoMillisModelMigrationIntegrationTest` | 부분 구현(#204 저장, #218 추천 입력 연결) | 렌즈·연사 ID·EXIF 고유 ID는 받지 않는다(D4·L2 법무 대기). 추천 입력(`RecoPhoto`)에 연결하는 것은 후속. 앱 협의 필요 |
 | R1 | 중복 묶음 | `DuplicateGrouper(TimeNormalizer, burstMaxGap)`: 밀리초+기기 모델+해상도가 모두 있고 같음, 같은 업로더·같은 기기 모델·2초 안의 연사. 이미지 지문은 쓰지 않는다. 같은 파일은 업로드 때 한 사진으로 합쳐짐 | `DuplicateGrouperTest`, `RecoPhotoInputIntegrationTest` | 구현됨(#218) | 값이 없으면 같다고 보지 않음(C8). 지문은 날짜 빌리기·시계 보정·카드 점수가 아직 써서 입력에 남아 있고, 그 단계의 재작성 이슈에서 삭제 |
-| R2 | 함께 찍은 순간 | 없음 | — | 미구현 | 후속 |
+| R2 | 함께 찍은 순간 | `TogetherMoments`(서로 다른 멤버의 쓸 수 있는 사진이 `togetherWindow` 안에 있는 순간. 같은 중복 묶음을 여러 멤버가 올렸으면 가장 먼저 올린 멤버 한 명의 사진으로 봄) | `TogetherMomentsTest` | 구현됨(#222) | 번들·나누기 판단에 연결하는 것은 #223, 사진 고르기·커버는 후속 |
 
 ### 시간 기준 (새 기준 「시간 기준」)
 
@@ -39,7 +39,7 @@
 | 경계 20분 | 공백 20분 이상 | `CombinationSettings.minBoundaryGap` | `CombinationSettingsTest` | 구현됨 | 나누기 규칙은 아래 행 |
 | 사람 바뀜 1시간 | 사람 바뀜 공백 | 없음 | — | 미구현 | 후속 |
 | 시간대 바뀜 2시간 / 같은 시간대 4시간 | | `continuityShort`, `continuityLong`(활동 성격별로 씀) | `CombinationSettingsTest` | 교체 예정 | 새 기준은 시간대 기준으로 쓴다. 후속 |
-| 함께 찍은 순간 30분 | | 없음 | — | 미구현 | 후속 |
+| 함께 찍은 순간 30분 | | `CombinationSettings.togetherWindow`(30분, 정확히 30분은 포함) | `CombinationSettingsTest` | 구현됨(#222) | "30분 안"의 경계 포함 여부는 기획 확인 |
 
 ### 일반 번들 (새 기준 「일반 번들 기준」)
 
@@ -47,7 +47,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 묶기·나누기 1~5순위 | 사람 바뀜 → 시간대 바뀜 → 같은 시간대 4시간 → 묶음 → 40장 분할 | `GeneralBundleFinder`, `GeneralSegmenter`, `GeneralChunker`, `GeneralPeopleTimeSplitter`, `GeneralBigSplitter`, `GeneralSectionBalancer`(활동 라벨 기반) | `GeneralBundleFinderTest` 등 | 교체 예정 | 후속 |
 | 가장자리 정리 | 맨 앞·뒤의 한 사람 구간 떼어 냄 | 없음 | — | 미구현 | 후속 |
-| 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility`(6장 + 2명, 활동 미상 제외) | `BundleEligibilityTest` | 교체 예정 | 후속 |
+| 추천 조건 | 6장 + 2명 + 함께 찍은 순간 | `BundleEligibility.isRecommendable`(성립 조건 `isEnough` + 함께 찍은 순간 1번 이상) | `BundleEligibilityTest`, `TogetherMomentsTest` | 계산 구현됨(#222), 번들 반영은 후속 | 번들에 연결하고 "활동 미상은 번들이 아님" 규칙을 지우는 것은 #223 |
 | 이벤트 번들 | 만들지 않음 | `EventFinder` 등 | `EventFinderTest` 등 | 삭제됨 | #199 |
 
 ### 사진 고르기와 이름 (새 기준 「사진 고르기」)
@@ -77,7 +77,7 @@
 | X7 | 사진 변경 시 바뀐 하루만 다시 판단 | `RecommendedBundleRecalcTrigger`(D-1과 D, 초안 제외, 5분 디바운스) | `RecommendedBundleRecalculationIntegrationTest` | 구현됨 | |
 | X8 | 대량 업로드 노출 제한 | `RecommendedListRules`(최대 20개) | `RecommendedListRulesTest` | 부분 | 정책은 기획 결정 |
 | X9 | 동점은 항상 같은 기준 | `PhotoOrder`(시각 → 사진 번호) | `PhotoOrderTest` | 구현됨 | |
-| X10 | 한 시각에 몰아 찍어도 규칙대로 | — | — | 미구현 | R2와 함께 |
+| X10 | 한 시각에 몰아 찍어도 규칙대로 | `TogetherMoments`(몰아 찍어도 서로 다른 멤버가 30분 안이면 함께 찍은 순간) | `TogetherMomentsTest` | 구현됨(#222) | |
 
 ### 저장·재계산·노출·API
 
