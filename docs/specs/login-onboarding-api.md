@@ -71,17 +71,19 @@ AUTH-01~06, USER-01~02, 번치 생성·초대·참여(상세 2.1~2.7)의 서버 
 - 앱은 JPEG/PNG/HEIC/WebP를 선택받아 정사각형 JPEG로 변환한다. 서버 wire는 JPEG만 받는다.
   파일 최대 5MiB, 가로·세로 각각 최대 1024, 정사각형. decode 전에 크기를 확인하고
   JPEG로 재인코딩해 불필요한 EXIF 등 메타데이터를 제외한다.
-- Cloudinary는 서버 RestClient의 HTTPS Basic Auth로 Upload API를 호출한다.
-  API secret·Authorization·원문 토큰은 로그에 남기지 않는다. 사용자 입력 URL 원격 다운로드는 하지 않는다.
-- 저장 정보는 공용 ImageAsset의 publicId/HTTPS URL이다. 개인·번치는 nullable
-  `profile_image_asset_id`로 참조하며 기본 이미지는 imageUrl:null이다. 기존 데이터는
-  재업로드 없이 백필하고 기존 응답 URL을 유지한다. [사진함 기반 계약](photo-foundation.md)을 따른다.
+- 런타임 프로필 저장소는 비공개 R2이며 `profiles/<UUID>/profile.jpg` 한 객체만 둔다.
+  `ImageAsset`에는 object key만 저장하고 기존 `profile_image_asset_id`·자산 ID·FK를 유지한다.
+  R2 endpoint/bucket/credentials 환경변수 계약과 이전 순서는 [사진함 기반 계약](photo-foundation.md)과
+  [R2 이미지 이전 문서](../r2-migration.md)를 따른다. 사용자 입력 URL을 원격 다운로드하지 않는다.
+- 응답의 `imageUrl`은 기존 필드명과 null 계약을 유지한다. 기존 유스케이스의 인증·소속·공개 범위를
+  확인한 뒤 정확히 1800초 유효한 signed GET URL을 생성하며, URL은 DB·멱등 재생 결과·이벤트에
+  저장하지 않는다. 만료되면 같은 기존 조회 API를 다시 호출하고 별도 refresh API는 만들지 않는다.
   회원 사진은 가입 multipart 요청에서 최종 저장한다. 사진 검증/저장만 실패하면 null로 가입을 완료한다.
   필수 프로필 오류·요청 전체의 파싱/전송 실패는 가입을 완료하지 않는다.
 - 번치 사진은 OWNER만 즉시 변경·초기화 가능하다. 새 파일 업로드→DB 반영→커밋 후 미참조 기존 자산·파일 삭제 순서다.
   DB 실패 시 새 파일 삭제를 시도하며 기존 파일·참조는 유지한다.
   다른 프로필·Photo·발행본의 FK 참조가 있으면 자산·파일을 유지한다.
-  외부 파일 삭제 실패는 publicId만 기록하고 수동 정리 대상으로 남긴다.
+  외부 파일 삭제 실패는 이미 완료한 DB 변경을 되돌리지 않는다.
 
 ## 생성·초대·참여
 
@@ -219,7 +221,7 @@ DB 무변경·요청 키 없이 성공, 최종 생성 재검사를 확인한다.
 | --- | --- |
 | memberId | Long, 인증된 본인 ID |
 | nickname | String 또는 null. 가입 완료 전 미저장 상태는 null |
-| imageUrl | String 또는 null. 미등록·사진 저장 실패·기본 이미지이면 null이며 앱이 기본 이미지를 표시 |
+| imageUrl | String 또는 null. 권한 확인 뒤 1800초 signed profile URL을 생성하며, 미등록·사진 저장 실패·기본 이미지이면 null이고 앱이 기본 프로필을 표시 |
 | defaultBunch | 기존 BunchResponse 형식의 {id,name,characterType,imageUrl} 또는 null |
 
 `defaultBunch`는 가입 완료 회원의 서버 current 번치를 기존 `BunchResponse`로 보여주는
@@ -233,7 +235,7 @@ DB 무변경·요청 키 없이 성공, 최종 생성 재검사를 확인한다.
 fallback한다.
 
 null 필드도 JSON에 포함하며 임시 입력이나 기본값을 만들어 반환하지 않는다. 위 여섯 필드만
-반환하고 사진 publicId·약관·소셜 식별자·내부 계정 정보는 포함하지 않는다.
+반환하고 사진 object key·약관·소셜 식별자·내부 계정 정보는 포함하지 않는다.
 미인증·잘못된/만료된 access JWT·유효하지 않은 세션은 기존 401 `AUTH_001`이다.
 회원이 없거나 SUSPENDED/WITHDRAWN이면 온보딩 조회와 동일하게 현재 세션을 해제하고
 401 `AUTH_001`로 응답한다. 실패 응답은 `success:false`, `data:null`인 기존 오류 형식이다.
@@ -331,7 +333,7 @@ ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책�
 | --- | --- |
 | memberId | Long |
 | nickname | String 또는 null. 가입 완료 멤버는 항상 있다 |
-| imageUrl | String 또는 null. 미등록이면 null이며 앱이 기본 이미지를 표시 |
+| imageUrl | String 또는 null. 기존 멤버 조회 권한 확인 뒤 1800초 signed profile URL을 생성하며, 미등록이면 null이고 앱이 기본 이미지를 표시 |
 | role | `OWNER`(메인 관리자) / `CO_OWNER`(공동 관리자) / `MEMBER` |
 
 - 활성 멤버만 포함한다. 나가기·내보내짐으로 소속이 끝난 멤버와 탈퇴·정지 계정은 제외한다(3.1.2).
@@ -355,8 +357,9 @@ ACTIVE 소속이면 `INTERNAL`, 그 외는 동일한 외부 접근 flag 정책�
 실제 PostgreSQL/Redis에서 OIDC 회귀·세션 독립/회전/로그아웃 경합, 약관·가입 재개·닉네임
 경합·사진 실패, 생성 롤백·동시 초대 발급·코드·정원/소속 한도·요청 재시도·알림 중복을 검증한다.
 기존 Flyway는 수정하지 않으며 새 마이그레이션+JPA validate+전체 clean build가 필요하다.
-사진 외부 호출은 로컬 HTTP stub으로 검증하고 실제 Cloudinary/iOS 연동은 별도로 기록한다.
-실제 약관 원문/버전, Cloudinary 계정 설정, 초대 도메인·앱 이미지 매핑이 준비되어야 앱 연동 가능하다.
+사진 외부 호출은 로컬 R2 stub으로 PUT·보상 삭제·서명 TTL을 검증하고 실제 R2/iOS 연동은 별도 수동 검증 대상으로 둔다.
+실제 약관 원문/버전, R2 환경변수(`R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`),
+초대 도메인·앱 이미지 매핑이 준비되어야 앱 연동 가능하다.
 
 정리 계획: 인증의 단일 refresh 구현만 세션 단위로 교체하고 기존 검증기를 재사용한다.
 기존 테스트로 OIDC·회원 유일성·응답 계약을 보호한 뒤 동작 변경 테스트를 교체/추가한다.

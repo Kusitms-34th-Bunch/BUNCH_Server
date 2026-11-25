@@ -221,10 +221,7 @@ class BunchMembershipExitPhotoIntegrationTest : BunchIntegrationSupport() {
         capturedDate: LocalDate? = null
     ): Photo {
         val asset = assets.saveAndFlush(
-            ImageAsset(
-                publicId = "exit-test/${UUID.randomUUID()}",
-                url = "https://images.example/exit/${UUID.randomUUID()}.jpg"
-            )
+            ImageAsset(objectKey = "profiles/${UUID.randomUUID()}/profile.jpg")
         )
         val photo = photos.saveAndFlush(
             Photo(

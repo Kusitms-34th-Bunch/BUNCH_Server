@@ -51,7 +51,8 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 | GET /{viewerId}/blocks | `page,size` | `{id,bunch,blockedAt}` 페이지 |
 | POST /{viewerId}/reports | `{targetBunchId,reason,detail?}` (Bunch 프로필만) | `{reportId}`; 접수마다 새 ID |
 
-- `bunch`는 `id,name,imageUrl,characterType,visibility`다.
+- `bunch`는 `id,name,imageUrl,characterType,visibility`다. `bunch.imageUrl`은 기존 외부 프로필
+  접근 확인 뒤 `profiles/<UUID>/profile.jpg`의 정확히 1800초 유효한 signed URL이며, 없으면 `null`이다.
   RelationItem은 `{bunch,followState,followId,followedAt}`이며 상태는 **서버 current Bunch→행 번치** 기준이다.
   current가 없거나 자기 current 행이면 NONE/null이다. 관계는 승인 시각 DESC,id DESC, 요청·차단은 생성 시각 DESC,id DESC다.
 - 공개 대상은 즉시 APPROVED/FOLLOWING, 비공개는 PENDING/REQUESTED다. 기존 PUT 재실행은 같은 ID다.
@@ -112,6 +113,8 @@ ID는 양의 정수, nullable 필드는 JSON null, 시각은 UTC ISO-8601이다.
 초안 수정 권한은 반환하지 않는다.
 
 PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`다.
+카드의 `coverImageUrl`은 첫 사진의 비공개 `thumbnail.jpg`를 가리키는 정확히 1800초 signed URL이며,
+상세의 `photos[].imageUrl`은 같은 권한 확인 뒤 `original.jpg` signed URL이다.
 카드에는 `visibility`(PUBLIC/PRIVATE)도 포함한다. 발행본에 저장된 공개/비공개 값이며 상세와 같은 값이다.
 외부 조회는 PUBLIC 발행본만 반환하므로 외부 응답의 값은 항상 PUBLIC이다.
 페이지는 `{items,page,size,totalElements,hasNext}`이며 `publishedAt DESC,id DESC`로 조회한다.
@@ -120,7 +123,9 @@ PublicBundleCard는 `{id,bunchId,title,coverImageUrl,date,location,publishedAt}`
 contributor/comment의 `nickname`·`imageUrl`·`content`)는 외부에서도 JSON `null`을 유지한다.
 nullable 객체 DTO는 `location:null`을 보존하기 위해 유지한다. null 전용 Kotlin 타입은 이 필드를 생략한다.
 상세는 카드 필드에 photos `{id,imageUrl,position}`, contributors `{memberId,nickname,imageUrl}`,
-comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다.
+comments `{id,memberId,nickname,imageUrl,content,updatedAt}`를 추가한다. contributor/comment의
+`imageUrl`도 프로필 객체의 1800초 signed URL이며, 모든 URL은 저장·재생하지 않는다. 만료되면
+같은 외부 프로필/번들 조회 API를 다시 호출한다.
 상세도 목록과 같은 서버 current·차단·승인·공개 범위를 다시 확인한다.
 신고 이력은 접근 제외 근거가 아니다. `BunchProfileReport` 조건과 reporter가 non-null인
 과거 숨김 행은 무시하고, null-reporter 전역 BUNCH/BUNDLE 숨김만 호환용으로 적용한다.

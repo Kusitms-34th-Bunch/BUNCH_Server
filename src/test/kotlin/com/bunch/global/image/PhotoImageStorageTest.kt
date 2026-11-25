@@ -2,50 +2,16 @@ package com.bunch.global.image
 
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
-import org.junit.jupiter.api.Assertions.assertArrayEquals
-import org.junit.jupiter.api.Assertions.assertDoesNotThrow
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import org.springframework.context.annotation.AnnotationConfigApplicationContext
-import org.springframework.core.env.MapPropertySource
-import org.springframework.http.HttpMethod
-import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType
-import org.springframework.mock.http.client.MockClientHttpRequest
 import org.springframework.mock.web.MockMultipartFile
-import org.springframework.test.web.client.MockRestServiceServer
-import org.springframework.test.web.client.match.MockRestRequestMatchers.method
-import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
-import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
-import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
-import org.springframework.web.client.RestClient
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets.ISO_8859_1
-import java.util.Base64
-import java.util.UUID
 import javax.imageio.ImageIO
 
 class PhotoImageStorageTest {
-    private val uploadUrl = "https://api.cloudinary.com/v1_1/test-cloud/image/upload"
-    private val destroyUrl = "https://api.cloudinary.com/v1_1/test-cloud/image/destroy"
-    private val basicAuth = "Basic " + Base64.getEncoder().encodeToString("test-key:test-secret".toByteArray())
-    private val publicIdPart = Regex("name=\"public_id\"\\r\\n(?:[A-Za-z-]+:[^\\r]*\\r\\n)*\\r\\n([^\\r]+)")
-    private lateinit var server: MockRestServiceServer
-    private lateinit var storage: PhotoImageStorage
-    private var uploadBody: ByteArray = byteArrayOf()
-
-    @BeforeEach
-    fun setup() {
-        val builder = RestClient.builder()
-        server = MockRestServiceServer.bindTo(builder).build()
-        storage = PhotoImageStorage("test-cloud", "test-key", "test-secret", client = builder.build())
-    }
+    private val storage = PhotoImageStorage()
 
     @Test
     fun `accepts a JPEG and keeps the uploaded bytes untouched`() {
@@ -56,6 +22,25 @@ class PhotoImageStorageTest {
         assertArrayEquals(source, image.bytes)
         assertEquals(1200, image.width)
         assertEquals(800, image.height)
+    }
+
+    @Test
+    fun `reports display dimensions for all EXIF orientations without changing original bytes`() {
+        for (orientation in 1..8) {
+            val exif = byteArrayOf(
+                0x45, 0x78, 0x69, 0x66, 0, 0,
+                0x49, 0x49, 0x2a, 0, 8, 0, 0, 0,
+                1, 0, 0x12, 1, 3, 0, 1, 0, 0, 0,
+                orientation.toByte(), 0, 0, 0, 0, 0, 0, 0
+            )
+            val bytes = withSegment(jpeg(120, 80), 0xe1, segmentLength(exif.size + 2) + exif)
+
+            val image = storage.inspect(file(bytes))
+
+            assertEquals(if (orientation >= 5) 80 else 120, image.width, "orientation=$orientation")
+            assertEquals(if (orientation >= 5) 120 else 80, image.height, "orientation=$orientation")
+            assertArrayEquals(bytes, image.bytes)
+        }
     }
 
     @Test
@@ -79,7 +64,7 @@ class PhotoImageStorageTest {
 
     @Test
     fun `the resolution limit is configurable`() {
-        val small = PhotoImageStorage("test-cloud", "test-key", "test-secret", maxDimension = 2560)
+        val small = PhotoImageStorage(maxDimension = 2560)
 
         assertDoesNotThrow { small.inspect(file(jpeg(2560, 10))) }
         assertThrows(PhotoImageRejectedException::class.java) { small.inspect(file(jpeg(2561, 10))) }
@@ -133,146 +118,6 @@ class PhotoImageStorageTest {
 
         assertRejected(PhotoImageRejection.LOCATION_METADATA, file(withSegmentAfterScan(valid, 0xe1, gpsExif())))
         assertRejected(PhotoImageRejection.LOCATION_METADATA, file(withSegmentAfterScan(valid, 0xe1, xmpWithGps())))
-    }
-
-    @Test
-    fun `upload sends the bytes as an unmodified JPEG with basic auth and a unique photos path`() {
-        val image = storage.inspect(file(jpeg(1200, 800)))
-        repeat(2) { respondUpload(1200, 800) }
-        val stored = listOf(storage.upload(image), storage.upload(image))
-
-        server.verify()
-        assertNotEquals(stored[0].publicId, stored[1].publicId)
-        stored.forEach { assertNotNull(UUID.fromString(it.publicId.removePrefix("photos/"))) }
-        assertTrue(stored.all { it.url.startsWith("https://res.cloudinary.com/test/image/upload/") })
-        val multipart = String(uploadBody, ISO_8859_1)
-        assertTrue(multipart.contains("filename=\"photo.jpg\""))
-        assertTrue(multipart.contains("Content-Type: image/jpeg"))
-        assertTrue(Regex("name=\"overwrite\"\\r\\n(?:[A-Za-z-]+:[^\\r]*\\r\\n)*\\r\\nfalse").containsMatchIn(multipart))
-        assertTrue(multipart.contains(String(image.bytes, ISO_8859_1)))
-    }
-
-    @Test
-    fun `upload failures clean up the generated id and report a storage error`() {
-        val image = storage.inspect(file(jpeg(64, 64)))
-        val failures = listOf<() -> Unit>(
-            { server.expect(requestTo(uploadUrl)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE)) },
-            { server.expect(requestTo(uploadUrl)).andRespond(withSuccess("not-json", MediaType.APPLICATION_JSON)) },
-            { server.expect(requestTo(uploadUrl)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON)) },
-            { respondUpload { it.replace("\"width\":64", "\"width\":65") } },
-            { respondUpload { it.replace("\"format\":\"jpg\"", "\"format\":\"png\"") } },
-            { respondUpload { it.replace("https://", "http://") } },
-            { respondUpload { it.replace("\"resource_type\":\"image\"", "\"resource_type\":\"video\"") } }
-        )
-
-        failures.forEach { arrange ->
-            server.reset()
-            arrange()
-            server.expect(requestTo(destroyUrl))
-                .andRespond(withSuccess("{\"result\":\"ok\"}", MediaType.APPLICATION_JSON))
-
-            val error = assertThrows(BusinessException::class.java) { storage.upload(image) }
-
-            assertEquals(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED, error.errorCode)
-            server.verify()
-        }
-    }
-
-    @Test
-    fun `delete posts the public id to the destroy endpoint and tolerates a missing file`() {
-        server.expect(requestTo(destroyUrl))
-            .andExpect(method(HttpMethod.POST))
-            .andExpect {
-                assertEquals(basicAuth, it.headers.getFirst("Authorization"))
-                assertTrue(String((it as MockClientHttpRequest).bodyAsBytes).contains("public_id=photos%2Fold"))
-            }
-            .andRespond(withSuccess("{\"result\":\"not found\"}", MediaType.APPLICATION_JSON))
-
-        storage.delete("photos/old")
-
-        server.verify()
-    }
-
-    @Test
-    fun `delete never throws and does nothing for a blank id`() {
-        server.expect(requestTo(destroyUrl)).andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
-
-        assertDoesNotThrow { storage.delete("photos/old") }
-        assertDoesNotThrow { storage.delete(null) }
-        assertDoesNotThrow { storage.delete(" ") }
-        server.verify()
-    }
-
-    @Test
-    fun `missing credentials or unsafe base URLs fail without any remote call`() {
-        val image = storage.inspect(file(jpeg()))
-        val unsafe = listOf(
-            offlineStorage(cloud = ""),
-            offlineStorage(key = ""),
-            offlineStorage(secret = ""),
-            offlineStorage(base = "http://api.cloudinary.com"),
-            offlineStorage(base = "https://u:p@example.com")
-        )
-
-        unsafe.forEach {
-            val error = assertThrows(BusinessException::class.java) { it.upload(image) }
-            assertEquals(ErrorCode.PHOTO_IMAGE_STORAGE_FAILED, error.errorCode)
-        }
-    }
-
-    @Test
-    fun `Spring wires the configuration properties and keeps startup working without credentials`() {
-        AnnotationConfigApplicationContext().use { context ->
-            context.environment.propertySources.addFirst(
-                MapPropertySource(
-                    "photo-image",
-                    mapOf(
-                        "cloudinary.cloud-name" to "",
-                        "cloudinary.api-key" to "",
-                        "cloudinary.api-secret" to "",
-                        "photo-image.max-dimension" to "2560"
-                    )
-                )
-            )
-            context.register(PhotoImageStorage::class.java)
-            context.refresh()
-            val bean = context.getBean(PhotoImageStorage::class.java)
-
-            assertDoesNotThrow { bean.inspect(file(jpeg(2560, 1))) }
-            assertThrows(PhotoImageRejectedException::class.java) { bean.inspect(file(jpeg(2561, 1))) }
-            assertThrows(BusinessException::class.java) { bean.upload(bean.inspect(file(jpeg()))) }
-            assertDoesNotThrow { bean.delete(null) }
-        }
-    }
-
-    private fun respondUpload(width: Int = 64, height: Int = 64, mutate: (String) -> String = { it }) {
-        server.expect(requestTo(uploadUrl))
-            .andExpect(method(HttpMethod.POST))
-            .andExpect { request ->
-                assertEquals(basicAuth, request.headers.getFirst("Authorization"))
-                assertTrue(request.headers.contentType.toString().startsWith("multipart/form-data"))
-            }
-            .andRespond { request ->
-                uploadBody = (request as MockClientHttpRequest).bodyAsBytes
-                val publicId = publicIdPart.find(String(uploadBody, ISO_8859_1))!!.groupValues[1]
-                assertTrue(publicId.startsWith("photos/"))
-                val body = """{"secure_url":"https://res.cloudinary.com/test/image/upload/v1/$publicId.jpg",""" +
-                    """"public_id":"$publicId","resource_type":"image","format":"jpg",""" +
-                    """"width":$width,"height":$height}"""
-                withSuccess(mutate(body), MediaType.APPLICATION_JSON).createResponse(request)
-            }
-    }
-
-    // A mock server without expectations fails the test if the storage tries to call out.
-    private fun offlineStorage(
-        cloud: String = "test-cloud",
-        key: String = "test-key",
-        secret: String = "test-secret",
-        base: String = "https://api.cloudinary.com"
-    ): PhotoImageStorage {
-        val builder = RestClient.builder()
-        MockRestServiceServer.bindTo(builder).build()
-        return PhotoImageStorage(cloud, key, secret, base, client = builder.build())
     }
 
     private fun assertRejected(reason: PhotoImageRejection, file: MockMultipartFile) {

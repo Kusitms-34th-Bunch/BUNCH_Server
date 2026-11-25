@@ -7,6 +7,7 @@ import com.bunch.global.redis.RefreshTokenRepository
 import com.bunch.global.security.TokenProvider
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
@@ -17,12 +18,22 @@ import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.context.TestPropertySource
+import java.net.URI
 import java.util.UUID
 
 /**
  * What the photo tests that call the API over HTTP share: a signed-in caller, a bunch with members and the check
  * of an error response. A subclass adds @SpringBootTest and @AutoConfigureMockMvc, which provide [mvc].
  */
+@TestPropertySource(
+    properties = [
+        "r2.endpoint=https://00000000000000000000000000000000.r2.cloudflarestorage.com",
+        "r2.bucket=bunch-test",
+        "r2.access-key-id=fake-access-key",
+        "r2.secret-access-key=fake-secret-key"
+    ]
+)
 abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
     @Autowired
     protected lateinit var mvc: MockMvc
@@ -97,7 +108,8 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
 
     /**
      * Inserts a photo straight into the tables, so a test does not need the upload flow. The caller removes the
-     * rows it adds: photo_uploaders, photos and the image_assets whose public_id starts with `test-http/`.
+     * rows it adds: photo_uploaders, photos and the image_assets whose object_key starts with
+     * `photos/test-http-`.
      */
     protected fun insertPhoto(
         bunchId: Long,
@@ -108,10 +120,9 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         uploaders: List<Long> = emptyList()
     ): Long {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-http/${UUID.randomUUID()}",
-            "https://res.cloudinary.com/test/image/upload/test-http/photo.jpg"
+            "photos/test-http-${UUID.randomUUID()}/original.jpg"
         )!!
         val photoId = jdbc.queryForObject(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,
@@ -176,6 +187,14 @@ abstract class PhotoHttpTestSupport : BunchIntegrationSupport() {
         associate { it.path("photoId").asLong() to it.path("usedInDraftBundle").asBoolean() }
 
     protected fun MvcResult.data(): JsonNode = mapper.readTree(response.contentAsString).path("data")
+
+    protected fun assertSignedImageUrl(value: String, objectKey: String) {
+        val uri = URI(value)
+        assertThat(uri.scheme).isEqualTo("https")
+        assertThat(uri.host).isEqualTo("00000000000000000000000000000000.r2.cloudflarestorage.com")
+        assertThat(uri.path).startsWith("/bunch-test/").endsWith("/$objectKey")
+        assertThat(uri.rawQuery).contains("X-Amz-Expires=1800", "X-Amz-Signature=")
+    }
 
     protected fun ResultActions.expectError(error: ErrorCode): ResultActions =
         andExpect(status().`is`(error.status))

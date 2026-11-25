@@ -23,7 +23,7 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
         deleteInsertedBundles()
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-list/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-list-%/original.jpg'")
     }
 
     @Test
@@ -172,16 +172,18 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
     @Test
     fun `the thumbnail is the square transformation of the stored image`() {
         val (ownerId, bunchId) = bunchWithOwner()
+        val objectKey = "photos/test-list-abc/original.jpg"
         photo(
             bunchId,
             "2026-10-19",
             "10:00:00",
-            url = "https://res.cloudinary.com/test/image/upload/test-list/abc.jpg"
+            objectKey = objectKey
         )
 
-        list(ownerId, bunchId).andExpect(
-            jsonPath("$.data.photos[0].thumbnailUrl")
-                .value("https://res.cloudinary.com/test/image/upload/c_fill,w_300,h_300/test-list/abc.jpg")
+        val data = list(ownerId, bunchId).andExpect(status().isOk).andReturn().data()
+        assertSignedImageUrl(
+            data.path("photos")[0].path("thumbnailUrl").asText(),
+            "photos/test-list-abc/thumbnail.jpg"
         )
     }
 
@@ -303,13 +305,12 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
         time: String? = null,
         status: String = "READY",
         uploaders: List<Long> = emptyList(),
-        url: String = "https://res.cloudinary.com/test/image/upload/test-list/photo.jpg"
+        objectKey: String = "photos/test-list-${UUID.randomUUID()}/original.jpg"
     ): Long {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-list/${UUID.randomUUID()}",
-            url
+            objectKey
         )!!
         val photoId = jdbc.queryForObject(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,
@@ -339,10 +340,9 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
 
     private fun seedPhotos(bunchId: Long, count: Int, date: String) {
         val assetId = jdbc.queryForObject(
-            "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+            "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
             Long::class.java,
-            "test-list/${UUID.randomUUID()}",
-            "https://res.cloudinary.com/test/image/upload/test-list/seed.jpg"
+            "photos/test-list-seed-${UUID.randomUUID()}/original.jpg"
         )!!
         jdbc.update(
             """INSERT INTO photos (bunch_id, image_asset_id, file_hash, processing_status,

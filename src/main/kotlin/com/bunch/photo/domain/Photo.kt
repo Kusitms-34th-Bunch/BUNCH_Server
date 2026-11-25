@@ -60,9 +60,18 @@ class Photo(
     val originalFileHash: String? = null,
 
     @Column(name = "captured_utc_offset", length = 6)
-    val capturedUtcOffset: String? = null
+    val capturedUtcOffset: String? = null,
+
+    @Column(name = "width")
+    val width: Int? = null,
+
+    @Column(name = "height")
+    val height: Int? = null
 ) {
     init {
+        require((width == null && height == null) || ((width ?: 0) > 0 && (height ?: 0) > 0)) {
+            "photo dimensions must both be null or positive"
+        }
         require(isSha256Hex(fileHash)) {
             "fileHash must be a lowercase SHA-256 hexadecimal value"
         }

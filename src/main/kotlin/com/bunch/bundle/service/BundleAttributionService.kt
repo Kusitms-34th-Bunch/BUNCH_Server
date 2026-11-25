@@ -1,5 +1,6 @@
 package com.bunch.bundle.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchMembershipRepository
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.domain.BundleCommentRepository
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional
 
 @Service
 class BundleAttributionService(
+    private val imageUrls: ImageUrls,
     private val participants: BundleParticipantRepository,
     private val comments: BundleCommentRepository,
     private val memberships: BunchMembershipRepository
@@ -52,7 +54,7 @@ class BundleAttributionService(
                 val currentMembership = profiles[bundle.bunchId to row.memberId]
                 val profile = currentMembership?.member
                 val person = BundleParticipantResponse(
-                    row.memberId, row.joinedAt, profile?.nickname ?: "작성자", profile?.imageUrl, profile != null
+                    row.memberId, row.joinedAt, profile?.nickname ?: "작성자", imageUrls.profile(profile?.imageKey), profile != null
                 )
                 if (bundle.status == BundleStatus.DRAFT) {
                     person.copy(role = currentMembership?.role, creator = bundle.createdBy == row.memberId)

@@ -56,15 +56,15 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
     fun cleanup() {
         sessionIds.forEach { (sid, id) -> sessions.delete(sid, id) }
         memberIds.forEach { members.deleteById(it) }
-        publicIds.forEach { jdbc.update("DELETE FROM image_assets WHERE public_id = ?", it) }
+        publicIds.forEach { jdbc.update("DELETE FROM image_assets WHERE object_key = ?", it) }
     }
 
     @Test
     fun `edit returns the same member shape as the profile lookup`() {
         val (member, access) = account()
         val nickname = "수정${UUID.randomUUID().toString().take(6)}"
-        val uploaded = StoredImage("profiles/http-${UUID.randomUUID()}", "https://res.cloudinary.com/test/http.jpg")
-            .also { publicIds += it.publicId }
+        val uploaded = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
+            .also { publicIds += it.objectKey }
         val photo = MockMultipartFile("photo", "p.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
         `when`(images.upload(photo)).thenReturn(uploaded)
 
@@ -73,9 +73,9 @@ class MemberProfileEditHttpIntegrationTest @Autowired constructor(
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.memberId").value(member.id))
             .andExpect(jsonPath("$.data.nickname").value(nickname))
-            .andExpect(jsonPath("$.data.imageUrl").value(uploaded.url))
+            .andExpect(jsonPath("$.data.imageUrl").value(org.hamcrest.Matchers.containsString("/bunch-test/${uploaded.objectKey}?")))
             .andExpect(jsonPath("$.error").isEmpty)
-        assertThat(assets.findAll().map { it.publicId }).contains(uploaded.publicId)
+        assertThat(assets.findAll().map { it.objectKey }).contains(uploaded.objectKey)
     }
 
     @Test

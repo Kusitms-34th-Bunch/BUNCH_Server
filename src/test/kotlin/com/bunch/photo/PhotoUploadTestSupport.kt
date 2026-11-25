@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.mockito.ArgumentMatchers
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.test.context.TestPropertySource
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import java.security.MessageDigest
 import java.time.Instant
@@ -22,6 +23,14 @@ import java.time.ZoneOffset
 import java.util.HexFormat
 import java.util.UUID
 
+@TestPropertySource(
+    properties = [
+        "r2.endpoint=https://00000000000000000000000000000000.r2.cloudflarestorage.com",
+        "r2.bucket=bunch-test",
+        "r2.access-key-id=fake-access-key",
+        "r2.secret-access-key=fake-secret-key"
+    ]
+)
 abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
     @Autowired
     protected lateinit var uploads: PhotoService
@@ -38,7 +47,7 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
     fun cleanPhotoUploads() {
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'photos/test-%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-%/original.jpg'")
     }
 
     // Mockito's any() returns null, which a non-null Kotlin parameter would reject.
@@ -81,14 +90,13 @@ abstract class PhotoUploadTestSupport : BunchIntegrationSupport() {
     protected fun hashOf(image: PhotoImage): String =
         HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(image.bytes))
 
-    protected fun stored(publicId: String = "photos/test-${UUID.randomUUID()}") =
-        StoredImage(publicId, "https://res.cloudinary.com/test/image/upload/$publicId.jpg")
+    protected fun stored(objectKey: String = "photos/test-${UUID.randomUUID()}/original.jpg") =
+        StoredImage(objectKey)
 
     protected fun seedAsset(): Long = jdbc.queryForObject(
-        "INSERT INTO image_assets (public_id, url, created_at) VALUES (?, ?, now()) RETURNING id",
+        "INSERT INTO image_assets (object_key, created_at) VALUES (?, now()) RETURNING id",
         Long::class.java,
-        "photos/test-seed-${UUID.randomUUID()}",
-        "https://res.cloudinary.com/test/image/upload/seed.jpg"
+        "photos/test-seed-${UUID.randomUUID()}/original.jpg"
     )!!
 
     // Many photos at once without going through the service; they share one asset row.

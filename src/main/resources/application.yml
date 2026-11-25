@@ -66,10 +66,11 @@ terms:
   privacy-version: ${TERMS_PRIVACY_VERSION:}
   age-version: ${TERMS_AGE_VERSION:}
   demographics-version: ${TERMS_DEMOGRAPHICS_VERSION:}
-cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
-  api-key: ${CLOUDINARY_API_KEY:}
-  api-secret: ${CLOUDINARY_API_SECRET:}
+r2:
+  endpoint: ${R2_ENDPOINT:}
+  bucket: ${R2_BUCKET:}
+  access-key-id: ${R2_ACCESS_KEY_ID:}
+  secret-access-key: ${R2_SECRET_ACCESS_KEY:}
 # The new recommended bundles (docs/specs/reco-bundle-combination.md). Off by default: while it is off nothing is put in
 # the queue and nothing is calculated or kept, because the recommended bundles that are shown are still the old ones.
 reco:

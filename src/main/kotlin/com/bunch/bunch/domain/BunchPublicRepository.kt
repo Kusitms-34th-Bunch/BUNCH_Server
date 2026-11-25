@@ -2,7 +2,7 @@ package com.bunch.bunch.domain
 
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bunch.dto.BunchPublicBundleCover
-import com.bunch.bunch.dto.BunchPublicBundlePhoto
+import com.bunch.bunch.domain.PublicBundlePhotoRow
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
 import org.springframework.data.repository.query.Param
@@ -10,7 +10,7 @@ import org.springframework.data.repository.query.Param
 interface BunchPublicRepository : Repository<Bundle, Long> {
     @Query(
         """
-        select new com.bunch.bunch.dto.BunchPublicBundleCover(photo.bundleId, asset.url)
+        select new com.bunch.bunch.dto.BunchPublicBundleCover(photo.bundleId, asset.objectKey)
         from BundlePhoto photo
         join photo.imageAsset asset
         where photo.bundleId in :bundleIds
@@ -28,14 +28,14 @@ interface BunchPublicRepository : Repository<Bundle, Long> {
 
     @Query(
         """
-        select new com.bunch.bunch.dto.BunchPublicBundlePhoto(photo.id, asset.url, photo.position)
+        select new com.bunch.bunch.domain.PublicBundlePhotoRow(photo.id, asset.objectKey, photo.position)
         from BundlePhoto photo
         join photo.imageAsset asset
         where photo.bundleId = :bundleId
         order by photo.position asc, photo.id asc
         """
     )
-    fun findBundlePhotos(@Param("bundleId") bundleId: Long): List<BunchPublicBundlePhoto>
+    fun findBundlePhotos(@Param("bundleId") bundleId: Long): List<PublicBundlePhotoRow>
 
     @Query(
         """

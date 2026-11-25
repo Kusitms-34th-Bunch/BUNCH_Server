@@ -1,5 +1,6 @@
 package com.bunch.photo.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchMembership
 import com.bunch.bunch.domain.BunchMembershipRepository
@@ -12,7 +13,6 @@ import com.bunch.global.image.ImageQuality
 import com.bunch.global.image.ImageQualityGrade
 import com.bunch.global.image.PhotoImage
 import com.bunch.global.image.PhotoImageStorage
-import com.bunch.global.image.PhotoImageUrls
 import com.bunch.global.image.StoredImage
 import com.bunch.image.domain.ImageAssetRepository
 import com.bunch.image.service.ImageAssetService
@@ -62,6 +62,7 @@ import java.util.UUID
  */
 @Service
 class PhotoService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val memberships: BunchMembershipRepository,
     private val bunches: BunchRepository,
@@ -155,13 +156,13 @@ class PhotoService(
         val quality = imageQuality.of(image)
         val file = storage.upload(image)
         val result = try {
-            transaction.execute<PhotoUploadResult> { saveUpload(command, hash, file, fingerprint, quality) }!!
+            transaction.execute<PhotoUploadResult> { saveUpload(command, image, hash, file, fingerprint, quality) }!!
         } catch (ex: Exception) {
             discardUnlessSaved(file)
             throw ex
         }
         // Someone stored the same file while this one was uploading; the new copy is not used.
-        if (result.kind != PhotoUploadKind.STORED) storage.delete(file.publicId)
+        if (result.kind != PhotoUploadKind.STORED) storage.delete(file.objectKey)
         return result
     }
 
@@ -174,6 +175,7 @@ class PhotoService(
 
     private fun saveUpload(
         command: PhotoUploadCommand,
+        image: PhotoImage,
         hash: String,
         file: StoredImage,
         fingerprint: Long?,
@@ -195,7 +197,9 @@ class PhotoService(
                 dateSource = if (command.capturedDate == null) DateSource.UNKNOWN else DateSource.EXIF,
                 // A bunch keeps one photo per original hash, so a hash another photo already owns is not stored again.
                 originalFileHash = command.originalFileHash.takeUnless { same.originalHashTaken },
-                capturedUtcOffset = command.capturedUtcOffset
+                capturedUtcOffset = command.capturedUtcOffset,
+                width = image.width,
+                height = image.height
             )
         )
         // Every new photo gets its row, so the features that come later have a place to be filled in (4-5).
@@ -298,9 +302,9 @@ class PhotoService(
     // A failed commit can still have succeeded, so the file is removed only when no asset row owns it.
     private fun discardUnlessSaved(file: StoredImage) {
         try {
-            if (!imageAssetRepository.existsByPublicId(file.publicId)) storage.delete(file.publicId)
+            if (!imageAssetRepository.existsByObjectKey(file.objectKey)) storage.delete(file.objectKey)
         } catch (_: RuntimeException) {
-            logger.warn("Uploaded photo file cleanup skipped: publicId={}", file.publicId)
+            logger.warn("Uploaded photo file cleanup skipped: objectKey={}", file.objectKey)
         }
     }
 
@@ -339,11 +343,13 @@ class PhotoService(
             photos = page.map {
                 PhotoListItem(
                     photoId = it.id,
-                    thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
+                    thumbnailUrl = imageUrls.thumbnail(it.imageKey),
                     capturedDate = it.capturedDate,
                     capturedTime = it.capturedTime,
                     uploaderIds = uploaderIds[it.id].orEmpty(),
-                    usedInDraftBundle = it.id in inDraft
+                    usedInDraftBundle = it.id in inDraft,
+                    width = it.width,
+                    height = it.height
                 )
             },
             nextCursor = nextCursor
@@ -382,9 +388,11 @@ class PhotoService(
             photos = page.map {
                 PhotoUndatedItem(
                     photoId = it.id,
-                    thumbnailUrl = PhotoImageUrls.thumbnail(it.imageUrl),
+                    thumbnailUrl = imageUrls.thumbnail(it.imageKey),
                     uploaderIds = uploaderIds[it.id].orEmpty(),
-                    usedInDraftBundle = it.id in inDraft
+                    usedInDraftBundle = it.id in inDraft,
+                    width = it.width,
+                    height = it.height
                 )
             },
             nextCursor = nextCursor
@@ -398,11 +406,13 @@ class PhotoService(
         val photo = photos.findDetail(bunchId, photoId) ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         return PhotoDetailResponse(
             photoId = photo.id,
-            imageUrl = photo.imageUrl,
+            imageUrl = imageUrls.full(photo.imageKey),
             capturedDate = photo.capturedDate,
             uploaders = photos.findUploaderProfiles(photoId)
-                .map { PhotoDetailUploader(it.memberId, it.nickname, it.imageUrl) },
-            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty()
+                .map { PhotoDetailUploader(it.memberId, it.nickname, imageUrls.profile(it.imageKey)) },
+            usedInDraftBundle = draftBundlePhotoIdsOf(listOf(photoId)).isNotEmpty(),
+            width = photo.width,
+            height = photo.height
         )
     }
 

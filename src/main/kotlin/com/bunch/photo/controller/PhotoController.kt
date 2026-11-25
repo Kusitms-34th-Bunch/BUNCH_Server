@@ -1,6 +1,7 @@
 package com.bunch.photo.controller
 
 import com.bunch.global.common.ApiResponse
+import com.bunch.global.image.ImageUploadLimiter
 import com.bunch.global.image.PhotoImageStorage
 import com.bunch.photo.dto.PhotoDateChangeRequest
 import com.bunch.photo.dto.PhotoDeleteRequest
@@ -33,8 +34,11 @@ class PhotoController(
         @RequestPart photo: MultipartFile,
         @ModelAttribute request: PhotoUploadRequest
     ): ApiResponse<PhotoUploadResponse> {
-        val command = request.toCommand(bunchId, userId.toLong())
-        return ApiResponse.ok(PhotoUploadResponse.from(photoService.upload(command, images.inspect(photo))))
+        return ImageUploadLimiter.withPermit {
+            val command = request.toCommand(bunchId, userId.toLong())
+            val image = images.inspect(photo)
+            ApiResponse.ok(PhotoUploadResponse.from(photoService.upload(command, image)))
+        }
     }
 
     @GetMapping
