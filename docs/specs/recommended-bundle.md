@@ -507,7 +507,7 @@ AI 제목은 확정 전이라 만들지 않는다.
 | 카드 | `id`, `title`, `startDate`, `endDate`(자정을 넘긴 묶음만), `photoCount`(남은 카드 사진 장수), `uploaders`, `coverImageUrl`(카드 사진 중 첫 번째의 `thumbnail.jpg` signed URL) | 4.2.2 로직 1·2 |
 | 카드의 `uploaders` | 카드 사진을 올린 멤버(`memberId`, `nickname`, `imageUrl`). `imageUrl`은 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 대해 UTC 정시 기준 2시간 후 만료되는 signed URL이다. 올린 사진이 많은 멤버부터, 같으면 멤버 번호 순. 「외 N명」은 앱이 줄 너비로 줄인다 | 4.2.2 로직 1, 백엔드 가이드 1번 표 |
 | 상세 | `id`, `title`, `photos` | 4.2.5 |
-| 상세의 사진 | `photoId`, `thumbnailUrl`(정사각 그리드용 `thumbnail.jpg` signed URL), `imageUrl`(뷰어용 `original.jpg` signed URL), `capturedDate`(항상 있음), `capturedTime`(없을 수 있음), `uploaders`(함께 올린 사진은 여러 명, 닉네임과 프로필 이미지는 지금 값). 두 URL 모두 UTC 정시 기준 2시간 후 만료되며 저장·재생하지 않는다 | 4.2.5 로직 3, 4.2.6 |
+| 상세의 사진 | `photoId`, `thumbnailUrl`(정사각 그리드 UI에 표시하는 `thumbnail.jpg` signed URL; 썸네일 자체는 원본 비율·전체 영역 유지 fit), `imageUrl`(뷰어용 `original.jpg` signed URL), `capturedDate`(항상 있음), `capturedTime`(없을 수 있음), `uploaders`(함께 올린 사진은 여러 명, 닉네임과 프로필 이미지는 지금 값). 두 URL 모두 UTC 정시 기준 2시간 후 만료되며 저장·재생하지 않는다 | 4.2.5 로직 3, 4.2.6 |
 
 ### 권한과 오류
 
