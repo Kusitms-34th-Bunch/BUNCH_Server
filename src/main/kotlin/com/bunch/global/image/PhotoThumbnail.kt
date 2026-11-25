@@ -8,6 +8,7 @@ import java.io.IOException
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
+import kotlin.math.roundToInt
 
 /** Creates the private, metadata-free thumbnail stored beside a photo original. */
 public object PhotoThumbnail {
@@ -20,7 +21,7 @@ public object PhotoThumbnail {
     private const val JPEG_EOI = 0xd9
 
     /**
-     * Returns a central square JPEG no larger than 1080x1080, without enlarging a small source image.
+     * Fits the whole, EXIF-oriented image within 1080px, preserving its aspect ratio without upscaling.
      *
      * The input is decoded only while holding the process-wide [ImageDecodeLimiter] permit. Invalid,
      * truncated, warning-producing, oversized, or over-dimensioned images are rejected with
@@ -66,11 +67,11 @@ public object PhotoThumbnail {
                 require(reader.getNumImages(true) == 1) { "Image must contain exactly one frame" }
                 require(!warning) { "Image decoder reported a warning" }
 
-                val sourceSquare = minOf(width, height)
-                val targetSide = minOf(MAX_SIDE, sourceSquare)
-                // Read every scan at or above the final square size so truncation outside the crop is still
-                // observed by ImageIO. The full sampled raster remains bounded by the 4096px header limit.
-                val subsampling = maxOf(1, sourceSquare / targetSide)
+                val scale = minOf(1.0, MAX_SIDE.toDouble() / maxOf(width, height))
+                val targetWidth = maxOf(1, (width * scale).roundToInt())
+                val targetHeight = maxOf(1, (height * scale).roundToInt())
+                // Read the full frame at or above the final size, bounded by the 4096px header limit.
+                val subsampling = maxOf(1, maxOf(width, height) / MAX_SIDE)
                 val param = reader.defaultReadParam.apply {
                     setSourceSubsampling(subsampling, subsampling, 0, 0)
                 }
@@ -81,10 +82,12 @@ public object PhotoThumbnail {
                     "Decoded image dimensions are invalid"
                 }
 
-                val square = centralSquare(decoded)
-                val oriented = orient(square, orientation)
-                val outputSide = minOf(targetSide, oriented.width, oriented.height)
-                val output = resize(oriented, outputSide)
+                val oriented = orient(decoded, orientation)
+                val output = if (orientation >= 5) {
+                    resize(oriented, targetHeight, targetWidth)
+                } else {
+                    resize(oriented, targetWidth, targetHeight)
+                }
                 return encodeJpeg(output)
             } finally {
                 reader.dispose()
@@ -142,19 +145,6 @@ public object PhotoThumbnail {
         throw IllegalArgumentException("Truncated JPEG scan")
     }
 
-    private fun centralSquare(source: BufferedImage): BufferedImage {
-        val side = minOf(source.width, source.height)
-        require(side > 0)
-        val x = (source.width - side) / 2
-        val y = (source.height - side) / 2
-        if (x == 0 && y == 0 && source.width == side && source.height == side) return source
-
-        val result = BufferedImage(side, side, BufferedImage.TYPE_INT_RGB)
-        val pixels = source.getRGB(x, y, side, side, null, 0, side)
-        result.setRGB(0, 0, side, side, pixels, 0, side)
-        return result
-    }
-
     private fun orient(source: BufferedImage, orientation: Int): BufferedImage {
         require(orientation in 1..8)
         val destinationWidth = if (orientation >= 5) source.height else source.width
@@ -206,15 +196,15 @@ public object PhotoThumbnail {
         return destination
     }
 
-    private fun resize(source: BufferedImage, side: Int): BufferedImage {
-        require(side > 0)
-        if (source.width == side && source.height == side) return source
-        val result = BufferedImage(side, side, BufferedImage.TYPE_INT_RGB)
+    private fun resize(source: BufferedImage, width: Int, height: Int): BufferedImage {
+        require(width > 0 && height > 0)
+        if (source.width == width && source.height == height) return source
+        val result = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
         val graphics = result.createGraphics()
         try {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-            graphics.drawImage(source, 0, 0, side, side, null)
+            graphics.drawImage(source, 0, 0, width, height, null)
         } finally {
             graphics.dispose()
         }

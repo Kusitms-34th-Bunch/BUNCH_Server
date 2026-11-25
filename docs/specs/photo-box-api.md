@@ -39,9 +39,11 @@ POST /api/v1/bunches/{bunchId}/photos
   않으면 기존 방식으로 판단한다.
 - 위치 정보(EXIF·XMP의 GPS 등)는 앱이 보내기 전에 지운다. 남아 있으면 서버가 거부한다.
 - 서버는 보관본을 리사이즈·재인코딩하지 않는다. 다만 `PhotoImageStorage.upload`가 DB 트랜잭션 밖에서
-  ImageIO로 EXIF 방향을 반영한 중앙 정사각형 썸네일을 한 번 동기 생성해 원본과 함께 R2에 PUT한다.
-  썸네일은 최대 1080px·확대 없음·JPEG 품질 85이며, 전체 JPEG를 bounded source subsampling으로
-  읽은 뒤 중앙 crop한다. 썸네일 큐는 사용하지 않는다.
+  ImageIO로 EXIF 방향을 반영하고 원본 비율·전체 영역을 유지하는 fit 썸네일을 한 번 동기 생성해
+  원본과 함께 R2에 PUT한다. 썸네일은 긴 변 최대 1080px·작은 사진 확대 없음·JPEG 품질 85이며,
+  전체 JPEG를 bounded source subsampling으로 읽은 뒤 비율을 유지해 줄인다. 예를 들어 1920x2560은
+  810x1080이 된다. 원본 바이트와 원본 `width`·`height`는 변하지 않으며 중앙 crop하지 않는다.
+  썸네일 큐는 사용하지 않는다.
 - 긴 변 4096px 초과와 30MiB 초과 파일은 거부한다. 서버는 JPEG만 받는다(앱 입력 형식은 JPEG로 고정).
 
 ```http

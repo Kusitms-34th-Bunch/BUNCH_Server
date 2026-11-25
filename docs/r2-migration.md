@@ -12,9 +12,14 @@
 - 사진은 서로 다른 object key인 `photos/<ID>/original.jpg`, `photos/<ID>/thumbnail.jpg`에 저장한다.
   신규 ID는 UUID이며 기존 자산은 ImageAsset ID를 사용한다.
 - 프로필은 `profiles/<ID>/profile.jpg` 한 장을 저장한다. DB에는 `image_assets.object_key`만 저장한다.
-- 원본 바이트와 Photo 해시는 유지한다. 사진 썸네일은 EXIF 방향을 반영한 최대 1080px 중앙 정사각 JPEG 품질85다.
+- 원본 바이트와 Photo 해시는 유지한다. 사진 썸네일은 EXIF 방향을 반영하고 원본 비율·전체 영역을
+  유지하는 fit이며, 긴 변 최대 1080px·작은 사진 확대 없음·JPEG 품질 85다. 예를 들어
+  1920x2560 원본은 810x1080 썸네일이 된다. 원본 `width`·`height`는 변하지 않는다.
 - 목록은 썸네일, 상세는 원본을 제공한다. 각 요청의 기존 권한 검사를 통과한 뒤 UTC 현재 시각을 정시로 내림한 시간 슬롯(`slotStart`)으로 signed GET URL을 만들고, `slotStart + 7200초`에 만료시킨다(응답 시점의 남은 유효 시간은 1~2시간). 같은 bucket·object key·credentials·UTC 시간 슬롯에서는 같은 URL이고 다음 정시부터 바뀐다. URL은 DB·Redis·멱등성 결과에 저장하거나 권한 확인 없이 재사용하지 않는다.
 - signed GET에는 `response-cache-control=private, max-age=3600`을 덮어쓰기 파라미터로 넣어 기존 객체 metadata를 다시 쓰지 않고도 응답 Cache-Control을 고정한다. 신규 PUT에는 `Cache-Control: private, max-age=3600` metadata를 넣는다. URL 만료만으로 이미 캐시된 바이트가 자동으로 회수·폐기되지는 않는다.
+- 기존 정사각형 `thumbnail.jpg` 교체 시 이전 캐시와 구분하기 위해 썸네일 signed GET에만
+  `response-content-disposition=inline; filename="thumbnail-fit.jpg"`를 추가한다. 원본·프로필
+  URL은 바꾸지 않는다.
 
 ## 운영 우선 전환
 
