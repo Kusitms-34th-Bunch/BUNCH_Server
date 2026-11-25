@@ -52,7 +52,7 @@ jobs:
                   app=true
                   monitoring=true
                   ;;
-                src/*|scripts/r2/*|gradle/*|gradlew|gradlew.bat|build.gradle.kts|settings.gradle.kts|gradle.properties|Dockerfile|.dockerignore)
+                src/*|gradle/*|gradlew|gradlew.bat|build.gradle.kts|settings.gradle.kts|gradle.properties|Dockerfile|.dockerignore)
                   app=true
                   ;;
                 deploy/monitoring/*)
@@ -110,12 +110,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Build and test
         run: ./gradlew build
-      - name: Test the R2 migration tool
-        if: needs.changes.outputs.app == 'true'
-        run: |
-          if [[ -f scripts/r2/run.sh ]]; then
-            bash scripts/r2/run.sh test
-          fi
       - name: Validate monitoring configuration
         if: needs.changes.result != 'success' || needs.changes.outputs.monitoring != 'false'
         run: |

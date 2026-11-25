@@ -14,8 +14,8 @@
 - 현재 홈 Compose·환경 파일·실행 이미지 digest·마운트·볼륨을 확인하고 복구할 수 있게 보관한다.
   DB dump와 Redis 볼륨(AOF 포함)은 별도 저장소에 보관하고 별도 DB/Redis에서 복구를 시험한다.
   기존 Redis의 일관된 전체 볼륨 백업은 쓰기를 멈추고 Redis를 정지한 시점에 확보한다.
-- 기존 개발 앱이 동작하는 동안 [#226의 R2 이전 안내](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/pull/226/files)의 준비 SQL, 전체 원본 목록,
-  사전 복사를 진행한다. 대상은 `bunch-dev`다. 최초 운영 DB에는 기존 데이터 이전을 실행하지 않는다.
+- 기존 사진은 [#226의 R2 이전 안내](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/pull/226/files)에 따라 별도 관리 작업으로
+  `bunch-dev`에 복사한다. 기존 볼륨과 개발 DNS 연결은 운영 전환 이후에 준비할 수 있다.
 
 ## 2. 서버 설정 준비
 
@@ -33,7 +33,7 @@ PostgreSQL은 `postgres:16`, Redis는 `redis:7`을 사용한다. Compose 기본 
 두 환경 모두 `../profanity`로 지정한다. 볼륨 이름은 [환경 계약](../docs/specs/environments.md)에 따른다.
 
 각 `.env`는 `600`으로 설정한다. 기존 APNs 설정과 기기 토큰 암호화 키를 두 환경에서 사용하고 PEM 줄바꿈을 보존한다.
-개발은 `bunch-dev`, 운영은 `bunch-prod` R2 키를 넣는다. Cloudinary 키는 이전 도구와 복구 설정에 보관한다.
+개발은 `bunch-dev`, 운영은 `bunch-prod` R2 키를 넣는다. Cloudinary 키는 직접 이전 작업과 복구용으로 보관한다.
 WebSocket은 실제 웹·WebView Origin을 사용한다.
 
 기존 볼륨과 네트워크를 확인하고, 아래 새 자원 이름이 비어 있는 상태에서 한 번 생성한다.
@@ -52,21 +52,20 @@ docker volume create bunch-prod-redis-data
 
 ## 3. 점검 시간에 전환
 
-1. 테스트 앱의 API·WebSocket을 개발 주소로 바꿀 시점을 맞춘다. 홈 Compose에서 앱과 기존 Tunnel을
-   정지해 API·웹소켓 쓰기와 관련 백그라운드 작업을 중단한다. 이때 Grafana 외부 접근도 잠시 중단된다.
-2. 최종 DB dump를 확보하고 R2 이전 안내의 최종 복사·해시 검증·DB 매핑을 완료한다.
-   매핑에는 기존 PostgreSQL이 필요하다. 마무리 후 DB·Redis를 정지하고 최종 Redis 백업을 확보한다.
-3. `~/dev`에서 먼저 `docker compose up -d --wait postgres redis`로 기존 볼륨을 연결한다.
-   DB·Redis 데이터와 실제 마운트 이름을 확인한 후 `docker compose up -d --pull never --no-deps app`으로 V55를 적용한다.
-   기존 계정·사진 조회, 새 업로드·목록 썸네일·상세 원본, WebSocket, 내부 health를 검증한다.
-4. `~/prod`에서 `docker compose up -d --wait postgres redis`로 기존 `bunch`의 DB·Redis 서비스를
-   **새 운영 볼륨**에 연결한다. 개발과 운영 두 DB·Redis 컨테이너의 실제 마운트 이름이 서로 다른지 확인한다.
-   새 PostgreSQL에서 아래 순서로 앱 DB를 생성하고 앱을 기동해 Flyway와 내부 health를 확인한다.
-5. `~/prod`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
-   운영 앱의 Prometheus 대상과 대시보드를 확인한다. `~/prod`에서 기존 Tunnel을 기동해
+1. 점검 시간에 기존 앱과 Tunnel을 정지한다. 일관된 DB dump와 Redis 전체 볼륨(AOF 포함) 백업을 확보하고
+   기존 DB·Redis를 정지한다. 기존 데이터 볼륨은 개발용으로 보존한다. 이때 Grafana 외부 접근도 잠시 중단된다.
+2. `~/prod`에서 `docker compose up -d --wait postgres redis`로 기존 `bunch` 프로젝트의 DB·Redis를
+   새 운영 볼륨에 연결한다. 실제 마운트가 `bunch-prod-pgdata`·`bunch-prod-redis-data`인지 확인한다.
+   아래 순서로 운영 앱 DB를 초기화한 뒤 앱을 기동한다. 빈 DB는 기존 마이그레이션과 R2 V55를 적용한다.
+3. `~/prod`에서 Alloy·Loki·Prometheus·Grafana를 기존 볼륨으로 기동한다.
+   내부 health·운영 DB·Redis·R2와 대시보드를 확인하고 개발 토큰 API 차단을 확인한 뒤 기존 Tunnel을 기동한다.
    `api.bunch.kr → http://app:8080`, `grafana.bunch.kr → http://grafana:3000`으로 접근되는지 확인한다.
    기존 Tunnel의 다른 API 주소도 운영으로 연결되므로 공개할 주소를 확인한다.
-   개발 주소는 별도 개발 Tunnel을 기동한 뒤 테스트 앱으로 확인한다.
+4. 이후 개발 환경을 준비할 때 기존 PostgreSQL·Redis 볼륨을 `~/dev`에 연결한다. 개발 앱 기동 전에
+   기존 사진을 직접 R2에 복사·검증하고 자산별 `object_key`를 갱신한다. 운영 DB에는 이 작업을 실행하지 않는다.
+5. 같은 앱 이미지로 개발 앱을 기동하고 내부 조회·업로드를 확인한다. 개발 Tunnel과 `dev.bunch.kr`은
+   준비된 시점에 연결한다. 테스트 앱의 API·WebSocket 주소도 그때 바꾼다.
+   운영 전환부터 개발 주소 연결까지 기존 테스트 앱은 기존 테스트 데이터에 접근할 수 없다.
 
 운영 DB는 최초 한 번만 초기화한다.
 
