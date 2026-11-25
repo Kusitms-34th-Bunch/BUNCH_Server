@@ -388,7 +388,7 @@ class BundleLocationIntegrationTest : BunchIntegrationSupport() {
     @Test
     fun `locations are optional for publication and are preserved with title and photo content events`() {
         val f = fixture()
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "location/${UUID.randomUUID()}", url = "https://test/a.jpg"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds.add(asset.id)
         val photo = photos.saveAndFlush(Photo(
             bunch = bunchRows.findById(f.bunchId).orElseThrow(), imageAsset = asset,

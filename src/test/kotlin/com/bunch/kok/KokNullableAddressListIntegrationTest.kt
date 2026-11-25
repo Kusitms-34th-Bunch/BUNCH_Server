@@ -232,10 +232,10 @@ class KokNullableAddressListIntegrationTest : BunchIntegrationSupport() {
         join(selected, issue(owner, sourceBunch))
         jdbc.update("UPDATE bunches SET visibility = 'PUBLIC' WHERE id = ?", sourceBunch)
         val image = jdbc.queryForObject(
-            """INSERT INTO image_assets(public_id, url, created_at)
-                VALUES (?, 'https://example.invalid/nullable-place.jpg', CURRENT_TIMESTAMP) RETURNING id""",
+            """INSERT INTO image_assets(object_key, created_at)
+                VALUES (?, CURRENT_TIMESTAMP) RETURNING id""",
             Long::class.java,
-            "nullable-kok/${UUID.randomUUID()}"
+            "photos/nullable-kok-${UUID.randomUUID()}/original.jpg"
         )!!
         imageIds.add(image)
         val photo = jdbc.queryForObject(

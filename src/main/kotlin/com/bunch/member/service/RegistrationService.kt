@@ -1,5 +1,6 @@
 package com.bunch.member.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.global.common.ProfileText
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
@@ -21,6 +22,7 @@ import java.time.Instant
 
 @Service
 class RegistrationService(
+    private val imageUrls: ImageUrls,
     private val members: MemberRepository,
     private val consents: MemberConsentRepository,
     private val terms: TermsService,
@@ -61,9 +63,36 @@ class RegistrationService(
             "$nickname|${request.birthYear}|${request.gender}|${request.demographicsConsentVersion}|$photoHash".toByteArray()
         )
         var uploaded: StoredImage? = null
+        var attached = false
+        // Check the same policy before external I/O and again while attaching the object.
+        val replay = transaction.execute {
+            val member = members.findLockedById(memberId)?.requireActive()
+                ?: throw BusinessException(ErrorCode.USER_NOT_FOUND)
+            if (member.signupStatus == SignupStatus.COMPLETED) {
+                if (member.registrationFingerprint != fingerprint) throw BusinessException(ErrorCode.REGISTRATION_CONFLICT)
+                response(member)
+            } else {
+                if (!terms.accepted(memberId)) throw BusinessException(ErrorCode.SIGNUP_INCOMPLETE)
+                if (request.demographicsConsentVersion != null &&
+                    request.demographicsConsentVersion != terms.version(TermType.DEMOGRAPHICS)) {
+                    throw BusinessException(ErrorCode.TERMS_VERSION_MISMATCH)
+                }
+                profanity.requireClean(mapOf("nickname" to nickname))
+                if (members.existsByNickname(nickname)) throw BusinessException(ErrorCode.NICKNAME_TAKEN)
+                null
+            }
+        }
+        if (replay != null) return replay
 
         try {
-            return transaction.execute {
+            uploaded = photo?.takeIf { !it.isEmpty }?.let {
+                try {
+                    images.upload(it)
+                } catch (_: BusinessException) {
+                    null
+                }
+            }
+            val result = transaction.execute {
                 val member = members
                     .findLockedById(memberId)
                     ?.requireActive()
@@ -87,15 +116,6 @@ class RegistrationService(
                 profanity.requireClean(mapOf("nickname" to nickname))
                 if (members.existsByNickname(nickname))
                     throw BusinessException(ErrorCode.NICKNAME_TAKEN)
-                uploaded = photo?.takeIf { !it.isEmpty }?.let {
-                    try {
-                        images.upload(it)
-                    } catch (_: BusinessException) {
-                        null
-                    }
-                }
-
-                profanity.requireClean(mapOf("nickname" to nickname))
                 member.nickname = nickname
                 member.birthYear = request.birthYear
                 member.gender = request.gender
@@ -105,6 +125,7 @@ class RegistrationService(
                 member.signupStatus = SignupStatus.COMPLETED
                 member.completedAt = Instant.now()
                 member.registrationFingerprint = fingerprint
+                attached = uploaded != null
 
                 if (
                     request.demographicsConsentVersion != null &&
@@ -125,8 +146,10 @@ class RegistrationService(
                 members.saveAndFlush(member)
                 response(member)
             }!!
+            if (!attached) images.delete(uploaded?.objectKey)
+            return result
         } catch (e: RuntimeException) {
-            images.delete(uploaded?.publicId)
+            images.delete(uploaded?.objectKey)
             if (
                 e is DataIntegrityViolationException &&
                     (e.mostSpecificCause as? SQLException)?.sqlState == "23505"
@@ -141,7 +164,7 @@ class RegistrationService(
         member.id,
         member.signupStatus,
         member.nickname!!,
-        member.imageUrl
+        imageUrls.profile(member.imageKey)
     )
 
     private fun digest(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")

@@ -21,7 +21,7 @@ class RecommendationCandidateSchemaIntegrationTest : PhotoHttpTestSupport() {
         jdbc.update("DELETE FROM recommendation_dirty_dates")
         jdbc.update("DELETE FROM photo_uploaders")
         jdbc.update("DELETE FROM photos")
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-http/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'photos/test-http-%/original.jpg'")
     }
 
     @Test

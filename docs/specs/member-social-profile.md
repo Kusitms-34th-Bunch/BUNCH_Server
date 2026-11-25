@@ -17,20 +17,23 @@
 
 | 필드 | 의미 |
 | --- | --- |
-| `memberId`, `nickname`, `imageUrl` | 대상의 공개 정보. 사진이 없으면 null |
+| `memberId`, `nickname`, `imageUrl` | 대상의 공개 정보. 기존 소셜 접근 확인 뒤 `profiles/<UUID>/profile.jpg`의 UTC 정시 기준 2시간 후 만료되는 서명 URL을 만들며 사진이 없으면 `null` |
 | `currentBunchId` | 조회자의 현재 번치 ID. 소속 0개는 null |
 | `bunches` | 대상의 현재 ACTIVE 소속만 포함하는 전체 목록. 없으면 빈 배열 |
-| `bunches[].bunch` | 기존 `BunchSocialCard`: id/name/imageUrl/characterType/visibility |
+| `bunches[].bunch` | 기존 `BunchSocialCard`: id/name/imageUrl/characterType/visibility. `imageUrl`은 같은 권한·서명 규칙의 번치 프로필 URL |
 | `bunches[].followState` | 기존 NONE/REQUESTED/FOLLOWING |
 | `bunches[].followId` | 기존 팔로우 취소에 사용할 ID. 관계가 없으면 null |
 | `bunches[].showFollowButton` | 현재 번치 자신의 행만 false. 소속 0개를 포함한 나머지 행은 true |
 
 비공개 번치도 팔로우 승인 없이 위 기본정보를 반환한다. `visibility: PRIVATE`로
-자물쇠를 표시한다. 멤버 명단·번들·개인 출생연도·성별·동의·외부 식별자·사진 publicId는 반환하지 않는다.
+자물쇠를 표시한다. 멤버 명단·번들·개인 출생연도·성별·동의·외부 식별자·사진 object key는 반환하지 않는다.
 현재 번치 행과 소속 0개 조회는 NONE/null 상태다. 현재 번치 자신의 행만 팔로우 버튼을 숨긴다.
 소속 0개 조회자는 버튼을 표시하며, 앱은 `currentBunchId:null`일 때 버튼을 누르면
 팔로우 API를 호출하지 않고 토스트 「번치에 참여하면 할 수 있어요.」를 표시한다(6.1.7).
 `showFollowButton`은 표시 여부이며 팔로우 실행 권한을 의미하지 않는다.
+
+`imageUrl`은 DB·멱등 결과·이벤트에 저장하지 않는 일회성 URL이다. 만료되면 별도 refresh API가
+아니라 이 기존 social-profile GET을 다시 호출하며, `null`은 기본 이미지 fallback을 유지한다.
 
 이름을 첫 글자부터 비교하며 한글 → 영문(대소문자 무시) → 숫자(연속 숫자 수치 비교)
 순서를 적용한다. 그 외 문자는 뒤에서 코드 포인트로 비교한다. 한글은 NFC로 정규화한다.

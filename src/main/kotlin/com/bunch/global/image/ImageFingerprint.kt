@@ -21,7 +21,7 @@ object ImageFingerprint {
 
     /** The value of the image, or null when the bytes are not an image the JDK can read. */
     fun of(bytes: ByteArray): Long? = try {
-        read(bytes)?.let(::hash)
+        ImageDecodeLimiter.withPermit { read(bytes)?.let(::hash) }
     } catch (_: IOException) {
         null
     } catch (_: RuntimeException) {

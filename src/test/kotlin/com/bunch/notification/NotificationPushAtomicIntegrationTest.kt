@@ -280,7 +280,7 @@ class NotificationPushAtomicIntegrationTest : BunchIntegrationSupport() {
 
     private fun photo(bunchId: Long, memberId: Long): Long {
         val key = UUID.randomUUID().toString()
-        val asset = assets.saveAndFlush(ImageAsset(publicId = "atomic/$key", url = "https://example.test/$key"))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += asset.id
         val photo = photos.saveAndFlush(
             Photo(

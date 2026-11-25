@@ -183,7 +183,7 @@ class PhotoIntegrationTest : BunchIntegrationSupport() {
         assertThat(callbackPhotoIds).containsExactly(photo.id)
         assertThat(photos.existsById(photo.id)).isFalse()
         assertThat(assets.existsById(photo.imageAsset.id)).isFalse()
-        verify(storage, times(1)).delete(photo.imageAsset.publicId)
+        verify(storage, times(1)).delete(photo.imageAsset.objectKey)
     }
 
     @Test
@@ -247,7 +247,7 @@ class PhotoIntegrationTest : BunchIntegrationSupport() {
         assertThat(removalResults.count { it.photoDeleted }).isEqualTo(1)
         assertThat(callbackPhotoIds).containsExactly(photo.id)
         assertThat(photos.existsById(photo.id)).isFalse()
-        verify(storage, times(1)).delete(photo.imageAsset.publicId)
+        verify(storage, times(1)).delete(photo.imageAsset.objectKey)
     }
 
     @Test
@@ -351,8 +351,7 @@ class PhotoIntegrationTest : BunchIntegrationSupport() {
 
     private fun asset(): ImageAsset = assets.saveAndFlush(
         ImageAsset(
-            publicId = "photos/${UUID.randomUUID()}",
-            url = "https://images.example/photo.jpg",
+            objectKey = "photos/photo-integration-${UUID.randomUUID()}/original.jpg",
             createdAt = Instant.now()
         )
     ).also { ownedAssetIds += it.id }
