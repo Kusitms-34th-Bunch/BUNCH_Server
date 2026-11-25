@@ -26,7 +26,11 @@ data class PhotoUploadRequest(
     // The SHA-256 of the original file in lowercase hexadecimal, computed by the app before it shrinks the photo.
     val originalFileHash: String? = null,
     val capturedUtcOffset: String? = null,
-    val sourceType: String? = null
+    val sourceType: String? = null,
+    // The milliseconds of the capture time (0 to 999) and the model of the camera. The app leaves them out when the
+    // device did not record them; a default such as 0 or "unknown" would be taken for a real value.
+    val capturedMillis: String? = null,
+    val deviceModel: String? = null
 ) {
     fun toCommand(bunchId: Long, memberId: Long) = PhotoUploadCommand(
         bunchId = bunchId,
@@ -36,8 +40,30 @@ data class PhotoUploadRequest(
         capturedTime = capturedTime,
         originalFileHash = originalFileHash,
         capturedUtcOffset = checkedUtcOffset(),
-        sourceType = checkedSourceType()
+        sourceType = checkedSourceType(),
+        capturedMillis = checkedMillis(),
+        deviceModel = checkedDeviceModel()
     )
+
+    // Exactly three digits, so "007" and "123" are accepted and "7", "-1", "1000" and "1.5" are not. A shorter text
+    // could be the whole number of milliseconds ("7") or the fraction of a second ("7" is .7), and the server cannot
+    // tell which.
+    private fun checkedMillis(): Int? {
+        val text = capturedMillis?.takeIf { it.isNotEmpty() } ?: return null
+        if (!MILLIS.matches(text)) throw BusinessException(ErrorCode.INVALID_INPUT)
+        return text.toInt()
+    }
+
+    // The model is only a hint for the recommendation, so a strange one never fails the upload of the photo: it is
+    // dropped and the photo goes on without it. The blanks and the control characters at the ends (the text of an
+    // EXIF tag often ends in a NUL) do not belong to the model and are cut. What is left is no model when it is empty,
+    // too long, or still has a control character inside.
+    private fun checkedDeviceModel(): String? {
+        val model = deviceModel?.trim { it.isWhitespace() || it.isISOControl() }?.takeIf { it.isNotEmpty() }
+            ?: return null
+        if (model.length > MAX_DEVICE_MODEL_LENGTH || model.any { it.isISOControl() }) return null
+        return model
+    }
 
     private fun checkedUtcOffset(): String? {
         val offset = capturedUtcOffset?.takeIf { it.isNotEmpty() } ?: return null
@@ -54,3 +80,7 @@ data class PhotoUploadRequest(
         else -> throw BusinessException(ErrorCode.INVALID_INPUT)
     }
 }
+
+private val MILLIS = Regex("[0-9]{3}")
+
+private const val MAX_DEVICE_MODEL_LENGTH = 64

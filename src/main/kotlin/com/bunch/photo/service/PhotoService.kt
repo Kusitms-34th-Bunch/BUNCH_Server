@@ -139,6 +139,8 @@ class PhotoService(
     fun upload(command: PhotoUploadCommand, image: PhotoImage): PhotoUploadResult {
         // Photo rejects a time without a date, which would otherwise surface as a server error.
         if (command.capturedTime != null && command.capturedDate == null) fail(ErrorCode.INVALID_INPUT)
+        // The milliseconds are a part of the capture time, so they mean nothing without it.
+        if (command.capturedMillis != null && command.capturedTime == null) fail(ErrorCode.INVALID_INPUT)
         if (command.originalFileHash != null && !Photo.isSha256Hex(command.originalFileHash)) {
             fail(ErrorCode.INVALID_INPUT)
         }
@@ -198,12 +200,15 @@ class PhotoService(
                 // A bunch keeps one photo per original hash, so a hash another photo already owns is not stored again.
                 originalFileHash = command.originalFileHash.takeUnless { same.originalHashTaken },
                 capturedUtcOffset = command.capturedUtcOffset,
+                capturedMillis = command.capturedMillis,
+                // Measured from the image itself, not told by the app. A joining upload leaves the stored size alone.
                 width = image.width,
                 height = image.height
             )
         )
         // Every new photo gets its row, so the features that come later have a place to be filled in (4-5).
         recoFeatures.fillSource(photo.id, command.sourceType?.name)
+        command.deviceModel?.let { recoFeatures.fillDeviceModel(photo.id, it) }
         quality?.let { recoFeatures.fillQuality(photo.id, it.name) }
         fingerprint?.let { fingerprints.save(PhotoImageFingerprint(photo.id, it)) }
         uploaders.save(PhotoUploader(photo = photo, member = locked.member, uploadBatchId = command.uploadBatchId))
@@ -249,12 +254,15 @@ class PhotoService(
     }
 
     // The existing photo is not changed: the uploader list grows, and what the first upload did not say (the UTC
-    // offset, the original type) is filled in. A value that is already known is never replaced.
+    // offset, the milliseconds, the original type, the device model) is filled in. A value that is already known is
+    // never replaced.
     private fun joinUpload(locked: UploadLocks, command: PhotoUploadCommand, existing: Photo): PhotoUploadResult {
         val photo = photos.findAllLockedByIdInOrderByIdAsc(listOf(existing.id)).singleOrNull()
             ?: fail(ErrorCode.RESOURCE_NOT_FOUND)
         command.capturedUtcOffset?.let { photos.fillUtcOffset(photo.id, it) }
+        command.capturedMillis?.let { photos.fillCapturedMillis(photo.id, it) }
         command.sourceType?.let { recoFeatures.fillSource(photo.id, it.name) }
+        command.deviceModel?.let { recoFeatures.fillDeviceModel(photo.id, it) }
         if (uploaders.existsByPhotoIdAndMemberId(photo.id, command.memberId)) {
             return PhotoUploadResult(photo.id, PhotoUploadKind.ALREADY_UPLOADED)
         }
