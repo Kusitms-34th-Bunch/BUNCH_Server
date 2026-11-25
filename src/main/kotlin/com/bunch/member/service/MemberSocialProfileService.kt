@@ -1,5 +1,6 @@
 package com.bunch.member.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.Bunch
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.dto.BunchSocialCard
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 class MemberSocialProfileService(
+    private val imageUrls: ImageUrls,
     private val access: FeedAccessService,
     private val profiles: MemberSocialProfileRepository,
     private val follows: BunchFollowRepository
@@ -37,12 +39,12 @@ class MemberSocialProfileService(
         return MemberSocialProfileResponse(
             member.id,
             member.nickname,
-            member.imageUrl,
+            imageUrls.profile(member.imageKey),
             viewer.currentBunchId,
             bunches.map { bunch ->
                 val relation = FollowResult.from(relations[bunch.id])
                 MemberSocialBunchItem(
-                    BunchSocialCard.from(bunch),
+                    BunchSocialCard.from(bunch, imageUrls.profile(bunch.imageKey)),
                     relation.followState,
                     relation.followId,
                     viewer.currentBunchId != bunch.id

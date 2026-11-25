@@ -106,10 +106,10 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         jdbc.update(
             """UPDATE bunches SET profile_image_asset_id = NULL
                 WHERE profile_image_asset_id IN (
-                    SELECT id FROM image_assets WHERE public_id LIKE 'test-profile/%'
+                    SELECT id FROM image_assets WHERE object_key LIKE 'test-profile/%'
                 )"""
         )
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'test-profile/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'test-profile/%'")
     }
 
     @Test
@@ -250,6 +250,33 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
     }
 
     @Test
+    fun `profile replacement fingerprint includes bytes after the first buffer`() {
+        val owner = member()
+        val bunch = create(owner)
+        val bytes = ByteArray(8193) { 1 }
+        val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", bytes)
+        val stored = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
+        `when`(images.upload(photo)).thenReturn(stored)
+        val request = profile("사진 지문", "소개", 0, imageAction = ProfileImageAction.REPLACE)
+        val key = UUID.randomUUID()
+
+        val first = profiles.update(owner, bunch.id, key, request, photo)
+        assertThat(profiles.update(owner, bunch.id, key, request, photo)).isEqualTo(first)
+
+        val changed = bytes.copyOf().also { it[it.lastIndex] = 2 }
+        assertError(ErrorCode.IDEMPOTENCY_CONFLICT) {
+            profiles.update(
+                owner,
+                bunch.id,
+                key,
+                request,
+                MockMultipartFile("photo", "profile.jpg", "image/jpeg", changed)
+            )
+        }
+        verify(images).upload(photo)
+    }
+
+    @Test
     fun `profile final save rechecks profanity and compensates uploaded file`() {
         val dictionaries = java.util.concurrent.atomic.AtomicReference(
             ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ"))
@@ -258,7 +285,7 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val bunch = create(owner, "원래 번치")
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
-        val uploaded = StoredImage("test-profile/${UUID.randomUUID()}", "https://images.example/profanity.jpg")
+        val uploaded = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
         `when`(images.upload(photo)).thenAnswer {
             dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
             uploaded
@@ -277,7 +304,7 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         assertThat(error.errorCode).isEqualTo(ErrorCode.PROHIBITED_WORD)
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().name).isEqualTo("원래 번치")
         assertThat(bunchRepository.findById(bunch.id).orElseThrow().profileVersion).isZero()
-        verify(images).delete(uploaded.publicId)
+        verify(images).delete(uploaded.objectKey)
     }
 
     @Test
@@ -304,7 +331,7 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
         val owner = member()
         val bunch = create(owner, "사진 번치")
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(1, 2, 3))
-        val stored = StoredImage("test-profile/${UUID.randomUUID()}", "https://images.example/profile.jpg")
+        val stored = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
         `when`(images.upload(photo)).thenReturn(stored)
 
         val replaced = profiles.update(
@@ -315,7 +342,7 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
             photo
         )
         assertThat(replaced.profileVersion).isEqualTo(1)
-        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imagePublicId).isEqualTo(stored.publicId)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imageKey).isEqualTo(stored.objectKey)
 
         val reset = profiles.update(
             owner,
@@ -325,15 +352,12 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
             null
         )
         assertThat(reset.profileVersion).isEqualTo(2)
-        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imagePublicId).isNull()
-        org.mockito.Mockito.verify(images).delete(stored.publicId)
+        assertThat(bunchRepository.findById(bunch.id).orElseThrow().imageKey).isNull()
+        org.mockito.Mockito.verify(images).delete(stored.objectKey)
 
         val rollbackBunch = create(owner, "보상 번치")
         val rollbackPhoto = MockMultipartFile("photo", "rollback.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
-        val rollbackStored = StoredImage(
-            "test-profile/${UUID.randomUUID()}",
-            "https://images.example/rollback.jpg"
-        )
+        val rollbackStored = StoredImage("profiles/${UUID.randomUUID()}/profile.jpg")
         `when`(images.upload(rollbackPhoto)).thenReturn(rollbackStored)
         rejectWrite("bunch_test_reject_image", "bunches", "UPDATE")
         try {
@@ -350,9 +374,9 @@ class BunchHomeProfileIntegrationTest : BunchIntegrationSupport() {
             jdbc.execute("DROP TRIGGER IF EXISTS bunch_test_reject_image ON bunches")
             jdbc.execute("DROP FUNCTION IF EXISTS bunch_test_reject_write()")
         }
-        org.mockito.Mockito.verify(images).delete(rollbackStored.publicId)
+        org.mockito.Mockito.verify(images).delete(rollbackStored.objectKey)
         assertThat(bunchRepository.findById(rollbackBunch.id).orElseThrow().profileVersion).isZero()
-        assertThat(bunchRepository.findById(rollbackBunch.id).orElseThrow().imagePublicId).isNull()
+        assertThat(bunchRepository.findById(rollbackBunch.id).orElseThrow().imageKey).isNull()
     }
 
     @Test

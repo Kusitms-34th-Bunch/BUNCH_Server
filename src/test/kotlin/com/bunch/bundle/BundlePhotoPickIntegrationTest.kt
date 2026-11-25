@@ -310,10 +310,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         assertNoCaptionMetadata(savedData.path("photos").first())
         assertThat(legacyCaptionState(f.photoId)).isEqualTo(historicalBefore)
         write(f, """{"picked":true,"expectedVersion":0}""", 409)
-        val addedAsset = assets.saveAndFlush(ImageAsset(
-            publicId = "pick/${UUID.randomUUID()}",
-            url = "https://images.example/new.jpg"
-        ))
+        val addedAsset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += addedAsset.id
         val added = photos.saveAndFlush(Photo(
             bunch = bunchRows.findById(f.bunchId).orElseThrow(), imageAsset = addedAsset,
@@ -407,10 +404,7 @@ class BundlePhotoPickIntegrationTest : BunchIntegrationSupport() {
         val bunchId = create(owner).id
         join(guest, issue(owner, bunchId))
         join(selected, issue(owner, bunchId))
-        val asset = assets.saveAndFlush(ImageAsset(
-            publicId = "pick/${UUID.randomUUID()}",
-            url = "https://images.example/pick.jpg"
-        ))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += asset.id
         val source = photos.saveAndFlush(Photo(
             bunch = bunchRows.findById(bunchId).orElseThrow(), imageAsset = asset,

@@ -122,7 +122,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         jdbc.update("DELETE FROM external_identity WHERE provider_subject LIKE 'withdrawal-test-%'")
         extraMemberIds.forEach { jdbc.update("DELETE FROM members WHERE id = ?", it) }
         extraMemberIds.clear()
-        jdbc.update("DELETE FROM image_assets WHERE public_id LIKE 'withdrawal-test/%'")
+        jdbc.update("DELETE FROM image_assets WHERE object_key LIKE 'withdrawal-test/%'")
     }
 
     @Test
@@ -152,7 +152,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
         assertThat(identityCount(memberId)).isZero()
         assertThat(count("member_consents WHERE member_id = $memberId")).isZero()
         assertThat(assets.findById(image.id)).isEmpty
-        verify(profileImages).delete(image.publicId)
+        verify(profileImages).delete(image.objectKey)
     }
 
     @Test
@@ -547,7 +547,7 @@ class MemberWithdrawalIntegrationTest : BunchIntegrationSupport() {
     }
 
     private fun asset(name: String): ImageAsset = assets.saveAndFlush(
-        ImageAsset(publicId = "withdrawal-test/$name-${UUID.randomUUID()}", url = "https://images.example/$name.jpg")
+        ImageAsset(objectKey = "profiles/${UUID.randomUUID()}/profile.jpg")
     )
 
     private fun device(memberId: Long) {

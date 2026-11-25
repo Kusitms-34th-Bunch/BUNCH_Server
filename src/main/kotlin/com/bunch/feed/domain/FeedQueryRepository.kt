@@ -73,7 +73,7 @@ interface FeedQueryRepository : Repository<Bundle, Long> {
     """)
     fun photos(bundleIds: Collection<Long>): List<BundlePhoto>
 
-    @Query("""select bunch.id as id, bunch.name as name, image.url as imageUrl,
+    @Query("""select bunch.id as id, bunch.name as name, image.objectKey as imageKey,
         bunch.characterType as characterType, bunch.visibility as visibility
         from Bunch bunch left join bunch.profileImageAsset image where bunch.id in :bunchIds
     """)
@@ -82,7 +82,7 @@ interface FeedQueryRepository : Repository<Bundle, Long> {
     interface FeedBunchProfile {
         val id: Long
         val name: String
-        val imageUrl: String?
+        val imageKey: String?
         val characterType: com.bunch.bunch.domain.CharacterType
         val visibility: com.bunch.bunch.domain.Visibility
     }

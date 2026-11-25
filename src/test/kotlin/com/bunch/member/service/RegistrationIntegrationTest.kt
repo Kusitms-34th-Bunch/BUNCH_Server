@@ -107,10 +107,10 @@ class RegistrationIntegrationTest @Autowired constructor(
         org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
         val member = member()
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5, 6))
-        val publicId = "registration-profanity/${UUID.randomUUID()}"
+        val publicId = "profiles/registration-profanity-${UUID.randomUUID()}/profile.jpg"
         `when`(images.upload(photo)).thenAnswer {
             dictionaries.set(ProfanityDictionary(listOf("씨발", "시발", "ㅅㅂ", "fuck")))
-            StoredImage(publicId, "https://res.cloudinary.com/test/registration-profanity.jpg")
+            StoredImage(publicId)
         }
 
         val error = assertThrows<BusinessException> {
@@ -133,8 +133,8 @@ class RegistrationIntegrationTest @Autowired constructor(
         org.mockito.Mockito.`when`(profanity.current()).thenAnswer { dictionaries.get() }
         val member = member()
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(7, 8, 9))
-        val publicId = "registration-replay/${UUID.randomUUID()}"
-        val uploaded = StoredImage(publicId, "https://res.cloudinary.com/test/registration-replay.jpg")
+        val publicId = "profiles/registration-replay-${UUID.randomUUID()}/profile.jpg"
+        val uploaded = StoredImage(publicId)
         `when`(images.upload(photo)).thenReturn(uploaded)
         val request = RegistrationRequest("fuck")
 
@@ -198,19 +198,27 @@ class RegistrationIntegrationTest @Autowired constructor(
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(4, 5))
         assertThrows<BusinessException> { registrations.complete(member.id, RegistrationRequest("bad!"), photo) }
         verifyNoInteractions(images)
-        val publicId = "profile/${UUID.randomUUID()}"
-        `when`(images.upload(photo)).thenReturn(StoredImage(publicId, "https://res.cloudinary.com/test/profile.jpg"))
+        val publicId = "profiles/${UUID.randomUUID()}/profile.jpg"
+        `when`(images.upload(photo)).thenAnswer {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+                .isFalse()
+            StoredImage(publicId)
+        }
         val result = registrations.complete(member.id, RegistrationRequest("사진성공"), photo)
-        assertThat(result.imageUrl).endsWith("profile.jpg")
-        assertThat(members.findById(member.id).get().imagePublicId).isEqualTo(publicId)
+        assertThat(result.imageUrl).contains("/bunch-test/$publicId?").contains("X-Amz-Expires=1800")
+        assertThat(members.findById(member.id).get().imageKey).isEqualTo(publicId)
     }
 
     @Test
     fun `failed database profile save removes new image and keeps signup incomplete`() {
         val member = member()
         val photo = MockMultipartFile("photo", "profile.jpg", "image/jpeg", byteArrayOf(6, 7))
-        val publicId = "rollback-profile/${UUID.randomUUID()}"
-        `when`(images.upload(photo)).thenReturn(StoredImage(publicId, "https://res.cloudinary.com/test/rollback.jpg"))
+        val publicId = "profiles/rollback-${UUID.randomUUID()}/profile.jpg"
+        `when`(images.upload(photo)).thenAnswer {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+                .isFalse()
+            StoredImage(publicId)
+        }
         jdbc.execute("CREATE FUNCTION registration_test_reject() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''profile write failed''; END'")
         try {
             jdbc.execute("CREATE TRIGGER registration_test_reject BEFORE UPDATE ON members FOR EACH ROW WHEN (NEW.id = ${member.id}) EXECUTE FUNCTION registration_test_reject()")
@@ -219,7 +227,7 @@ class RegistrationIntegrationTest @Autowired constructor(
             val saved = members.findById(member.id).get()
             assertThat(saved.signupStatus).isEqualTo(SignupStatus.IN_PROGRESS)
             assertThat(saved.nickname).isNull()
-            assertThat(saved.imagePublicId).isNull()
+            assertThat(saved.imageKey).isNull()
         } finally {
             jdbc.execute("DROP TRIGGER IF EXISTS registration_test_reject ON members")
             jdbc.execute("DROP FUNCTION IF EXISTS registration_test_reject()")
