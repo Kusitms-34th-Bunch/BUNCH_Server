@@ -37,13 +37,13 @@ class PhotoThumbnailTest {
             val input = withExifOrientation(jpeg(source), orientation, littleEndian = orientation % 2 == 1)
             val output = decoded(PhotoThumbnail.create(input))
 
-            assertEquals(40, output.width, "orientation=$orientation width")
-            assertEquals(40, output.height, "orientation=$orientation height")
+            assertEquals(if (orientation >= 5) 40 else 80, output.width, "orientation=$orientation width")
+            assertEquals(if (orientation >= 5) 80 else 40, output.height, "orientation=$orientation height")
             listOf(
-                10 to 10,
-                30 to 10,
-                10 to 30,
-                30 to 30
+                output.width / 4 to output.height / 4,
+                output.width * 3 / 4 to output.height / 4,
+                output.width / 4 to output.height * 3 / 4,
+                output.width * 3 / 4 to output.height * 3 / 4
             ).zip(expected[orientation - 1]).forEach { (point, color) ->
                 assertColorNear(output.getRGB(point.first, point.second), color, orientation)
             }
@@ -55,9 +55,9 @@ class PhotoThumbnailTest {
         val output = decoded(PhotoThumbnail.create(jpeg(quadrantImage())))
 
         assertColorNear(output.getRGB(10, 10), RED, 1)
-        assertColorNear(output.getRGB(30, 10), GREEN, 1)
+        assertColorNear(output.getRGB(70, 10), GREEN, 1)
         assertColorNear(output.getRGB(10, 30), BLUE, 1)
-        assertColorNear(output.getRGB(30, 30), YELLOW, 1)
+        assertColorNear(output.getRGB(70, 30), YELLOW, 1)
     }
 
     @Test
@@ -70,16 +70,42 @@ class PhotoThumbnailTest {
 
         assertColorNear(output.getRGB(10, 10), BLUE, 6)
         assertColorNear(output.getRGB(30, 10), RED, 6)
-        assertColorNear(output.getRGB(10, 30), YELLOW, 6)
-        assertColorNear(output.getRGB(30, 30), GREEN, 6)
+        assertColorNear(output.getRGB(10, 70), YELLOW, 6)
+        assertColorNear(output.getRGB(30, 70), GREEN, 6)
     }
 
     @Test
-    fun `creates a central square capped at 1080 without upscaling`() {
+    fun `fits the full source within 1080 preserving aspect ratio without upscaling`() {
         assertEquals(1 to 1, thumbnailDimensions(image(1, 1)))
-        assertEquals(40 to 40, thumbnailDimensions(image(80, 40)))
-        assertEquals(400 to 400, thumbnailDimensions(image(800, 400)))
+        assertEquals(80 to 40, thumbnailDimensions(image(80, 40)))
+        assertEquals(400 to 800, thumbnailDimensions(image(400, 800)))
+        assertEquals(1080 to 540, thumbnailDimensions(image(4096, 2048)))
+        assertEquals(810 to 1080, thumbnailDimensions(image(1920, 2560)))
+        assertEquals(1080 to 720, thumbnailDimensions(image(4000, 2667)))
+        assertEquals(1 to 1080, thumbnailDimensions(image(1, 4096)))
+        assertEquals(1080 to 1, thumbnailDimensions(image(4096, 1)))
         assertEquals(1080 to 1080, thumbnailDimensions(image(4096, 4096)))
+    }
+
+    @Test
+    fun `keeps both outer edges rather than cropping the source`() {
+        val source = image(2400, 1200).apply {
+            createGraphics().also { graphics ->
+                graphics.color = Color(RED)
+                graphics.fillRect(0, 0, 600, height)
+                graphics.color = Color(GREEN)
+                graphics.fillRect(600, 0, 1200, height)
+                graphics.color = Color(BLUE)
+                graphics.fillRect(1800, 0, 600, height)
+                graphics.dispose()
+            }
+        }
+        val output = decoded(PhotoThumbnail.create(jpeg(source)))
+
+        assertEquals(1080 to 540, output.width to output.height)
+        assertColorNear(output.getRGB(50, 270), RED, 1)
+        assertColorNear(output.getRGB(540, 270), GREEN, 1)
+        assertColorNear(output.getRGB(1030, 270), BLUE, 1)
     }
 
     @Test
@@ -121,7 +147,7 @@ class PhotoThumbnailTest {
     }
 
     @Test
-    fun `rejects a tall JPEG truncated outside the central crop`() {
+    fun `rejects a tall JPEG truncated near the end of the frame`() {
         val valid = jpeg(tallImage())
         val truncated = truncateScan(valid, 0.70)
 
@@ -176,16 +202,16 @@ class PhotoThumbnailTest {
         assertDoesNotThrow { ImageDecodeLimiter.withPermit { 42 } }
     }
 
-    private fun quadrantImage(): BufferedImage = BufferedImage(40, 40, BufferedImage.TYPE_INT_RGB).apply {
+    private fun quadrantImage(): BufferedImage = BufferedImage(80, 40, BufferedImage.TYPE_INT_RGB).apply {
         createGraphics().also { graphics ->
             graphics.color = Color(RED)
-            graphics.fillRect(0, 0, 20, 20)
+            graphics.fillRect(0, 0, 40, 20)
             graphics.color = Color(GREEN)
-            graphics.fillRect(20, 0, 20, 20)
+            graphics.fillRect(40, 0, 40, 20)
             graphics.color = Color(BLUE)
-            graphics.fillRect(0, 20, 20, 20)
+            graphics.fillRect(0, 20, 40, 20)
             graphics.color = Color(YELLOW)
-            graphics.fillRect(20, 20, 20, 20)
+            graphics.fillRect(40, 20, 40, 20)
             graphics.dispose()
         }
     }

@@ -53,6 +53,11 @@ class R2ObjectStorageTest {
             assertTrue(full.query.contains("X-Amz-SignedHeaders=host"))
             assertFalse(full.query.contains("x-amz-checksum"))
             assertEquals("private, max-age=3600", parameter(full, "response-cache-control"))
+            assertEquals("inline; filename=\"thumbnail-fit.jpg\"", parameter(thumb, "response-content-disposition"))
+            assertFalse(full.query.contains("response-content-disposition"))
+            assertFalse(profile.query.contains("response-content-disposition"))
+            assertTrue(validSignature(thumb, "GET"))
+            assertFalse(validSignature(URI(thumb.toString().replace("thumbnail-fit", "thumbnail-square")), "GET"))
             assertNull(urls.profile(null))
             assertTrue(validSignature(full, "GET"))
             assertFalse(validSignature(full, "PUT"))
@@ -132,7 +137,7 @@ class R2ObjectStorageTest {
             assertEquals(2, puts.size)
             assertArrayEquals(bytes, puts.first().body)
             val thumbnail = ImageIO.read(puts.last().body.inputStream())
-            assertEquals(600, thumbnail.width)
+            assertEquals(800, thumbnail.width)
             assertEquals(600, thumbnail.height)
         }
     }

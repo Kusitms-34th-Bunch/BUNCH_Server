@@ -187,7 +187,7 @@ class PhotoUndatedListIntegrationTest : PhotoHttpTestSupport() {
     }
 
     @Test
-    fun `the thumbnail is the square transformation of the stored image and nothing else is returned`() {
+    fun `the thumbnail URL points to the separate stored thumbnail and nothing else is returned`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val objectKey = "photos/test-undated-abc/original.jpg"
         photo(
