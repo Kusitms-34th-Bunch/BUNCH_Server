@@ -1,6 +1,7 @@
 package com.bunch.recommendation.service
 
 import com.bunch.bunch.domain.BunchRepository
+import com.bunch.recommendation.domain.RecommendationRepository
 import com.bunch.recommendation.domain.RecommendedBundleQueueRepository
 import com.bunch.recommendation.domain.combination.BundleCombiner
 import com.bunch.recommendation.domain.combination.BundleExpiry
@@ -40,6 +41,7 @@ class RecommendedBundleRecalculation(
     private val inputs: RecoPhotoInputBuilder,
     private val combiner: BundleCombiner,
     private val store: RecommendedBundleStore,
+    private val recommendations: RecommendationRepository,
     private val expiry: BundleExpiry,
     private val settings: CombinationSettings
 ) {
@@ -54,7 +56,8 @@ class RecommendedBundleRecalculation(
         val photos = inputs.build(bunchId)
         val addedAt = photos.associate { it.photoId to it.uploadedAt }
         val result = combiner.combine(photos)
-        val outcome = store.replace(bunchId, withoutExpired(result, addedAt, now), now, addedAt)
+        val used = recommendations.findUsedPhotoIds(bunchId).toSet()
+        val outcome = store.replace(bunchId, withoutUsed(withoutExpired(result, addedAt, now), used), now, addedAt)
 
         queue.deleteDue(bunchId, due, now)
         waitForAnalysis(bunchId, result, photos, now)
@@ -80,6 +83,23 @@ class RecommendedBundleRecalculation(
                 }
             }
         )
+
+    // The photos of a recommended bundle that a draft was made from are not recommended again (4.1.3 rule 5). A
+    // bundle of only those photos is not a recommended bundle; one with a photo that is not among them is, so the
+    // photos that are left come back with the photo that was added to them (4.2.9 rule 5).
+    private fun withoutUsed(result: CombinationResult, used: Set<Long>): CombinationResult {
+        if (used.isEmpty()) return result
+
+        return result.copy(
+            days = result.days.map { day ->
+                if (day is DayCombination.Bundled) {
+                    day.copy(bundles = day.bundles.filterNot { bundle -> bundle.photos.all { it.photoId in used } })
+                } else {
+                    day
+                }
+            }
+        )
+    }
 
     private fun isExpired(bundle: RecoBundle, addedAt: Map<Long, Instant>, now: Instant): Boolean {
         val last = bundle.photos.mapNotNull { addedAt[it.photoId] }.maxOrNull() ?: return false

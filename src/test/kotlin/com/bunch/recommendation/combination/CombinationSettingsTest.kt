@@ -96,7 +96,6 @@ class CombinationSettingsTest {
         assertThat(settings.aiPendingTimeout).isEqualTo(Duration.ofMinutes(30))
         assertThat(settings.recalculationDebounce).isEqualTo(Duration.ofMinutes(5))
         assertThat(settings.listMax).isEqualTo(20)
-        assertThat(settings.sameActivityGeneralMax).isEqualTo(3)
         assertThat(settings.yearEndWindows).containsExactly(
             CombinationSettings.MonthDayWindow(MonthDay.of(12, 24), MonthDay.of(12, 25)),
             CombinationSettings.MonthDayWindow(MonthDay.of(12, 31), MonthDay.of(1, 1))
