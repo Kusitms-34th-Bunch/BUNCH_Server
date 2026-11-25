@@ -56,7 +56,7 @@ class KokListIntegrationTest : BunchIntegrationSupport() {
             statistics.clear()
             val first = pins.list(f.actor)
             val oneSourceQueries = statistics.prepareStatementCount
-            assertThat(first.members.single().imageUrl).contains("/profiles/pin-list-").contains("/profile.jpg?").contains("X-Amz-Expires=1800")
+            assertThat(first.members.single().imageUrl).contains("/profiles/pin-list-").contains("/profile.jpg?").contains("X-Amz-Expires=7200")
             repeat(4) { index ->
                 val owner = member()
                 val source = create(owner).id

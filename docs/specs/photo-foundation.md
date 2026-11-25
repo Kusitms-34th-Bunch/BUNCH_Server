@@ -196,8 +196,8 @@ restrictive FK로 참조 중인지 DB가 최종 판단한다.
 이 방식은 미래 retaining table을 ImageAsset에 restrictive FK로 연결하기만 해도
 참조 카운터나 테이블 목록을 수정하지 않고 파일 보존을 적용한다. 새 업로드는
 새 UUID object key를 생성하며 삭제한 key로 자산을 재생성하거나 파일을 덮어쓰지 않는다.
-공유 파일은 기존 자산 ID의 FK로 연결한다. 자동 URL 캐시·URL 갱신 API·정리 배치는
-추가하지 않는다.
+공유 파일은 기존 자산 ID의 FK로 연결한다. 애플리케이션 URL 값 캐시·URL 갱신 API·정리
+배치는 추가하지 않는다.
 
 ## 기존 프로필 이전
 
@@ -252,9 +252,10 @@ FK와 API `imageUrl`이 모두 `null`이다. 세부 순서와 복구는 [R2 이�
 
 `PhotoImageStorage.upload`는 DB transaction 밖에서 다음을 한 번 수행한다.
 
-1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 300px이고 작은
-   이미지는 확대하지 않으며 JPEG 품질은 75다.
-2. 원본을 `original.jpg`로, 방금 만든 썸네일을 `thumbnail.jpg`로 R2에 PUT한다.
+1. ImageIO로 EXIF 방향을 반영해 중앙을 자른 정사각형 썸네일을 만든다. 최대 1080px이고 작은
+   이미지는 확대하지 않으며 JPEG 품질은 85다.
+2. 원본을 `original.jpg`로, 방금 만든 썸네일을 `thumbnail.jpg`로 각각 서로 다른 object key에
+   `Cache-Control: private, max-age=3600` metadata와 함께 R2에 PUT한다.
 
 썸네일은 큐나 별도 비동기 작업으로 만들지 않는다. JPEG 전체를 대상으로 ImageIO의 bounded
 source subsampling을 적용해 디코딩한 뒤 중앙을 잘라 최종 크기로 줄인다. 따라서 crop 바깥의
@@ -262,22 +263,33 @@ source subsampling을 적용해 디코딩한 뒤 중앙을 잘라 최종 크기�
 하나라도 실패하면 생성한 사진 객체를 보상 정리하고 업로드 실패로 처리한다.
 
 프로필은 `ProfileImageStorage`가 기존 JPEG 정제 결과를 `profiles/<UUID>/profile.jpg`로
-PUT한다. 사진·프로필 모두 외부 저장소 I/O는 DB transaction 밖에서 실행하며, DB 자산 행
-삭제와 R2 객체 삭제는 커밋 후에만 시도한다. restrictive FK가 공유 자산을 보호한다.
+같은 `Cache-Control: private, max-age=3600` metadata와 함께 PUT한다. 사진·프로필 모두 외부
+저장소 I/O는 DB transaction 밖에서 실행하며, DB 자산 행 삭제와 R2 객체 삭제는 커밋 후에만
+시도한다. restrictive FK가 공유 자산을 보호한다.
 
 ### 표시 URL
 
 표시 URL은 `ImageUrls.full(key)`, `ImageUrls.thumbnail(key)`, `ImageUrls.profile(key?)`가
-응답 시 로컬에서 만든다. 각 URL은 기존 유스케이스의 인증·소속·공개 범위 확인을 통과한
-뒤에만 정확히 1800초 유효하게 서명한다.
+응답 시 로컬에서 만든다. 모든 요청은 기존 유스케이스의 인증·소속·공개 범위 확인을 매번
+통과해야 서명할 수 있다. UTC 현재 시각을 시간 단위로 내림한 `slotStart`를 기준 시각으로
+삼고, signed GET의 만료 시각은 `slotStart + 7200초`로 고정한다. 따라서 응답 시점에 남은
+유효 시간은 1~2시간이며, 응답 시점부터 항상 2시간인 것은 아니다. 같은 bucket·object key·
+credentials·UTC 시간 슬롯에서는 같은 URL을 만들고 다음 UTC 정시부터 URL이 바뀐다.
 
 - 사진함 목록·카드·Feed는 `thumbnail.jpg`를 기존 `thumbnailUrl` 또는 `coverImageUrl` 필드로
   제공한다.
 - 사진함·발행 Bundle 상세는 `original.jpg`를 기존 `imageUrl` 필드로 제공한다.
 - 프로필·멤버·업로더 이미지는 `profile.jpg`를 기존 `imageUrl` 필드로 제공한다.
-- 기존 필드명과 `null`/기본 이미지 fallback을 유지하고 `objectKey`는 외부 응답에 내보내지
-  않는다. 서명 URL은 DB·멱등 재생 결과·이벤트에 저장하거나 재생하지 않는다.
-- URL이 만료되면 전용 refresh API를 만들지 않고 같은 기존 조회 API를 다시 호출한다.
+- `original.jpg`와 `thumbnail.jpg`는 서로 다른 key이므로 각각 요청된 key로 서명하며 URL을
+  서로 재사용하지 않는다. 기존 필드명과 `null`/기본 이미지 fallback을 유지하고 `objectKey`는
+  외부 응답에 내보내지 않는다.
+- 비공개 버킷은 유지한다. signed GET에는 `response-cache-control=private, max-age=3600`을
+  덮어쓰기 파라미터로 넣으므로 기존 객체 metadata를 다시 쓸 필요가 없다. 신규 PUT metadata는
+  위 Cache-Control을 사용한다. URL 만료는 새 요청 URL의 유효성만 끝내며 이미 캐시된 바이트를
+  자동으로 회수·폐기하지 않는다.
+- 서명 URL 자체는 DB·Redis·멱등성 결과·이벤트에 저장하거나 재생하지 않는다. 멱등 성공 재생도
+  저장된 object key로 현재 권한을 다시 확인한 뒤 현재 UTC 시간 슬롯의 signed URL을 만든다.
+  URL이 만료되면 전용 refresh API를 만들지 않고 같은 기존 조회 API를 다시 호출한다.
 
 세부 이전 순서와 복구는 [R2 이미지 이전 문서](../r2-migration.md)를 따른다. 준비 단계와
 전환 Flyway는 분리하고, 이미 적용된 Flyway는 수정하지 않는다.
@@ -286,8 +298,8 @@ PUT한다. 사진·프로필 모두 외부 저장소 I/O는 DB transaction 밖�
 
 저장소 테스트는 DB와 실제 R2 없이 로컬 stub으로 R2 PUT·부분 실패 보상·삭제 경계를 검증한다.
 입력 30MiB/헤더 4096px 경계, EXIF 방향·위치 메타데이터, 두 limiter의 동시성, 전체 JPEG를
-bounded source subsampling으로 읽는 썸네일, 300px·JPEG 품질 75, object key 경로와 정확한 1800초 서명
-계약을 포함한다.
+bounded source subsampling으로 읽는 썸네일, 1080px·JPEG 품질 85, object key 경로와 UTC 시간 슬롯
+기준의 deterministic signed GET·`response-cache-control`·신규 PUT Cache-Control 계약을 포함한다.
 
 ## 테스트 기준
 

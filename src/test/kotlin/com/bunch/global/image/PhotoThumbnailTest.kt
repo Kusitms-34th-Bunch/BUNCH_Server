@@ -75,11 +75,11 @@ class PhotoThumbnailTest {
     }
 
     @Test
-    fun `creates a central square capped at 300 without upscaling`() {
+    fun `creates a central square capped at 1080 without upscaling`() {
         assertEquals(1 to 1, thumbnailDimensions(image(1, 1)))
         assertEquals(40 to 40, thumbnailDimensions(image(80, 40)))
-        assertEquals(300 to 300, thumbnailDimensions(image(800, 400)))
-        assertEquals(300 to 300, thumbnailDimensions(image(4096, 4096)))
+        assertEquals(400 to 400, thumbnailDimensions(image(800, 400)))
+        assertEquals(1080 to 1080, thumbnailDimensions(image(4096, 4096)))
     }
 
     @Test

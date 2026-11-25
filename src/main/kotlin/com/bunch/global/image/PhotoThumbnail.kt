@@ -13,14 +13,14 @@ import javax.imageio.ImageWriteParam
 public object PhotoThumbnail {
     private const val MAX_INPUT_BYTES = 30 * 1024 * 1024
     private const val MAX_DIMENSION = 4096
-    private const val MAX_SIDE = 300
-    private const val JPEG_QUALITY = 0.75f
+    private const val MAX_SIDE = 1080
+    private const val JPEG_QUALITY = 0.85f
     private const val JPEG_MARKER = 0xff
     private const val JPEG_SOI = 0xd8
     private const val JPEG_EOI = 0xd9
 
     /**
-     * Returns a central square JPEG no larger than 300x300, without enlarging a small source image.
+     * Returns a central square JPEG no larger than 1080x1080, without enlarging a small source image.
      *
      * The input is decoded only while holding the process-wide [ImageDecodeLimiter] permit. Invalid,
      * truncated, warning-producing, oversized, or over-dimensioned images are rejected with

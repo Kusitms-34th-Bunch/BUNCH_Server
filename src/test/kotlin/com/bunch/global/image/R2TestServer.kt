@@ -6,7 +6,7 @@ import java.util.Collections
 
 /** A local S3 wire stub. It intentionally never records Authorization or query strings. */
 class R2TestServer : AutoCloseable {
-    data class Request(val method: String, val path: String, val body: ByteArray)
+    data class Request(val method: String, val path: String, val body: ByteArray, val cacheControl: String?)
     val requests = Collections.synchronizedList(mutableListOf<Request>())
     var onPut: () -> Unit = {}
     var failPuts = false
@@ -14,7 +14,12 @@ class R2TestServer : AutoCloseable {
     var failDeletes = false
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/") { exchange ->
-            val request = Request(exchange.requestMethod, exchange.requestURI.path, exchange.requestBody.readBytes())
+            val request = Request(
+                exchange.requestMethod,
+                exchange.requestURI.path,
+                exchange.requestBody.readBytes(),
+                exchange.requestHeaders.getFirst("Cache-Control")
+            )
             requests.add(request)
             if (request.method == "PUT") onPut()
             val fail = (request.method == "PUT" && (failPuts || (failThumbnail && request.path.endsWith("thumbnail.jpg")))) ||

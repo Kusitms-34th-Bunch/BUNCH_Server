@@ -94,7 +94,7 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 - `GET /api/v1/bunches/{bunchId}/members`는 기존 최소 `List<BunchMemberResponse>`를
   그대로 반환한다. 필드는 `memberId`, `nickname`, `imageUrl`, `role`뿐이며 ACTIVE 멤버만
   포함한다. `imageUrl`은 기존 멤버 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 대해 정확히
-  1800초 유효하게 서명하며, 이미지가 없으면 JSON `null`이다. URL은 저장·재생하지 않고 만료되면
+  UTC 정시 기준 2시간 후 만료되도록 서명하며, 이미지가 없으면 JSON `null`이다. URL은 저장·재생하지 않고 만료되면
   이 기존 members API를 다시 호출한다. 내부·외부 모두 배열을 직접 반환하며 wrapper를 만들지 않는다.
 - 역할 필드는 `OWNER`, `CO_OWNER`, `MEMBER`를 유지하고, 앱의 메인/공동 관리자 배지는
   [PRD 정렬 커밋 `d898c21`](https://github.com/Kusitms-34th-Bunch/BUNCH_Server/commit/d898c21691201c1768f5f90e9e336d4cadd369e1)에
@@ -132,7 +132,7 @@ query의 `viewerBunchId`·`currentBunchId` 선택 정책을 대체한다. 이 �
 - 외부 이미지 upload는 DB 잠금 밖에서 수행한다. upload 뒤 회원 완료 상태·OWNER·이름 유일성·버전을 번치 잠금 아래 재검사한다.
 - 새 asset 참조와 이전 asset 해제 예약은 프로필 변경, 알림, 성공 결과 기록과 같은 DB transaction에 속한다. 실패한 원격 파일은 보상 삭제한다.
 - 정규화된 입력과 `REPLACE` 이미지 bytes의 SHA-256을 `PROFILE` action request fingerprint로 저장한다. 성공 결과는 30일 재생하며 만료된 기록은 새 요청으로 정리한다.
-- 성공 replay도 저장된 object key에서 현재 권한을 다시 확인한 뒤 새 signed URL을 만든다. signed URL 자체는 멱등 결과나 DB에 저장하지 않는다.
+- 성공 replay도 저장된 object key에서 현재 권한을 다시 확인한 뒤 현재 UTC 시간대의 signed URL을 만든다. signed URL 자체는 멱등 결과나 DB에 저장하지 않는다.
 - 같은 값 저장은 성공하지만 `profileVersion`·알림을 증가시키지 않는다. 다른 입력을 같은 키로 재생하면 `REQUEST_001`, 오래된 버전이면 `BUNCH_004`다.
 - 금칙어 거부는 `COMMON_003`이며 적발 단어는 응답하지 않는다. 재시도·멱등·원자성 경계는 기존 계약을 유지한다.
 - 공개 범위 변경은 실제 방향에 따라 type 16 알림을 만든다. `PRIVATE → PUBLIC`에서는 대상 번치만 잠근 상태에서 현재 PENDING follow를 승인하고, #51의 `NotificationWriter.followApproved`를 통해 type 19 및 기존 승인 문구/중복키를 재사용한다. follower 번치 lock을 뒤늦게 획득하지 않는다.

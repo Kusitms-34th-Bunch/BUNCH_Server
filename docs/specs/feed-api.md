@@ -33,7 +33,7 @@ nextCursor, hasNext, endReached}`다. `bundleCount`는 이번 응답의 실제 �
 카드는 `{id, bunch, publishedAt, title, date, coverImageUrl, photos, locations,
 participants, likeCount, likedByCurrentBunch, commentCount}`다.
 `bunch`는 `{id, name, imageUrl, characterType, visibility}`이며 번치 프로필 이동에 쓴다.
-`coverImageUrl`과 `photos[].imageUrl`은 카드·Feed 표시용 `thumbnail.jpg`의 정확히 1800초 유효한
+`coverImageUrl`과 `photos[].imageUrl`은 카드·Feed 표시용 `thumbnail.jpg`의 UTC 정시 기준 2시간 후 만료되는
 signed URL이고, `bunch.imageUrl`과 `participants[].imageUrl`은 `profile.jpg` signed URL이다.
 `photos`는 `{id, imageUrl, position}` 배열, `position ASC, id ASC`이며 첫 사진이 대표다.
 `date`는 nullable ISO 날짜, 경과 시간은 `publishedAt` 기준으로 앱이 표시한다.

@@ -43,7 +43,7 @@
 - 사진 업로드와 번들 생성은 별개다. 사진함에 사진만 보관할 수 있다.
 - Photo와 이미지 자산의 수명을 분리한다. 사진함에서 Photo를 지워도 발행본이 참조하는 파일은 유지한다.
 - 개인·번치 프로필은 이미지 자산을 참조한다. 기본 이미지는 참조가 없는 상태이며 기존 API의 `imageUrl` 응답을 유지한다.
-  기존 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 정확히 1800초 서명하고, URL이 없으면 `null`이다.
+  기존 권한 확인 뒤 `profiles/<UUID>/profile.jpg`에 UTC 정시 기준 2시간 후 만료되도록 서명하고, URL이 없으면 `null`이다.
   목록·카드의 사진은 `thumbnail.jpg`, 상세 사진은 `original.jpg`를 사용한다. 공통 저장·서명 규칙은
   [사진함 기반 계약](photo-foundation.md)을 따른다.
 - 픽은 `BundlePhoto`와 초안 참여 멤버의 조합에 귀속한다. 사진 순서를 바꿔도 사진을 따라가며,

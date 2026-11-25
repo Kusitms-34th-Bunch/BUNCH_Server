@@ -1719,9 +1719,9 @@ class BundleLifecycleIntegrationTest : BunchIntegrationSupport() {
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         assertThat(ordered().total).isEqualTo(3)
         assertThat(ordered().items.flatMap { it.photos }.map { it.imageUrl })
-            .allSatisfy { url -> assertThat(url).contains("/thumbnail.jpg?").contains("X-Amz-Expires=1800") }
+            .allSatisfy { url -> assertThat(url).contains("/thumbnail.jpg?").contains("X-Amz-Expires=7200") }
         assertThat(bundleService.get(owner, bunchId, first.id).photos.single().imageUrl)
-            .contains("/original.jpg?").contains("X-Amz-Expires=1800")
+            .contains("/original.jpg?").contains("X-Amz-Expires=7200")
         bundleService.get(owner, bunchId, first.id)
         assertThat(ordered().items.map { it.id }).containsExactly(third.id, second.id)
         bundleService.title(actor(owner), bunchId, first.id,
