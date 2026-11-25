@@ -49,7 +49,8 @@ BFF·프론트·운영 Origin·세션 레지스트리/오류 처리 전체 개�
 
 ## 개발용 access token — 이슈 #112
 
-온보딩 테스트를 위한 임시 API다. `prod` 포함 모든 환경에서 인증 없이 허용하며 테스트 종료 후 삭제한다.
+온보딩 테스트를 위한 임시 API다. `dev`·`test`에서 인증 없이 허용하며 테스트 종료 후 삭제한다.
+`prod` 프로필이 활성화되면 다른 프로필을 함께 사용해도 요청을 차단한다. 익명 요청은 401이다.
 
 - `POST /api/v1/auth/dev/token` — `{"nickname":"tester1"}`로 호출한다.
 - `ProfileText.name`의 기존 닉네임 규칙으로 정규화한 뒤 `MemberRepository.findByNickname`으로 조회한다.

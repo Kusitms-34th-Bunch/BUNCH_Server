@@ -28,7 +28,7 @@ import java.util.UUID
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test", "prod")
+@ActiveProfiles("test", "dev")
 class DevTokenHttpIntegrationTest @Autowired constructor(
     private val mvc: MockMvc,
     private val json: ObjectMapper,
