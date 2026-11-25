@@ -71,6 +71,17 @@ class GeneralBigSplitterTest {
     }
 
     @Test
+    fun `a boundary where a side has no moment the members took photos together is no place to cut`() {
+        val apart = shots(1, "09:00", 5, members = listOf(1), step = 1) + shots(10, "09:40", 1, members = listOf(2))
+        val big = shots(100, "11:00", 42, step = 5)
+
+        val result = split(apart + big)
+
+        assertThat(result).hasSize(1)
+        assertThat(result.single().photos).hasSize(48)
+    }
+
+    @Test
     fun `a boundary where a side is not enough for a bundle is no place to cut`() {
         val small = shots(1, "09:00", 3, step = 5)
         val big = shots(100, "10:00", 40, step = 5)

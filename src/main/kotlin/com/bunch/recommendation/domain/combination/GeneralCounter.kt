@@ -14,6 +14,10 @@ class GeneralCounter(
     fun uploaders(photos: Collection<PreparedPhoto>): Set<Long> =
         eligibility.groupsOf(photos, groups).flatMap { it.uploaderIds }.toSet()
 
+    /** The photos that are in a moment the members took photos together, counted among [photos] only (R2). */
+    fun togetherPhotoIds(photos: Collection<PreparedPhoto>): Set<Long> =
+        eligibility.togetherMoments(photos, groups).photoIds
+
     /** Enough photos and enough members for a bundle to stand (3-1). */
     fun isEnough(photos: Collection<PreparedPhoto>): Boolean = eligibility.isEnough(photos, groups)
 
