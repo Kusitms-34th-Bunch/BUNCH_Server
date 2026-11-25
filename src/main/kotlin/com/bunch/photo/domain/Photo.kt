@@ -74,6 +74,9 @@ class Photo(
     val height: Int? = null
 ) {
     init {
+        require((width == null && height == null) || ((width ?: 0) > 0 && (height ?: 0) > 0)) {
+            "photo dimensions must both be null or positive"
+        }
         require(isSha256Hex(fileHash)) {
             "fileHash must be a lowercase SHA-256 hexadecimal value"
         }
@@ -100,9 +103,6 @@ class Photo(
         }
         require(capturedMillis == null || (capturedMillis in 0..MAX_MILLIS && capturedTime != null)) {
             "capturedMillis must be from 0 to 999 and needs a capturedTime"
-        }
-        require((width == null) == (height == null) && (width ?: 1) > 0 && (height ?: 1) > 0) {
-            "width and height must be given together and be positive"
         }
     }
 

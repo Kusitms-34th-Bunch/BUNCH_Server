@@ -110,10 +110,7 @@ class ContentModerationIntegrationTest : BunchIntegrationSupport() {
         val reporter = member()
         publicBunch(reporter)
         val report = reports.bundle(reporter, bundle, SocialContentReportRequest(BunchReportReason.SPAM))
-        val asset = assets.saveAndFlush(ImageAsset(
-            publicId = "moderation/${UUID.randomUUID()}",
-            url = "https://example.com/photo.jpg"
-        ))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += asset.id
         jdbc.update("""INSERT INTO bundle_photos(bundle_id,image_asset_id,position,added_by,added_at)
             VALUES (?,?,0,?,now())""", bundle, asset.id, owner)
@@ -132,7 +129,7 @@ class ContentModerationIntegrationTest : BunchIntegrationSupport() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM social_comments WHERE id=?", Long::class.java, root.id)).isZero()
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bundle_photos WHERE bundle_id=?", Long::class.java, bundle)).isZero()
         assertThat(assets.findById(asset.id)).isEmpty()
-        verify(storage).delete(asset.publicId)
+        verify(storage).delete(asset.objectKey)
         assertThat(jdbc.queryForObject("SELECT status FROM push_jobs WHERE id=?", String::class.java, reminder)).isEqualTo("CANCELLED")
         assertThat(jdbc.queryForObject("SELECT last_error_code FROM push_jobs WHERE id=?", String::class.java, reminder))
             .isEqualTo("BUNDLE_CLOSED")

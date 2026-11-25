@@ -1,5 +1,6 @@
 package com.bunch.feed.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bundle.domain.Bundle
 import com.bunch.bundle.service.BundleAttributionService
 import com.bunch.bundle.service.BundleLocationService
@@ -28,6 +29,7 @@ import java.time.temporal.ChronoUnit
 
 @Service
 class FeedService(
+    private val imageUrls: ImageUrls,
     private val access: FeedAccessService,
     private val query: FeedQueryRepository,
     private val cursors: FeedCursorCodec,
@@ -138,13 +140,13 @@ class FeedService(
         return bundles.associate { bundle ->
             val profile = bunches.getValue(bundle.bunchId)
             val images = photos[bundle.id].orEmpty().map {
-                FeedPhoto(it.id, it.imageAsset.url, it.position)
+                FeedPhoto(it.id, imageUrls.thumbnail(it.imageAsset.objectKey), it.position)
             }
             val reactions = likeCounts.getValue(bundle.id)
             bundle.id to FeedBundleCard(
                 id = bundle.id,
                 bunch = FeedBunchInfo(
-                    profile.id, profile.name, profile.imageUrl, profile.characterType, profile.visibility
+                    profile.id, profile.name, imageUrls.profile(profile.imageKey), profile.characterType, profile.visibility
                 ),
                 publishedAt = requireNotNull(bundle.publishedAt),
                 title = bundle.title,

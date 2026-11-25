@@ -42,8 +42,7 @@ class SecurityConfig(
                     "/api/v1/auth/apple/login",
                     "/api/v1/auth/google/login",
                     "/api/v1/auth/kakao/login",
-                    "/api/v1/auth/reissue",
-                    "/api/v1/auth/dev/token"
+                    "/api/v1/auth/reissue"
                 ).permitAll()
                 it.requestMatchers(HttpMethod.GET, "/api/v1/invitations/*").permitAll()
                 it.requestMatchers(HttpMethod.GET, "/ws", "/ws/**").permitAll()

@@ -170,10 +170,7 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         expireInvitations()
         val newName = uniqueName()
         val currentImage = assetRepository.saveAndFlush(
-            ImageAsset(
-                publicId = "invitation/${UUID.randomUUID()}",
-                url = "https://images.example/current.jpg"
-            )
+            ImageAsset(objectKey = "profiles/${UUID.randomUUID()}/profile.jpg")
         )
         jdbc.update(
             "UPDATE bunches SET name = ?, profile_image_asset_id = ? WHERE id = ?",
@@ -185,7 +182,7 @@ class InvitationIntegrationTest : BunchIntegrationSupport() {
         assertThat(replay.outcome).isEqualTo(JoinOutcome.JOINED)
         assertThat(replay.bunch.id).isEqualTo(first.bunch.id)
         assertThat(replay.bunch.name).isEqualTo(newName)
-        assertThat(replay.bunch.imageUrl).isEqualTo(currentImage.url)
+        assertThat(replay.bunch.imageUrl).contains("/bunch-test/${currentImage.objectKey}?").contains("X-Amz-Expires=7200")
         assertError(ErrorCode.INVALID_INVITATION) { join(newcomer, invite) }
     }
 

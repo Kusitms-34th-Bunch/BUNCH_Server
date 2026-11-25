@@ -124,17 +124,6 @@ set +a
 실제 SDK 검증에는 실제 제공자 설정이 필요하다. 자동 테스트는 테스트 키·로컬 JWKS를
 사용하며 실제 제공자 자격 증명이 필요하지 않다.
 
-### 소셜 로그인 없이 온보딩 테스트
-
-`POST /api/v1/auth/dev/token`에 `{"nickname":"tester1"}`을 보내면 기존 닉네임으로 회원을 조회하고,
-없으면 그 닉네임의 일반 회원을 생성한다. 응답은 `data.memberId`, `data.accessToken`이다.
-닉네임을 바꾼 뒤에는 바뀐 값으로 호출한다. 별도 계정 구분·이름 매핑·DB 스키마 변경은 없다.
-
-운영(`prod`)을 포함한 모든 환경에서 인증 없이 사용하는 임시 테스트 API다.
-새 회원은 `IN_PROGRESS`이고 약관 동의·프로필 완료·번치 소속은 없다. 기존 회원의 상태는 유지한다.
-닉네임은 기존 규칙(앞뒤 공백 제거·NFC·한글/영문/숫자/공백 1~12자)을 따른다.
-상세 동작은 [인증 Spec](docs/specs/auth.md#개발용-access-token--이슈-112)을 따른다.
-
 ## 가입·온보딩 환경 설정
 
 | 변수 | 용도 |
@@ -275,7 +264,7 @@ Discord 알림은 두 개다. 최근 1분 요청 종료 로그의 **5xx 한 건�
 알리며 복구 메시지는 보내지 않는다. 앱 메트릭 수집 중단은 1분 유지 후 알리고 복구도 보낸다.
 최초 묶음 대기는 0초, 지속 장애 반복은 5분이다. 로그 수집·초기 기동·전송 지연이 더해지므로
 요청 후 10초 내 수신 보장은 아니다. 로그·메트릭은 7일, Docker 로그는 `10m × 3`으로 제한한다.
-운영 환경변수는 `.env` 하나에 두고 Compose의 `env_file`로 읽는다.
+운영 Compose와 모니터링은 운영 서버의 `.env`를 사용한다.
 상세 조건·한계는 [모니터링 Spec](docs/specs/monitoring.md)을 따른다.
 
 모니터링 설정을 바꿀 때는 Docker가 실행된 환경에서 다음을 검증한다.
@@ -297,7 +286,7 @@ python3 deploy/monitoring/smoke_test.py
 | [온보딩 Spec](docs/specs/onboarding.md) | 번치 생성·초대 발급·참여·웹 초대장 |
 | [로그인·온보딩 API 계약](docs/specs/login-onboarding-api.md) | 이슈 #5 확정 정책·API·데이터 보장 |
 | [모니터링 Spec](docs/specs/monitoring.md) | 로그·메트릭·두 Discord 알림 계약 |
-| [배포 안내](deploy/README.md) | SSH 사용자 홈(`~`) 준비·CI 분기·설정 복원 |
+| [배포 안내](deploy/README.md) | 개발·운영 분리·이미지 배포·복구 |
 | [번들 Spec](docs/specs/bundle.md) | 번들 생성·공동 편집·발행과 사진함 연결의 확정 계약 |
 | [번들 API 계약](docs/specs/bundle-api.md) | 번들 REST·STOMP 클라이언트 요청·응답·복구 프로토콜 |
 | [발행본 상세·원자적 수정](docs/specs/published-bundle-edit.md) | 발행 사진·참여자 표시·OWNER 일괄 저장·삭제 |
@@ -320,10 +309,7 @@ python3 deploy/monitoring/smoke_test.py
 CI는 dev 대상 PR과 dev/main push에서 빌드·테스트한다.
 문서만 변경하면 변경 확인만 수행하고 빌드·테스트·배포를 건너뛴다.
 CI는 앱과 모니터링 변경을 각각 감지한다. 공통 Compose·환경 예제·CI 변경은 둘 다 검증한다.
-main push는 앱 변경일 때만 GHCR `latest` 게시와 앱 교체를 수행한다.
-모니터링 변경은 네 모니터링 서비스만 함께 재생성하며, 모니터링 단독 변경은 앱을 재시작하지 않는다.
-Compose 파일과 변경된 모니터링 파일은 SSH 사용자 홈(`~`)에 복사하며 `.env`는 보존한다.
-앱 단독 변경은 모니터링 파일을 건드리지 않는다. DB·Redis·Tunnel은 자동 갱신하지 않는다.
-서버 Compose·환경 변수·SSH Secrets 준비는 [배포 안내](deploy/README.md)를 따른다.
+앱 변경이 있는 main push는 검증 후 GHCR에 커밋별 이미지를 게시하고 서버에서 받는다.
+서버 적용은 [배포 안내](deploy/README.md)에 따라 대상 환경에서 검증한 이미지 digest로 수행한다.
 원격 연결과 브랜치 보호는 설정했다. CodeRabbit은 설치되어 있고 Gemini 연결은 후속 작업이다.
 확정 마감일은 없다.
