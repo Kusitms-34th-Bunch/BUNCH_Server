@@ -132,7 +132,7 @@ PRIVATE(멤버 공개)로 바꾸면 외부 피드·번치 프로필 목록·상�
 보여준다. 나가기·내보내짐·탈퇴는 `nickname: "작성자"`, `imageUrl: null`,
 `profileAvailable: false`, `content: "삭제된 코멘트입니다"`로 응답하고 원문과 픽 row는 보존한다.
 발행 상세의 사진 `imageUrl`은 `photos/<UUID>/original.jpg`, 참여자·코멘트 `imageUrl`은
-`profiles/<UUID>/profile.jpg`에 대한 signed URL이다. 기존 접근 판정 뒤 정확히 1800초 유효하게
+`profiles/<UUID>/profile.jpg`에 대한 signed URL이다. 기존 접근 판정 뒤 UTC 정시 기준 2시간 후 만료되도록
 만들며 URL은 저장·재생하지 않는다. 만료되면 같은 발행 상세 GET을 다시 호출한다.
 같은 계정의 번치 재참여 시 기존 순서·코멘트를 복구한다. `profileAvailable: true`일 때
 `GET /api/v1/members/{memberId}/social-profile`(#94)로 이동한다. WITHDRAWN 계정이나 새

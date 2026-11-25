@@ -67,7 +67,7 @@ A의 후보 집합 검사는 페이지를 받은 뒤 필터링하는 용도로 �
 기본 사진(null)이며 프로필 이동 불가다. 같은 계정이 번치에 재참여하면 복구되지만
 WITHDRAWN 계정이나 새 계정은 복구되지 않는다.
 사진별 제목 오버레이·상대 시각·회색 로딩 자리·토스트·애니메이션·스크롤 보존은 앱 표시 책임이다.
-Feed 카드의 사진·대표 `coverImageUrl`은 권한 확인 뒤 1800초 signed thumbnail URL이며,
+Feed 카드의 사진·대표 `coverImageUrl`은 권한 확인 뒤 UTC 정시 기준 2시간 후 만료되는 signed thumbnail URL이며,
 프로필 이미지도 같은 TTL의 signed `profile.jpg` URL이다. URL은 저장·재생하지 않고 만료되면
 기존 Feed 조회를 다시 호출한다.
 

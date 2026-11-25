@@ -51,7 +51,7 @@ REST 기본 경로는 다음과 같다.
 번들 응답·snapshot·이벤트의 이미지 URL은 기존 번들 권한과 공개 범위를 먼저 확인한 뒤 생성한다.
 사진 목록·카드의 `coverImageUrl`/photo image field는 비공개 R2 `thumbnail.jpg`, 상세의
 `imageUrl`은 `original.jpg`, 멤버 `imageUrl`은 `profiles/<UUID>/profile.jpg`를 가리키는
-정확히 1800초 유효한 signed GET URL이다. URL은 DB·멱등 재생 결과·이벤트에 저장하거나 재생하지
+UTC 정시 기준 2시간 후 만료되는 signed GET URL이다. URL은 DB·멱등 재생 결과·이벤트에 저장하거나 재생하지
 않으며, 만료되면 기존 bundle GET/snapshot API를 다시 호출한다. 별도 URL refresh API는 제공하지 않는다.
 
 JSON 필드명은 Kotlin DTO의 camelCase를 사용한다. 날짜는 `yyyy-MM-dd`, 시각은
@@ -449,7 +449,7 @@ DB commit 후 서버가 `PHOTOS` 이벤트를 발행한다.
       "memberId": 201,
       "joinedAt": "2026-10-25T01:02:03Z",
       "nickname": "지민",
-      "imageUrl": "<signed-1800-second-url-for-profiles/UUID/profile.jpg>",
+      "imageUrl": "<hourly-signed-url-for-profiles/UUID/profile.jpg>",
       "profileAvailable": true
     }
   ]
@@ -586,7 +586,7 @@ error.message = error.idempotency_conflict
   "id": 901,
   "photoId": 101,
   "imageAssetId": 7001,
-  "imageUrl": "<signed-1800-second-url-for-photos/UUID/original.jpg>",
+  "imageUrl": "<hourly-signed-url-for-photos/UUID/original.jpg>",
   "position": 0,
   "addedBy": 201,
   "addedAt": "2026-10-25T01:02:03Z"

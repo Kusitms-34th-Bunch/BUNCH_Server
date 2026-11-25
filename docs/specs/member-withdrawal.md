@@ -42,7 +42,7 @@
   동시에 두 요청이 오면 회원 잠금으로 직렬화되어 하나만 처리하고 다른 하나는 401이다. 그래서 `Idempotency-Key`는
   재생할 결과가 없어 받지 않는다.
 
-`ownerBunches[].imageUrl`과 오류 상세의 `imageUrl`은 기존 번치 권한 확인 뒤 정확히 1800초 유효한
+`ownerBunches[].imageUrl`과 오류 상세의 `imageUrl`은 기존 번치 권한 확인 뒤 UTC 정시 기준 2시간 후 만료되는
 `profiles/<UUID>/profile.jpg` signed URL이며, 번치 프로필이 없으면 `null`이다. URL은 저장·재생하지
 않고 만료되면 이 기존 withdrawal-check API를 다시 호출한다.
 
