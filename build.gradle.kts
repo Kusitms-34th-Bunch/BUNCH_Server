@@ -51,11 +51,3 @@ tasks.withType<Test> {
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     archiveFileName.set("app.jar")
 }
-
-// Used only by scripts/r2; migration sources and Cloudinary credentials are excluded from app.jar.
-tasks.register("printR2MigrationClasspath") {
-    dependsOn("classes")
-    doLast {
-        println(sourceSets.main.get().runtimeClasspath.asPath)
-    }
-}
