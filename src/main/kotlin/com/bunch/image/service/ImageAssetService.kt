@@ -28,7 +28,7 @@ class ImageAssetService(
     // Called inside the transaction that attaches the uploaded file to its owner.
     fun store(image: StoredImage): ImageAsset {
         requireTransaction()
-        return assets.save(ImageAsset(publicId = image.publicId, url = image.url))
+        return assets.save(ImageAsset(objectKey = image.objectKey))
     }
 
     fun releaseAfterCommit(assetId: Long?) {
@@ -48,14 +48,14 @@ class ImageAssetService(
     }
 
     private fun deleteIfUnreferenced(assetId: Long) {
-        val publicId = try {
+        val objectKey = try {
             cleanup.execute {
                 val asset = assets.findLockedById(assetId) ?: return@execute null
                 // Every owner uses a restrictive FK. This also protects references added by
                 // future bundle_photos without a table registry or a reference counter.
                 assets.delete(asset)
                 assets.flush()
-                asset.publicId
+                asset.objectKey
             }
         } catch (ex: DataIntegrityViolationException) {
             val referenced = generateSequence<Throwable>(ex) { it.cause }
@@ -65,7 +65,7 @@ class ImageAssetService(
             throw ex
         }
         // The asset row is committed as deleted before its external file can be removed.
-        storage.delete(publicId)
+        storage.delete(objectKey)
     }
 
     private fun requireTransaction() {

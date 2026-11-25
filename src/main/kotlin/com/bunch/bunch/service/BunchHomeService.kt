@@ -1,5 +1,6 @@
 package com.bunch.bunch.service
 
+import com.bunch.global.image.ImageUrls
 import com.bunch.bunch.domain.BunchAccessScope
 import com.bunch.bunch.domain.BunchFollowRepository
 import com.bunch.bunch.domain.BunchPublicRepository
@@ -22,6 +23,7 @@ import java.time.Duration
 
 @Service
 class BunchHomeService(
+    private val imageUrls: ImageUrls,
     private val access: BunchSocialAccessService,
     private val bundles: BundleService,
     private val bundleRepository: BundleRepository,
@@ -53,7 +55,7 @@ class BunchHomeService(
         } else null
 
         return BunchHomeResponse(
-            bunch = BunchHomeProfileResponse.from(bunch),
+            bunch = BunchHomeProfileResponse.from(bunch, imageUrls.profile(bunch.imageKey)),
             myMembership = current?.takeIf { internal }?.toMyMembershipResponse(),
             permissions = permissions(current?.role, internal),
             profileVersion = bunch.profileVersion.takeIf { internal },

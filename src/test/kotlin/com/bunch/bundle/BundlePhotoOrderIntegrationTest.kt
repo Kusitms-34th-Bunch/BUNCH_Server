@@ -331,10 +331,7 @@ class BundlePhotoOrderIntegrationTest : BunchIntegrationSupport() {
     private fun addBundle(memberId: Long, bunchId: Long, size: Int): Fixture = transaction {
         val bundle = bundles.saveAndFlush(Bundle(bunchId = bunchId, createdBy = memberId))
         participants.saveAndFlush(BundleParticipant(bundleId = bundle.id, memberId = memberId))
-        val asset = assets.saveAndFlush(ImageAsset(
-            publicId = "photo-order-test/${UUID.randomUUID()}",
-            url = "https://images.example/photo-order-test.jpg"
-        ))
+        val asset = assets.saveAndFlush(ImageAsset(objectKey = "photos/${UUID.randomUUID()}/original.jpg"))
         assetIds += asset.id
         val ids = (0 until size).map { position ->
             photos.saveAndFlush(BundlePhoto(

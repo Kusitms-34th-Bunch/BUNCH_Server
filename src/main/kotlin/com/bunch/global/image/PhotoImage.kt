@@ -3,7 +3,7 @@ package com.bunch.global.image
 import com.bunch.global.exception.BusinessException
 import com.bunch.global.exception.ErrorCode
 
-/** A photo that passed [PhotoImageStorage.inspect]. The bytes are exactly what the client sent. */
+/** A photo that passed [PhotoImageStorage.inspect]. The bytes are exactly what the client sent; dimensions describe the EXIF-oriented display. */
 class PhotoImage(val bytes: ByteArray, val width: Int, val height: Int)
 
 enum class PhotoImageRejection {
