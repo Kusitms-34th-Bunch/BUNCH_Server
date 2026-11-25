@@ -92,8 +92,8 @@ class BundleCombinerTest {
         assertThat(bundle.establishedBy).isNull()
         assertThat(bundle.activity).isNull()
         assertThat(bundle.photoCount).isEqualTo(8)
-        assertThat(onCard(bundle)).hasSize(8)
-        assertThat(bundle.coverPhotoId).isEqualTo(onCard(bundle).first())
+        assertThat(onCard(bundle)).hasSize(6)
+        assertThat(bundle.coverPhotoId).isIn(onCard(bundle))
     }
 
     @Test

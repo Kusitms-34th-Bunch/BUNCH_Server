@@ -2,7 +2,7 @@ package com.bunch.recommendation.domain.combination
 
 /**
  * What a photo shows that points at a special event (recommended bundle specification 3-2). A code belongs to no
- * event by itself: which event it counts for, and how strongly, comes from [EventClueMapping] (3-3), because a bouquet
+ * event by itself: which event it counts for, and how strongly, was read from a mapping table (3-3), because a bouquet
  * or a toast shows up at several events. The order is the order of the specification table.
  */
 enum class EventClueCode {

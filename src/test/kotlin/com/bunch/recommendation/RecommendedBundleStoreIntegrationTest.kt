@@ -71,9 +71,11 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         val (ownerId, bunchId) = bunchWithOwner()
         val photos = lunch(bunchId, ownerId)
 
-        val outcome = store.replace(bunchId, combine(photos), evening)
+        val calculated = combine(photos)
+        val outcome = store.replace(bunchId, calculated, evening)
 
         val saved = bundles.findByBunchId(bunchId).single()
+        val cover = (calculated.days.single() as DayCombination.Bundled).bundles.single().coverPhotoId
         assertThat(outcome.created).isEqualTo(1)
         assertThat(saved.title).isEqualTo("10월 19일 오전")
         assertThat(saved.kind).isEqualTo(BundleKind.GENERAL)
@@ -85,7 +87,9 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         assertThat(saved.stableKey).isEqualTo(BundleStableKey.of(bunchId, day, photos.map { it.photoId }))
         val rows = bundlePhotos.findByBundleIdIn(listOf(saved.id))
         assertThat(rows.map { it.photoId }).containsExactlyInAnyOrderElementsOf(photos.map { it.photoId })
-        assertThat(rows.mapNotNull { it.cardPosition }.sorted()).isEqualTo((1..8).toList())
+        assertThat(rows.mapNotNull { it.cardPosition }.sorted()).isEqualTo((1..6).toList())
+        assertThat(saved.coverPhotoId).isNotNull().isEqualTo(cover)
+        assertThat(rows.first { it.photoId == saved.coverPhotoId }.cardPosition).isNotNull()
         @Suppress("UNCHECKED_CAST")
         assertThat((saved.ruleTrace["counts"] as Map<String, Any?>)["photos"]).isEqualTo(8)
     }
@@ -338,6 +342,24 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
             .isEqualTo(Instant.parse("2026-10-10T00:00:00Z"))
     }
 
+    @Test
+    fun `the cover is kept, and is written again when the same photos have another cover`() {
+        val (ownerId, bunchId) = bunchWithOwner()
+        val ids = (1..6).map { photoId(bunchId, ownerId, "10:%02d".format(it)) }
+        store.replace(bunchId, bundled(day, manual(day, ids, cover = ids[2])), evening)
+        val before = bundles.findByBunchId(bunchId).single()
+
+        val same = store.replace(bunchId, bundled(day, manual(day, ids, cover = ids[2])), evening.plusSeconds(60))
+        val changed = store.replace(bunchId, bundled(day, manual(day, ids, cover = ids[4])), evening.plusSeconds(120))
+
+        val after = bundles.findByBunchId(bunchId).single()
+        assertThat(before.coverPhotoId).isEqualTo(ids[2])
+        assertThat(same.unchanged).isEqualTo(1)
+        assertThat(changed.updated).isEqualTo(1)
+        assertThat(after.id).isEqualTo(before.id)
+        assertThat(after.coverPhotoId).isEqualTo(ids[4])
+    }
+
     // --- what is refused ---
 
     @Test
@@ -402,7 +424,12 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
         }
 
     // A general bundle with the photos given, as the calculation would have made it, with a title and a card.
-    private fun manual(dayKey: LocalDate, ids: List<Long>, positions: Map<Long, Int>? = null): RecoBundle {
+    private fun manual(
+        dayKey: LocalDate,
+        ids: List<Long>,
+        positions: Map<Long, Int>? = null,
+        cover: Long? = null
+    ): RecoBundle {
         val card = positions ?: ids.withIndex().associate { (index, id) -> id to index + 1 }
         return RecoBundle(
             dayKey = dayKey,
@@ -412,7 +439,7 @@ class RecommendedBundleStoreIntegrationTest : PhotoHttpTestSupport() {
             activity = ActivityCode.MEAL,
             subIndex = null,
             photos = ids.map { RecoBundle.BundlePhoto(it, PhotoRole.GENERAL, card[it]) },
-            coverPhotoId = null,
+            coverPhotoId = cover,
             startAt = Instant.parse("2026-10-19T10:00:00Z"),
             endAt = Instant.parse("2026-10-19T11:00:00Z"),
             photoCount = ids.size,

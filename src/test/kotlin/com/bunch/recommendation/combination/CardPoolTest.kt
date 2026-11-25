@@ -4,11 +4,8 @@ import com.bunch.recommendation.combination.CardTestSupport.bundle
 import com.bunch.recommendation.combination.CardTestSupport.run
 import com.bunch.recommendation.combination.CardTestSupport.shot
 import com.bunch.recommendation.combination.EventTestSupport.ready
-import com.bunch.recommendation.domain.combination.BundleKind
 import com.bunch.recommendation.domain.combination.CardCandidate
 import com.bunch.recommendation.domain.combination.CardPool
-import com.bunch.recommendation.domain.combination.EventClueCode.CANDLE_WHOLE_CAKE
-import com.bunch.recommendation.domain.combination.PeopleCount
 import com.bunch.recommendation.domain.combination.PhotoQuality
 import com.bunch.recommendation.domain.combination.PhotoSubject
 import com.bunch.recommendation.domain.combination.RecoPhoto
@@ -17,7 +14,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
-/** The pictures a card is made of: the usable photos, one for each group of duplicates (specification 8-2, 8-5). */
+/** The pictures a card is made of: the usable photos, one for each group of duplicates (specification 4, rule 1, 2). */
 class CardPoolTest {
     private val pool = CardPool()
 
@@ -26,14 +23,9 @@ class CardPoolTest {
     private val phone = "iPhone15,2"
     private val size = 4032 to 3024
 
-    private fun candidates(
-        photos: List<RecoPhoto>,
-        kind: BundleKind = BundleKind.GENERAL,
-        clues: Set<Long> = emptySet(),
-        failed: Set<Long> = emptySet()
-    ): List<CardCandidate> {
+    private fun candidates(photos: List<RecoPhoto>): List<CardCandidate> {
         val day = ready(photos)
-        return pool.build(bundle(day, kind, clues), day, failed)
+        return pool.build(bundle(day), day)
     }
 
     private fun ids(candidates: List<CardCandidate>) = candidates.map { it.photoId }
@@ -120,34 +112,26 @@ class CardPoolTest {
     }
 
     @Test
-    fun `a picture is a clue when a photo of its group is a clue of the event, or of an event that was not a bundle`() {
-        val cakes = listOf(
-            shot(1, "10:00:00", clue = CANDLE_WHOLE_CAKE, model = phone, quality = PhotoQuality.NORMAL),
-            shot(2, "10:00:01", model = phone, quality = PhotoQuality.GOOD)
+    fun `C8 two members of the same model who took a group photo in the same second are two pictures`() {
+        val photos = listOf(
+            shot(1, "19:00:00", member = 1, model = phone, millis = 120, size = size),
+            shot(2, "19:00:00", member = 2, model = phone, millis = 480, size = size)
         )
-        val others = run(10, 2)
 
-        val event = candidates(cakes + others, BundleKind.EVENT, clues = setOf(1L))
-        val general = candidates(cakes + others, failed = setOf(10L))
-
-        assertThat(event.filter { it.clue }.map { it.photoId }).containsExactly(2L)
-        assertThat(general.filter { it.clue }.map { it.photoId }).containsExactly(10L)
+        assertThat(ids(candidates(photos))).containsExactly(1L, 2L)
     }
 
     @Test
-    fun `a picture knows if it shows a person, 3 people or more, and its subject`() {
-        val photos = listOf(
-            shot(1, "10:00", subject = PhotoSubject.PERSON, people = PeopleCount.P3_PLUS),
-            shot(2, "10:05", subject = PhotoSubject.FOOD, people = PeopleCount.P0),
-            shot(3, "10:10")
+    fun `the member who took a picture is the one who uploaded its group first`() {
+        val early = Instant.parse("2026-10-20T01:00:00Z")
+        val late = Instant.parse("2026-10-20T02:00:00Z")
+        val copies = listOf(
+            shot(1, "10:00:00", member = 1, model = phone, millis = 5, size = size, uploaded = mapOf(1L to late)),
+            shot(2, "10:00:00", member = 2, model = phone, millis = 5, size = size, uploaded = mapOf(2L to early))
         )
 
-        val result = candidates(photos).associateBy { it.photoId }
+        val picture = candidates(copies).single()
 
-        assertThat(result.getValue(1L).person).isTrue()
-        assertThat(result.getValue(1L).group).isTrue()
-        assertThat(result.getValue(2L).person).isFalse()
-        assertThat(result.getValue(2L).subject).isEqualTo(PhotoSubject.FOOD)
-        assertThat(result.getValue(3L).subject).isNull()
+        assertThat(picture.taker).isEqualTo(2L)
     }
 }

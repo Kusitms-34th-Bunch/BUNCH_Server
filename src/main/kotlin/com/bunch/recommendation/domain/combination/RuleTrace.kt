@@ -73,7 +73,8 @@ data class RuleTrace(
     data class Selection(
         val cardSize: Int,
         val picked: List<Pick>,
-        val relaxed: List<String>
+        val relaxed: List<String>,
+        val coverBy: String? = null
     )
 
     /** A chosen photo and the rule that chose it, as text (for example `P3_clue`, `P4_member`). */

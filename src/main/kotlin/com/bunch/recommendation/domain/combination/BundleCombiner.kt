@@ -21,13 +21,12 @@ import java.time.LocalDate
  */
 class BundleCombiner(
     private val settings: CombinationSettings = CombinationSettings(),
-    similarity: ImageSimilarity = FingerprintSimilarity,
     private val clock: Clock = Clock.system(settings.defaultZone)
 ) {
     private val preparer = DayPreparer(settings)
     private val general = GeneralBundleFinder(settings)
     private val attacher = DateOnlyAttacher()
-    private val cards = CardSelector(settings, similarity = similarity)
+    private val cards = CardSelector(settings)
     private val namer = BundleNamer(settings)
 
     fun combine(photos: List<RecoPhoto>): CombinationResult {
@@ -46,7 +45,7 @@ class BundleCombiner(
 
     private fun bundlesOf(day: DayPreparation.Ready): List<RecoBundle> {
         val sorted = attacher.attach(day, general.find(day).bundles)
-            .map { cards.select(it, day, emptySet()) }
+            .map { cards.select(it, day) }
             .sortedWith(compareBy({ it.startAt }, { bundle -> bundle.photos.minOf { it.photoId } }))
         return namer.name(sorted, day, LocalDate.ofInstant(clock.instant(), settings.defaultZone))
     }
