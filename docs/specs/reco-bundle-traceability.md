@@ -87,7 +87,7 @@
 | 저장·안정 키·재계산 | 하루 단위, 5분 디바운스 | `RecommendedBundleStore`, `RecommendedBundleRecalcTrigger`, `RecommendedBundleScheduler` | `RecommendedBundleStoreIntegrationTest`, `RecommendedBundleSchedulerTest` | 구현됨 | #183 |
 | 30일 만료 | 마지막 사진 추가일부터 30일 | `RecommendedBundleExpiration`, `BundleExpiry` | `BundleExpiryTest` | 구현됨 | #183 |
 | 목록·상세·적용 | 최근 사진이 추가된 순, 올린 멤버 수, 사진 수. 상세는 커버가 맨 앞. 적용 뒤 남은 사진은 다시 추천하지 않음 | `RecommendedBundleReader`(목록·상세·`use`), `RecommendationService`(스위치 분기), `RecommendedListRules`, `RecommendedBundleRecalculation.withoutUsed`, `RecommendationScheduler`(켜지면 멈춤) | `RecommendedBundleReaderIntegrationTest`, `RecommendedBundleRecalculationIntegrationTest`, `RecommendedListRulesTest`, `RecommendationApiIntegrationTest`(꺼진 상태) | 구현됨(#234) | 새 엔드포인트 없음. 개수 제한·정렬·시간대·상세 순서는 확정 대기 |
-| 첫 계산(백필) | 사진함 전체 사진으로 추천(4.2.1). 켜기 전부터 쌓인 사진도 켠 뒤 계산 | `RecommendedBundleBackfill`, `RecommendedBundleQueueRepository.putAllDaysOfAllBunches`, 설정 `reco.combination.backfill.enabled` | `RecommendedBundleBackfillIntegrationTest` | 구현됨(#236) | 기본 꺼짐. 켜는 날에만 켜고 이후 끈다. 어긋난 시각은 두지 않음(스케줄러가 20번치씩) |
+| 첫 계산(백필) | 사진함 전체 사진으로 추천(4.2.1). 켠 뒤 변화가 없는 번치도 켠 직후 계산 | `RecommendedBundleBackfill`, `RecommendedBundleQueueRepository.putAllDaysOfAllBunches`, 설정 `reco.combination.backfill.enabled` | `RecommendedBundleBackfillIntegrationTest` | 구현됨(#236) | 기본 꺼짐. 켜는 날에만 켜고 이후 끈다. 어긋난 시각은 두지 않음(스케줄러가 20번치씩) |
 | 이벤트·활동 필드 | 없음 | 저장 컬럼 `kind`, `event_type`, `established_by`, `activity`, 응답 선택 필드 | `RecommendedBundleSchemaIntegrationTest` | 교체 예정 | 마이그레이션과 함께 정리. 후속 |
 
 ### 케이스 시나리오 (새 기준 「케이스」, V10)

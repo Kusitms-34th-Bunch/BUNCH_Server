@@ -11,9 +11,10 @@ import java.time.Clock
 /**
  * The first calculation of the photos that were in the photo boxes before the new recommended bundles were switched on
  * (photo box 4.2.1: the recommended bundles are made of all the photos of the box). The recommended bundles are
- * calculated when a photo changes ([RecommendedBundleRecalcTrigger]), so a bunch whose photos do not change would have
- * none until then. This puts every day of every bunch in the queue once; [RecommendedBundleScheduler] then calculates
- * them as it calculates any due day, a few bunches at a time, so the load is spread by the scheduler and not by this.
+ * calculated when a photo changes ([RecommendedBundleRecalcTrigger]), and the whole bunch is calculated then, the older
+ * photos too. A bunch whose photos do not change would have none. This puts every day of every bunch in the queue once;
+ * [RecommendedBundleScheduler] then calculates them as it calculates any due day, a few bunches at a time, so the load
+ * is spread by the scheduler and not by this.
  *
  * It is run once at the start of the application when `reco.combination.backfill.enabled` is on, which is off by
  * default: it is turned on for the start that follows switching `reco.combination.enabled` on, and off again after. It
