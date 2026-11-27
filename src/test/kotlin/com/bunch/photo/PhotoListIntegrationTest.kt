@@ -170,7 +170,7 @@ class PhotoListIntegrationTest : PhotoHttpTestSupport() {
     }
 
     @Test
-    fun `the thumbnail is the square transformation of the stored image`() {
+    fun `the thumbnail URL points to the separate stored thumbnail`() {
         val (ownerId, bunchId) = bunchWithOwner()
         val objectKey = "photos/test-list-abc/original.jpg"
         photo(

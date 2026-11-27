@@ -67,6 +67,12 @@ class R2ObjectStorage(
             .uri(validEndpoint().resolve("/$bucket/$key"))
             .method(SdkHttpMethod.GET)
             .appendRawQueryParameter("response-cache-control", IMAGE_CACHE_CONTROL)
+            .apply {
+                // Separate full-frame thumbnails from previously cached square images without changing object keys.
+                if (key.startsWith("photos/") && key.endsWith("/thumbnail.jpg")) {
+                    appendRawQueryParameter("response-content-disposition", "inline; filename=\"thumbnail-fit.jpg\"")
+                }
+            }
             .build()
         val signingTime = clock.instant().truncatedTo(ChronoUnit.HOURS)
         return signer.sign {
